@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, JSON, String, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, JSON, String, Text, UniqueConstraint, func, text as sql_text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -17,8 +17,8 @@ class IngestionRun(Base):
     config_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     code_version: Mapped[str] = mapped_column(String(64), nullable=False)
     initiated_by: Mapped[str] = mapped_column(String(128), nullable=False)
-    mode: Mapped[str] = mapped_column(String(32), nullable=False, default="strict")
-    status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
+    mode: Mapped[str] = mapped_column(String(32), nullable=False, default="strict", server_default=sql_text("'strict'"))
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending", server_default=sql_text("'pending'"))
     config_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     metrics: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     error_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -48,7 +48,9 @@ class Document(Base):
     language: Mapped[str | None] = mapped_column(String(32), nullable=True)
     is_scanned: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     doc_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    status: Mapped[str] = mapped_column(String(32), nullable=False, default="discovered")
+    status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="discovered", server_default=sql_text("'discovered'")
+    )
     page_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     content_onset_page: Mapped[int | None] = mapped_column(Integer, nullable=True)
     metadata_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
@@ -72,15 +74,17 @@ class Chunk(Base):
     document_id: Mapped[UUID] = mapped_column(ForeignKey("documents.id", ondelete="CASCADE"), nullable=False)
     chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
     page_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    text: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    text: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default=sql_text("''"))
     text_start_offset: Mapped[int | None] = mapped_column(Integer, nullable=True)
     text_end_offset: Mapped[int | None] = mapped_column(Integer, nullable=True)
     bbox_map: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    ocr_used: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
+    ocr_used: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=sql_text("false"))
     layout_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
     confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
     page_relevance_score: Mapped[float | None] = mapped_column(Float, nullable=True)
-    is_boilerplate: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
+    is_boilerplate: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=sql_text("false")
+    )
     page_width: Mapped[float | None] = mapped_column(Float, nullable=True)
     page_height: Mapped[float | None] = mapped_column(Float, nullable=True)
     layout_profile: Mapped[dict | None] = mapped_column(JSON, nullable=True)
@@ -110,7 +114,9 @@ class Detection(Base):
     evidence_text_start: Mapped[int | None] = mapped_column(Integer, nullable=True)
     evidence_text_end: Mapped[int | None] = mapped_column(Integer, nullable=True)
     evidence_bbox: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    is_validated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
+    is_validated: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=sql_text("false")
+    )
     validation_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
@@ -133,7 +139,9 @@ class Extraction(Base):
     masked_value: Mapped[str | None] = mapped_column(String(256), nullable=True)
     raw_value_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
     normalization_method: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    storage_policy: Mapped[str] = mapped_column(String(32), nullable=False, default="hash")
+    storage_policy: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="hash", server_default=sql_text("'hash'")
+    )
     retention_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     confidence_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     evidence_page: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -159,7 +167,9 @@ class PersonEntity(Base):
     ingestion_run_id: Mapped[UUID] = mapped_column(ForeignKey("ingestion_runs.id", ondelete="CASCADE"), nullable=False)
     entity_hash: Mapped[str] = mapped_column(String(128), nullable=False)
     entity_label: Mapped[str | None] = mapped_column(String(256), nullable=True)
-    is_probabilistic: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
+    is_probabilistic: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=sql_text("false")
+    )
     linkage_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
     attributes: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
@@ -178,9 +188,11 @@ class PersonLink(Base):
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
     person_entity_id: Mapped[UUID] = mapped_column(ForeignKey("person_entities.id", ondelete="CASCADE"), nullable=False)
     extraction_id: Mapped[UUID] = mapped_column(ForeignKey("extractions.id", ondelete="CASCADE"), nullable=False)
-    link_method: Mapped[str] = mapped_column(String(32), nullable=False, default="deterministic")
+    link_method: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="deterministic", server_default=sql_text("'deterministic'")
+    )
     confidence_score: Mapped[float | None] = mapped_column(Float, nullable=True)
-    is_primary: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
+    is_primary: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=sql_text("false"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
     person_entity: Mapped[PersonEntity] = relationship(back_populates="links")
@@ -195,8 +207,10 @@ class ReviewTask(Base):
     document_id: Mapped[UUID | None] = mapped_column(ForeignKey("documents.id", ondelete="SET NULL"), nullable=True)
     chunk_id: Mapped[UUID | None] = mapped_column(ForeignKey("chunks.id", ondelete="SET NULL"), nullable=True)
     task_type: Mapped[str] = mapped_column(String(64), nullable=False)
-    priority: Mapped[str] = mapped_column(String(16), nullable=False, default="medium")
-    status: Mapped[str] = mapped_column(String(32), nullable=False, default="queued")
+    priority: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="medium", server_default=sql_text("'medium'")
+    )
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="queued", server_default=sql_text("'queued'"))
     assigned_to: Mapped[str | None] = mapped_column(String(128), nullable=True)
     context: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -235,7 +249,9 @@ class AuditEvent(Base):
     entity_type: Mapped[str] = mapped_column(String(64), nullable=False)
     entity_id: Mapped[UUID | None] = mapped_column(nullable=True)
     action: Mapped[str] = mapped_column(String(64), nullable=False)
-    actor_type: Mapped[str] = mapped_column(String(32), nullable=False, default="system")
+    actor_type: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="system", server_default=sql_text("'system'")
+    )
     actor_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     details: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())

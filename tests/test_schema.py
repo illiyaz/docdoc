@@ -4,6 +4,12 @@ from app.db.base import Base
 from app.db import models  # noqa: F401
 
 
+def _assert_default_contains(default_value: object, expected: str) -> None:
+    assert default_value is not None
+    normalized = str(default_value).lower().replace("(", "").replace(")", "").replace("'", "").strip()
+    assert expected in normalized
+
+
 def test_schema_creation_in_sqlite_includes_all_canonical_tables():
     engine = create_engine("sqlite+pysqlite:///:memory:")
     Base.metadata.create_all(bind=engine)
@@ -76,3 +82,29 @@ def test_document_and_chunk_required_columns_exist():
     assert "storage_policy" in extraction_columns
     assert "retention_until" in extraction_columns
     assert extraction_columns["retention_until"]["nullable"] is True
+
+
+def test_server_defaults_exist_for_core_state_fields():
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(bind=engine)
+    inspector = inspect(engine)
+
+    ingestion_run_columns = {column["name"]: column for column in inspector.get_columns("ingestion_runs")}
+    _assert_default_contains(ingestion_run_columns["mode"]["default"], "strict")
+    _assert_default_contains(ingestion_run_columns["status"]["default"], "pending")
+
+    document_columns = {column["name"]: column for column in inspector.get_columns("documents")}
+    _assert_default_contains(document_columns["status"]["default"], "discovered")
+
+    review_task_columns = {column["name"]: column for column in inspector.get_columns("review_tasks")}
+    _assert_default_contains(review_task_columns["priority"]["default"], "medium")
+    _assert_default_contains(review_task_columns["status"]["default"], "queued")
+
+    person_link_columns = {column["name"]: column for column in inspector.get_columns("person_links")}
+    _assert_default_contains(person_link_columns["link_method"]["default"], "deterministic")
+
+    audit_event_columns = {column["name"]: column for column in inspector.get_columns("audit_events")}
+    _assert_default_contains(audit_event_columns["actor_type"]["default"], "system")
+
+    extraction_columns = {column["name"]: column for column in inspector.get_columns("extractions")}
+    _assert_default_contains(extraction_columns["storage_policy"]["default"], "hash")
