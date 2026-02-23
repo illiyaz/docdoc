@@ -187,12 +187,54 @@ GET /v1/export/{run_id}?format=xlsx
    •  If code, prompts, or assumptions conflict with PRD.md → PRD.md wins
    •  Reference docs exist only for historical context
 
-⸻
+---
 
-🚧 Explicit Non-Goals (MVP)
-   •  Cloud inference
-   •  Real-time streaming ingestion
-   •  Autonomous remediation
-   •  Black-box extraction without evidence
-   •  Non-reproducible pipelines
+## Quick Start (Docker)
+
+```bash
+# 1. Copy environment file
+cp .env.example .env
+
+# 2. Start all services (app, Postgres, Redis, MinIO, Mailpit)
+docker-compose up -d
+
+# 3. Run database migrations
+docker-compose exec notifai bash scripts/init_db.sh
+
+# 4. (Optional) Seed demo data
+docker-compose exec notifai python scripts/seed_demo.py
+```
+
+### Services
+
+| Service | Port | URL |
+|---|---|---|
+| Frontend (React) | 3847 | http://localhost:3847 |
+| FastAPI Backend | 3848 | http://localhost:3848 |
+| API docs (Swagger) | 3848 | http://localhost:3848/docs |
+| PostgreSQL | 3849 | `localhost:3849` |
+| Redis | 3850 | `localhost:3850` |
+| MinIO API | 3851 | http://localhost:3851 |
+| MinIO Console | 3852 | http://localhost:3852 |
+| Mailpit SMTP | 3853 | `localhost:3853` |
+| Mailpit UI | 3854 | http://localhost:3854 |
+
+> **Port range 3847–3854 is reserved.** See [PORTS.md](PORTS.md) for full details.
+
+### Development mode (live reload)
+
+```bash
+docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+```
+
+This mounts `./app` into the container and enables `--reload` on uvicorn.
+
+---
+
+## Explicit Non-Goals (MVP)
+- Cloud inference
+- Real-time streaming ingestion
+- Autonomous remediation
+- Black-box extraction without evidence
+- Non-reproducible pipelines
    

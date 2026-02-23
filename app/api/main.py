@@ -11,6 +11,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.middleware.pii_filter import PIIFilterMiddleware
+from app.api.routes.audit import router as audit_router
 from app.api.routes.health import router as health_router
 from app.api.routes.jobs import router as jobs_router
 from app.api.routes.review import router as review_router
@@ -47,3 +48,4 @@ app.add_middleware(PIIFilterMiddleware)
 app.include_router(health_router)
 app.include_router(jobs_router)
 app.include_router(review_router)
+app.include_router(audit_router)

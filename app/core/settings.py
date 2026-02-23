@@ -12,11 +12,18 @@ class Settings(BaseSettings):
     app_version: str = Field(default="0.1.0", alias="APP_VERSION")
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
     database_url: str = Field(
-        default="postgresql+psycopg://docdoc:docdoc@localhost:5432/docdoc",
+        default="postgresql+psycopg://notifai:notifai@localhost:3849/notifai",
         alias="DATABASE_URL",
     )
     tenant_salt: str = Field(default="change-me", alias="TENANT_SALT")
     fernet_key: str | None = Field(default=None, alias="FERNET_KEY")
+    redis_url: str = Field(default="redis://localhost:3850/0", alias="REDIS_URL")
+    minio_url: str = Field(default="http://localhost:3851", alias="MINIO_URL")
+    smtp_host: str = Field(default="localhost", alias="SMTP_HOST")
+    smtp_port: int = Field(default=3853, alias="SMTP_PORT")
+    storage_mode: str = Field(default="strict", alias="STORAGE_MODE")
+    secret_key: str = Field(default="change-me-in-production", alias="SECRET_KEY")
+    vault_addr: str | None = Field(default=None, alias="VAULT_ADDR")
 
 
 @lru_cache(maxsize=1)
