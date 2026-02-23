@@ -1,0 +1,23 @@
+protocol_id: hitech
+name: HITECH Act Breach Notification
+jurisdiction: US-FEDERAL
+triggering_entity_types:
+  - US_SSN
+  - PHI_MRN
+  - PHI_NPI
+  - PHI_DEA
+  - PHI_HICN
+  - PHI_HEALTH_PLAN
+  - PHI_ICD10
+  - US_MEDICARE_MBI
+notification_threshold: 1
+notification_deadline_days: 60
+requires_hhs_notification: true
+required_notification_content:
+  - description of breach
+  - types of information involved
+  - steps individuals should take
+  - what covered entity is doing
+  - contact information
+  - toll-free number for inquiries
+regulatory_framework: "45 CFR §164.400 (HITECH)"

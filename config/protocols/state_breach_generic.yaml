@@ -1,0 +1,17 @@
+protocol_id: state_breach_generic
+name: State Breach Notification Laws (Generic)
+jurisdiction: US-STATE
+triggering_entity_types:
+  - US_SSN
+  - CREDIT_CARD
+  - BANK_ACCOUNT
+  - US_DRIVER_LICENSE
+notification_threshold: 1
+notification_deadline_days: 30
+required_notification_content:
+  - description of the incident
+  - types of personal information involved
+  - steps individuals should take to protect themselves
+  - contact information for the reporting entity
+  - contact information for credit reporting agencies
+regulatory_framework: "State Breach Notification Laws (Generic)"

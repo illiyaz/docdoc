@@ -31,7 +31,6 @@ class IngestionRun(Base):
 
     documents: Mapped[list[Document]] = relationship(back_populates="ingestion_run")
     person_entities: Mapped[list[PersonEntity]] = relationship(back_populates="ingestion_run")
-    review_tasks: Mapped[list[ReviewTask]] = relationship(back_populates="ingestion_run")
 
 
 class Document(Base):
@@ -63,7 +62,6 @@ class Document(Base):
     chunks: Mapped[list[Chunk]] = relationship(back_populates="document")
     detections: Mapped[list[Detection]] = relationship(back_populates="document")
     extractions: Mapped[list[Extraction]] = relationship(back_populates="document")
-    review_tasks: Mapped[list[ReviewTask]] = relationship(back_populates="document")
 
 
 class Chunk(Base):
@@ -95,7 +93,6 @@ class Chunk(Base):
     document: Mapped[Document] = relationship(back_populates="chunks")
     detections: Mapped[list[Detection]] = relationship(back_populates="chunk")
     extractions: Mapped[list[Extraction]] = relationship(back_populates="chunk")
-    review_tasks: Mapped[list[ReviewTask]] = relationship(back_populates="chunk")
 
 
 class Detection(Base):
@@ -200,29 +197,28 @@ class PersonLink(Base):
 
 
 class ReviewTask(Base):
+    """Phase 4 HITL review task — one per subject-queue combination.
+
+    Four queue types: low_confidence, escalation, qc_sampling, rra_review.
+    """
+
     __tablename__ = "review_tasks"
 
-    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
-    ingestion_run_id: Mapped[UUID] = mapped_column(ForeignKey("ingestion_runs.id", ondelete="CASCADE"), nullable=False)
-    document_id: Mapped[UUID | None] = mapped_column(ForeignKey("documents.id", ondelete="SET NULL"), nullable=True)
-    chunk_id: Mapped[UUID | None] = mapped_column(ForeignKey("chunks.id", ondelete="SET NULL"), nullable=True)
-    task_type: Mapped[str] = mapped_column(String(64), nullable=False)
-    priority: Mapped[str] = mapped_column(
-        String(16), nullable=False, default="medium", server_default=sql_text("'medium'")
+    review_task_id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    queue_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    subject_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("notification_subjects.subject_id", ondelete="SET NULL"), nullable=True,
     )
-    status: Mapped[str] = mapped_column(String(32), nullable=False, default="queued", server_default=sql_text("'queued'"))
     assigned_to: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    context: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="PENDING", server_default=sql_text("'PENDING'"),
     )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(),
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    required_role: Mapped[str] = mapped_column(String(32), nullable=False)
 
-    ingestion_run: Mapped[IngestionRun] = relationship(back_populates="review_tasks")
-    document: Mapped[Document | None] = relationship(back_populates="review_tasks")
-    chunk: Mapped[Chunk | None] = relationship(back_populates="review_tasks")
     decisions: Mapped[list[ReviewDecision]] = relationship(back_populates="review_task")
 
 
@@ -230,7 +226,9 @@ class ReviewDecision(Base):
     __tablename__ = "review_decisions"
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
-    review_task_id: Mapped[UUID] = mapped_column(ForeignKey("review_tasks.id", ondelete="CASCADE"), nullable=False)
+    review_task_id: Mapped[UUID] = mapped_column(
+        ForeignKey("review_tasks.review_task_id", ondelete="CASCADE"), nullable=False,
+    )
     decision: Mapped[str] = mapped_column(String(32), nullable=False)
     reviewer_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     rationale: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -240,18 +238,83 @@ class ReviewDecision(Base):
     review_task: Mapped[ReviewTask] = relationship(back_populates="decisions")
 
 
+class NotificationSubject(Base):
+    """One row per unique individual identified across all source documents.
+
+    Produced by the Phase 2 RRA pipeline.  Each subject aggregates all
+    PII types found, normalized contact information, and provenance links
+    back to the originating extraction records.
+    """
+
+    __tablename__ = "notification_subjects"
+
+    subject_id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    canonical_name: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    canonical_email: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    canonical_address: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    canonical_phone: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    pii_types_found: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    source_records: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    merge_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    notification_required: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=sql_text("false")
+    )
+    review_status: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default="AI_PENDING",
+        server_default=sql_text("'AI_PENDING'"),
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class NotificationList(Base):
+    """A notification list produced by applying a Protocol to approved subjects.
+
+    Created in Phase 3 by the notification list builder.  Delivery is
+    gated on ``status = 'APPROVED'``.
+    """
+
+    __tablename__ = "notification_lists"
+
+    notification_list_id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    job_id: Mapped[str] = mapped_column(String(256), nullable=False)
+    protocol_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    subject_ids: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="PENDING", server_default=sql_text("'PENDING'")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    approved_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
+
+
 class AuditEvent(Base):
+    """Phase 4 append-only audit log.
+
+    Records every pipeline and human-review event for regulatory defensibility.
+    Rows are immutable by default — ``immutable=True``.
+    """
+
     __tablename__ = "audit_events"
 
-    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
-    ingestion_run_id: Mapped[UUID | None] = mapped_column(ForeignKey("ingestion_runs.id", ondelete="SET NULL"), nullable=True)
-    document_id: Mapped[UUID | None] = mapped_column(ForeignKey("documents.id", ondelete="SET NULL"), nullable=True)
-    entity_type: Mapped[str] = mapped_column(String(64), nullable=False)
-    entity_id: Mapped[UUID | None] = mapped_column(nullable=True)
-    action: Mapped[str] = mapped_column(String(64), nullable=False)
-    actor_type: Mapped[str] = mapped_column(
-        String(32), nullable=False, default="system", server_default=sql_text("'system'")
+    audit_event_id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    event_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    actor: Mapped[str] = mapped_column(
+        String(128), nullable=False, default="system", server_default=sql_text("'system'"),
     )
-    actor_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    details: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    subject_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    pii_record_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    decision: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    rationale: Mapped[str | None] = mapped_column(Text, nullable=True)
+    regulatory_basis: Mapped[str | None] = mapped_column(Text, nullable=True)
+    timestamp: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(),
+    )
+    immutable: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=sql_text("true"),
+    )

@@ -1,0 +1,45 @@
+# DocDoc pipeline configuration
+# No secrets in this file — all secrets go in .env or HashiCorp Vault.
+# Override any value via environment variables (see CLAUDE.md § Developer Commands).
+
+pipeline:
+  mode: "strict"              # "strict" | "investigation"
+  batch_size: 10              # documents processed concurrently
+  max_retries: 3
+  retry_backoff_seconds: 5
+
+readers:
+  pdf:
+    onset_detection: true
+    tail_buffer_lines: 5
+  excel:
+    # Columns where >threshold fraction of cells match the same numeric
+    # pattern are treated as structured ID fields, not PII.
+    structured_id_column_threshold: 0.80
+  csv:
+    chunk_size: 1000           # rows per pandas iterator chunk
+  tika:
+    endpoint: "http://localhost:9998"   # self-hosted only — never public cloud
+
+pii:
+  layer1:
+    enabled: true
+  layer2:
+    enabled: true
+    confidence_threshold: 0.75
+    context_window_chars: 100
+  layer3:
+    enabled: true
+
+llm:
+  llm_assist_enabled: false   # do not change without governance sign-off
+  llm_provider: "ollama"      # local only — never a cloud API
+  llm_model: "llama3"
+  llm_audit_log: true         # log every LLM call: prompt + response + decision
+
+storage:
+  retention_days: 90          # INVESTIGATION mode only; ignored in STRICT mode
+
+observability:
+  prometheus_port: 9090
+  grafana_port: 3000

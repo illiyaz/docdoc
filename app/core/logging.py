@@ -2,13 +2,12 @@ import logging
 import logging.config
 import re
 
-from app.core.settings import get_settings
-
 PII_PATTERNS = [
     re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"),
     re.compile(r"\b\d{3}-?\d{2}-?\d{4}\b"),
     re.compile(r"\b(?:\d[ -]*?){13,16}\b"),
     re.compile(r"\b(?:\+1[-.\s]?)?(?:\(?\d{3}\)?[-.\s]?)\d{3}[-.\s]?\d{4}\b"),
+    re.compile(r"(?i)(raw_value(?:_encrypted)?\s*[=:]\s*)([^,\s]+)"),
 ]
 
 
@@ -19,7 +18,10 @@ class PIISafeFilter(logging.Filter):
 
         redacted = value
         for pattern in PII_PATTERNS:
-            redacted = pattern.sub("[REDACTED]", redacted)
+            if "raw_value" in pattern.pattern.lower():
+                redacted = pattern.sub(r"\1[REDACTED]", redacted)
+            else:
+                redacted = pattern.sub("[REDACTED]", redacted)
         return redacted
 
     def filter(self, record: logging.LogRecord) -> bool:
@@ -34,6 +36,8 @@ class PIISafeFilter(logging.Filter):
 
 
 def setup_logging() -> None:
+    from app.core.settings import get_settings
+
     settings = get_settings()
     logging.config.dictConfig(
         {

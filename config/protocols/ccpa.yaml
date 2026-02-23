@@ -1,0 +1,19 @@
+protocol_id: ccpa
+name: California Consumer Privacy Act Breach Notification
+jurisdiction: US-CA
+triggering_entity_types:
+  - US_SSN
+  - CREDIT_CARD
+  - BANK_ACCOUNT
+  - US_BANK_ROUTING
+  - PHI_MRN
+  - BIOMETRIC
+notification_threshold: 1
+notification_deadline_days: 45
+required_notification_content:
+  - name and contact information of reporting entity
+  - types of personal information subject to the breach
+  - date or estimated date of breach
+  - description of the breach incident
+  - toll-free numbers of credit reporting agencies
+regulatory_framework: "Cal. Civ. Code §1798.29"

@@ -15,6 +15,8 @@ class Settings(BaseSettings):
         default="postgresql+psycopg://docdoc:docdoc@localhost:5432/docdoc",
         alias="DATABASE_URL",
     )
+    tenant_salt: str = Field(default="change-me", alias="TENANT_SALT")
+    fernet_key: str | None = Field(default=None, alias="FERNET_KEY")
 
 
 @lru_cache(maxsize=1)

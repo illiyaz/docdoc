@@ -1,0 +1,23 @@
+protocol_id: gdpr_article_33
+name: GDPR Breach Notification (Articles 33-34)
+jurisdiction: EU
+triggering_entity_types:
+  - EMAIL
+  - PHONE
+  - PERSON
+  - IBAN
+  - EU_VAT
+  - DE_PERSONALAUSWEIS
+  - FR_INSEE
+  - ES_DNI
+  - IT_CODICE_FISCALE
+  - IP_ADDRESS
+notification_threshold: 1
+notification_deadline_days: 3
+individual_deadline_days: 30
+required_notification_content:
+  - nature of the personal data breach
+  - name and contact details of DPO
+  - likely consequences of the breach
+  - measures taken or proposed to address the breach
+regulatory_framework: "GDPR Article 33-34"

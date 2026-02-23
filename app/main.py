@@ -1,18 +1,8 @@
-from contextlib import asynccontextmanager
+"""Entry point for uvicorn: uvicorn app.main:app --reload
 
-from fastapi import FastAPI
+The authoritative app object lives in app.api.main; this module re-exports
+it so uvicorn's conventional invocation continues to work.
+"""
+from app.api.main import app  # noqa: F401
 
-from app.api.health import router as health_router
-from app.core.logging import setup_logging
-from app.core.settings import get_settings
-
-
-@asynccontextmanager
-async def lifespan(_: FastAPI):
-    setup_logging()
-    yield
-
-
-settings = get_settings()
-app = FastAPI(title=settings.app_name, version=settings.app_version, lifespan=lifespan)
-app.include_router(health_router)
+__all__ = ["app"]

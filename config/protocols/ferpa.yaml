@@ -1,0 +1,14 @@
+protocol_id: ferpa
+name: FERPA Student Record Breach Notification
+jurisdiction: US-FEDERAL
+triggering_entity_types:
+  - FERPA_STUDENT_ID
+  - STUDENT_SURVEY
+notification_threshold: 1
+notification_deadline_days: 999
+required_notification_content:
+  - description of breach
+  - types of education records involved
+  - steps taken to address the breach
+  - contact information for further inquiries
+regulatory_framework: "20 U.S.C. §1232g"

@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Breach Notification Letter</title>
+<style>
+@page {
+  size: letter;
+  margin: 2cm;
+}
+body {
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 11pt;
+  line-height: 1.5;
+  color: #000;
+}
+.address-block {
+  margin-bottom: 30pt;
+}
+.date-block {
+  margin-bottom: 20pt;
+}
+h1 {
+  font-size: 14pt;
+  margin-bottom: 16pt;
+}
+h2 {
+  font-size: 12pt;
+  margin-top: 16pt;
+  margin-bottom: 8pt;
+}
+ul {
+  margin-left: 20pt;
+}
+.footer {
+  margin-top: 40pt;
+  font-size: 9pt;
+  color: #666;
+  border-top: 1px solid #ccc;
+  padding-top: 8pt;
+}
+</style>
+</head>
+<body>
+<div class="date-block">${breach_date}</div>
+
+<div class="address-block">
+${subject_name}<br>
+${street}<br>
+${city}, ${state} ${zip}<br>
+${country}
+</div>
+
+<h1>Important Notice Regarding Your Personal Information</h1>
+
+<p>Dear ${subject_name},</p>
+
+<p>
+  We are writing to inform you of a data security incident that may have
+  involved your personal information.  We take the protection of your
+  information very seriously and are providing this notice to explain the
+  incident, the steps we have taken, and resources available to you.
+</p>
+
+<h2>What Happened</h2>
+<p>
+  On ${breach_date}, we became aware of unauthorized access to certain
+  records.  Upon discovery, we immediately began an investigation and
+  engaged cybersecurity experts to determine the scope of the incident.
+</p>
+
+<h2>What Information Was Involved</h2>
+<p>
+  The types of personal information that may have been affected include:
+  <strong>${pii_types}</strong>.
+</p>
+
+<h2>What You Can Do</h2>
+<ul>
+  <li>Monitor your financial accounts and credit reports for unusual activity.</li>
+  <li>Consider placing a fraud alert or credit freeze with the major credit bureaus.</li>
+  <li>Be cautious of unsolicited communications asking for personal information.</li>
+</ul>
+
+<h2>What We Are Doing</h2>
+<p>
+  We have taken steps to enhance our security measures and prevent future
+  incidents.  We are also working with law enforcement as appropriate.
+</p>
+
+<h2>For More Information</h2>
+<p>
+  If you have any questions or concerns, please contact us at
+  ${contact_info}.  This notice is provided in accordance with applicable
+  law (${regulatory_framework}).
+</p>
+
+<div class="footer">
+  This notice is provided pursuant to ${regulatory_framework}.
+  This is an automated notification generated for postal delivery.
+</div>
+</body>
+</html>

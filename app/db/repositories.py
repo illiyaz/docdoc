@@ -6,6 +6,8 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.policies import StoragePolicyConfig, build_extraction_storage
+from app.core.security import SecurityService
 from app.db import models
 
 ModelT = TypeVar("ModelT")
@@ -59,6 +61,25 @@ class DetectionRepository(BaseRepository[models.Detection]):
 
 class ExtractionRepository(BaseRepository[models.Extraction]):
     model = models.Extraction
+
+    def create_with_policy(
+        self,
+        *,
+        raw_value: str,
+        normalized_value: str | None,
+        tenant_salt: str,
+        security: SecurityService,
+        policy_config: StoragePolicyConfig,
+        **kwargs,
+    ) -> models.Extraction:
+        storage_fields = build_extraction_storage(
+            raw_value=raw_value,
+            normalized_value=normalized_value,
+            tenant_salt=tenant_salt,
+            security=security,
+            config=policy_config,
+        )
+        return self.create(**kwargs, **storage_fields)
 
 
 class PersonEntityRepository(BaseRepository[models.PersonEntity]):
