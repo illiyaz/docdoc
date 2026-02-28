@@ -126,7 +126,7 @@ def _run_reader(
         patch("app.readers.pdf_reader.pdfplumber", mock_plumber),
         patch("app.readers.pdf_reader.find_data_onset", return_value=onset),
         patch("app.readers.pdf_reader.classify_page", return_value=classify_returns),
-        patch("app.readers.pdf_reader.OCREngine", return_value=mock_ocr_instance),
+        patch("app.readers.ocr.OCREngine", return_value=mock_ocr_instance),
         patch("app.readers.pdf_reader.PageStitcher", return_value=mock_stitcher_instance),
     ):
         reader = PDFReader("test.pdf")
@@ -276,7 +276,7 @@ def test_scanned_page_get_pixmap_receives_matrix():
         patch("app.readers.pdf_reader.pdfplumber", mock_plumber),
         patch("app.readers.pdf_reader.find_data_onset", return_value=0),
         patch("app.readers.pdf_reader.classify_page", return_value="scanned"),
-        patch("app.readers.pdf_reader.OCREngine", return_value=MagicMock()),
+        patch("app.readers.ocr.OCREngine", return_value=MagicMock()),
         patch("app.readers.pdf_reader.PageStitcher", return_value=MagicMock()),
     ):
         PDFReader("test.pdf").read()
@@ -474,7 +474,7 @@ def test_onset_2_skips_pages_0_and_1():
         patch("app.readers.pdf_reader.pdfplumber", mock_plumber),
         patch("app.readers.pdf_reader.find_data_onset", return_value=2),
         patch("app.readers.pdf_reader.classify_page", return_value="digital"),
-        patch("app.readers.pdf_reader.OCREngine", return_value=MagicMock()),
+        patch("app.readers.ocr.OCREngine", return_value=MagicMock()),
         patch("app.readers.pdf_reader.PageStitcher", return_value=MagicMock()),
     ):
         mock_page.get_text.return_value = {"blocks": []}
@@ -610,7 +610,7 @@ def _run_reader_with_db(db_session, db_document_id, *, num_pages=1):
         patch("app.readers.pdf_reader.pdfplumber", mock_plumber),
         patch("app.readers.pdf_reader.find_data_onset", return_value=0),
         patch("app.readers.pdf_reader.classify_page", return_value="digital"),
-        patch("app.readers.pdf_reader.OCREngine", return_value=MagicMock()),
+        patch("app.readers.ocr.OCREngine", return_value=MagicMock()),
         patch("app.readers.pdf_reader.PageStitcher", return_value=mock_stitcher),
     ):
         reader = PDFReader("test.pdf", db_session=db_session, db_document_id=db_document_id)

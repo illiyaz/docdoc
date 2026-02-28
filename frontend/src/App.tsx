@@ -8,12 +8,14 @@ import {
   ClipboardCheck,
   GitMerge,
   Upload,
+  FlaskConical,
   Shield,
 } from "lucide-react"
 import { Dashboard } from "@/pages/Dashboard"
 import { QueueView } from "@/pages/QueueView"
 import { SubjectDetail } from "@/pages/SubjectDetail"
 import { JobSubmit } from "@/pages/JobSubmit"
+import { Diagnostic } from "@/pages/Diagnostic"
 
 // ---------------------------------------------------------------------------
 // Job ID context — shared across pages so SubjectDetail can fetch results
@@ -41,6 +43,7 @@ const NAV_ITEMS = [
   { to: "/queues/qc_sampling", label: "QC Sampling", icon: ClipboardCheck },
   { to: "/queues/rra_review", label: "RRA Review", icon: GitMerge },
   { to: "/jobs", label: "Submit Job", icon: Upload },
+  { to: "/diagnostic", label: "Diagnostic", icon: FlaskConical },
 ]
 
 // ---------------------------------------------------------------------------
@@ -97,6 +100,7 @@ export default function App() {
                   <Route path="/queues/:type" element={<QueueView />} />
                   <Route path="/subjects/:id" element={<SubjectDetail />} />
                   <Route path="/jobs" element={<JobSubmit />} />
+                  <Route path="/diagnostic" element={<Diagnostic />} />
                 </Routes>
               </main>
             </div>

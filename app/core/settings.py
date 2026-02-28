@@ -24,6 +24,9 @@ class Settings(BaseSettings):
     storage_mode: str = Field(default="strict", alias="STORAGE_MODE")
     secret_key: str = Field(default="change-me-in-production", alias="SECRET_KEY")
     vault_addr: str | None = Field(default=None, alias="VAULT_ADDR")
+    upload_dir: str = Field(default="/tmp/docdoc_uploads", alias="UPLOAD_DIR")
+    upload_max_file_size_mb: int = Field(default=100, alias="UPLOAD_MAX_FILE_SIZE_MB")
+    upload_max_total_size_mb: int = Field(default=500, alias="UPLOAD_MAX_TOTAL_SIZE_MB")
 
 
 @lru_cache(maxsize=1)

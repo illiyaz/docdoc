@@ -28,7 +28,18 @@ from app.pii.layer1_patterns import GEOGRAPHY_GLOBAL, PatternDefinition, get_all
 
 logger = logging.getLogger(__name__)
 
-_SPACY_MODEL = "en_core_web_trf"
+def _resolve_spacy_model() -> str:
+    """Pick the best available spaCy model: trf > lg > md > sm."""
+    try:
+        import spacy.util
+        for name in ("en_core_web_trf", "en_core_web_lg", "en_core_web_md", "en_core_web_sm"):
+            if spacy.util.is_package(name):
+                return name
+    except (ImportError, ModuleNotFoundError):
+        pass
+    return "en_core_web_trf"  # default; Presidio raises a clear error at init time
+
+_SPACY_MODEL = _resolve_spacy_model()
 _LAYER2_SCORE_THRESHOLD = 0.75
 
 

@@ -41,7 +41,8 @@ class PIIFilterMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next) -> Response:
         response = await call_next(request)
 
-        # Only scan JSON payloads
+        # Only scan JSON payloads — streaming responses (SSE, file
+        # downloads, etc.) must pass through without buffering.
         content_type = response.headers.get("content-type", "")
         if "application/json" not in content_type:
             return response
@@ -49,6 +50,8 @@ class PIIFilterMiddleware(BaseHTTPMiddleware):
         # Buffer the full response body (JSON responses are always small)
         chunks: list[bytes] = []
         async for chunk in response.body_iterator:
+            if isinstance(chunk, str):
+                chunk = chunk.encode("utf-8")
             chunks.append(chunk)
         body = b"".join(chunks)
         text = body.decode("utf-8", errors="replace")

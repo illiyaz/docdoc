@@ -18,11 +18,17 @@ Rules
 """
 from __future__ import annotations
 
+import importlib
 from pathlib import Path
 
 from app.readers.base import BaseReader, ExtractedBlock  # noqa: F401 — re-exported
 
-# Extension → reader class mapping; populated by _register_defaults() at import time.
+# Extension → (module_path, class_name) mapping.
+# Actual imports are deferred to get_reader() so missing optional
+# dependencies (python-docx, pyarrow, etc.) don't break import time.
+_LAZY_REGISTRY: dict[str, tuple[str, str]] = {}
+
+# Extension → eagerly registered reader class (for programmatic register()).
 _REGISTRY: dict[str, type[BaseReader]] = {}
 
 
@@ -53,41 +59,43 @@ def get_reader(path: str | Path) -> BaseReader:
             f"Cannot determine file type: {p.name!r} has no file extension. "
             "Provide a file with an extension or register a default reader."
         )
+
+    # Check eagerly registered readers first
     reader_cls = _REGISTRY.get(ext)
-    if reader_cls is None:
-        from app.readers.tika_reader import TikaReader
-        reader_cls = TikaReader
-    return reader_cls(p)
+    if reader_cls is not None:
+        return reader_cls(p)
+
+    # Check lazy registry
+    lazy_entry = _LAZY_REGISTRY.get(ext)
+    if lazy_entry is not None:
+        module_path, class_name = lazy_entry
+        mod = importlib.import_module(module_path)
+        reader_cls = getattr(mod, class_name)
+        return reader_cls(p)
+
+    # Fallback to Tika
+    from app.readers.tika_reader import TikaReader
+    return TikaReader(p)
 
 
 def _register_defaults() -> None:
-    """Populate _REGISTRY with all built-in readers.
+    """Populate _LAZY_REGISTRY with all built-in readers.
 
-    Imports are deferred to this function to avoid circular imports at
-    module load time (reader modules import from base.py, not registry.py).
+    No actual imports happen here — only module path + class name strings
+    are stored.  The real import is deferred to get_reader() call time.
     """
-    from app.readers.csv_reader import CSVReader
-    from app.readers.docx_reader import DOCXReader
-    from app.readers.email_reader import EmailReader
-    from app.readers.excel_reader import ExcelReader
-    from app.readers.html_reader import HTMLReader
-    from app.readers.parquet_reader import ParquetReader
-    from app.readers.pdf_reader import PDFReader
-
-    for ext in ("pdf",):
-        register(ext, PDFReader)
-    for ext in ("xlsx", "xls"):
-        register(ext, ExcelReader)
-    for ext in ("docx",):
-        register(ext, DOCXReader)
-    for ext in ("csv",):
-        register(ext, CSVReader)
-    for ext in ("html", "htm", "xml"):
-        register(ext, HTMLReader)
-    for ext in ("eml", "msg"):
-        register(ext, EmailReader)
-    for ext in ("parquet", "avro"):
-        register(ext, ParquetReader)
+    _LAZY_REGISTRY["pdf"] = ("app.readers.pdf_reader", "PDFReader")
+    _LAZY_REGISTRY["xlsx"] = ("app.readers.excel_reader", "ExcelReader")
+    _LAZY_REGISTRY["xls"] = ("app.readers.excel_reader", "ExcelReader")
+    _LAZY_REGISTRY["docx"] = ("app.readers.docx_reader", "DOCXReader")
+    _LAZY_REGISTRY["csv"] = ("app.readers.csv_reader", "CSVReader")
+    _LAZY_REGISTRY["html"] = ("app.readers.html_reader", "HTMLReader")
+    _LAZY_REGISTRY["htm"] = ("app.readers.html_reader", "HTMLReader")
+    _LAZY_REGISTRY["xml"] = ("app.readers.html_reader", "HTMLReader")
+    _LAZY_REGISTRY["eml"] = ("app.readers.email_reader", "EmailReader")
+    _LAZY_REGISTRY["msg"] = ("app.readers.email_reader", "EmailReader")
+    _LAZY_REGISTRY["parquet"] = ("app.readers.parquet_reader", "ParquetReader")
+    _LAZY_REGISTRY["avro"] = ("app.readers.parquet_reader", "ParquetReader")
 
 
 _register_defaults()

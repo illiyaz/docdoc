@@ -552,3 +552,344 @@ class TestPIIFilterMiddleware:
     ) -> None:
         resp = pii_client.get("/ssn")
         assert "123-45-6789" not in resp.text
+
+
+# ===========================================================================
+# POST /diagnostic/file
+# ===========================================================================
+
+
+class TestDiagnosticFile:
+    def test_unsupported_file_type_returns_400(self, client: TestClient) -> None:
+        resp = client.post(
+            "/diagnostic/file",
+            files={"file": ("test.xyz", b"hello", "application/octet-stream")},
+            data={"protocol_id": "hipaa_breach_rule"},
+        )
+        assert resp.status_code == 400
+        assert "Unsupported file type" in resp.json()["detail"]
+
+    def test_unknown_protocol_returns_400(self, client: TestClient) -> None:
+        resp = client.post(
+            "/diagnostic/file",
+            files={"file": ("test.csv", b"name,ssn\nJohn,123-45-6789", "text/csv")},
+            data={"protocol_id": "nonexistent_protocol"},
+        )
+        assert resp.status_code == 400
+        assert "Protocol not found" in resp.json()["detail"]
+
+    def test_valid_csv_upload_returns_correct_shape(
+        self, db_session: Session, client: TestClient,
+    ) -> None:
+        """Upload a small CSV and verify the response structure.
+
+        Both get_reader and PresidioEngine are mocked so the test is
+        fully self-contained and does not depend on optional reader deps.
+        """
+        from unittest.mock import patch
+        from app.readers.base import ExtractedBlock
+
+        fake_blocks = [
+            ExtractedBlock(
+                text="John Doe,123-45-6789",
+                page_or_sheet=1,
+                source_path="/tmp/test.csv",
+                file_type="csv",
+            ),
+            ExtractedBlock(
+                text="Jane Doe,987-65-4321",
+                page_or_sheet=1,
+                source_path="/tmp/test.csv",
+                file_type="csv",
+            ),
+        ]
+
+        class _FakeReader:
+            def read(self):
+                return fake_blocks
+
+        class _FakeEngine:
+            def analyze(self, blocks):  # type: ignore[override]
+                results = []
+                for b in blocks:
+                    if not b.text.strip():
+                        continue
+                    results.append(type("Det", (), {
+                        "block": b,
+                        "entity_type": "US_SSN",
+                        "start": 9,
+                        "end": min(20, len(b.text)),
+                        "score": 0.95,
+                        "pattern_used": r"\d{3}-\d{2}-\d{4}",
+                        "extraction_layer": "layer_1_pattern",
+                    })())
+                return results
+
+        import app.api.routes.diagnostic as diag_mod
+
+        orig_engine = diag_mod._create_presidio_engine
+        diag_mod._create_presidio_engine = lambda: _FakeEngine()  # type: ignore[assignment]
+        try:
+            with patch("app.api.routes.diagnostic.get_reader", return_value=_FakeReader()):
+                csv_content = b"name,ssn\nJohn Doe,123-45-6789\nJane Doe,987-65-4321\n"
+                resp = client.post(
+                    "/diagnostic/file",
+                    files={"file": ("test.csv", csv_content, "text/csv")},
+                    data={"protocol_id": "hipaa_breach_rule"},
+                )
+        finally:
+            diag_mod._create_presidio_engine = orig_engine  # type: ignore[assignment]
+
+        assert resp.status_code == 200
+        data = resp.json()
+
+        # Top-level shape
+        assert data["file_name"] == "test.csv"
+        assert data["file_type"] == "csv"
+        assert "total_pages" in data
+        assert "pages" in data
+        assert "summary" in data
+
+        # Summary shape
+        summary = data["summary"]
+        assert "total_pii_hits" in summary
+        assert "by_entity_type" in summary
+        assert "layer_distribution" in summary
+        assert "low_confidence_hits" in summary
+        assert "pages_skipped_by_onset" in summary
+        assert "ocr_pages" in summary
+
+        # Page shape — mock guarantees 1 page with 2 hits
+        assert data["total_pages"] == 1
+        page = data["pages"][0]
+        assert "page_number" in page
+        assert "page_type" in page
+        assert "blocks_extracted" in page
+        assert "pii_hits" in page
+
+        # PII hit shape
+        assert summary["total_pii_hits"] == 2
+        hit = page["pii_hits"][0]
+        assert hit["entity_type"] == "US_SSN"
+        assert "masked_value" in hit
+        assert hit["confidence"] == 0.95
+        assert hit["extraction_layer"] == "layer_1_pattern"
+        # No raw SSN in response
+        assert "123-45-6789" not in resp.text
+        assert "987-65-4321" not in resp.text
+
+
+# ===========================================================================
+# POST /jobs/upload  +  two-step job submission
+# ===========================================================================
+
+
+class TestUploadFiles:
+    def test_upload_single_csv(self, client: TestClient, tmp_path) -> None:
+        resp = client.post(
+            "/jobs/upload",
+            files=[("files", ("data.csv", b"name,ssn\nJohn,123-45-6789", "text/csv"))],
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "upload_id" in data
+        assert data["file_count"] == 1
+        assert data["files"][0]["name"] == "data.csv"
+
+    def test_upload_multiple_files(self, client: TestClient) -> None:
+        resp = client.post(
+            "/jobs/upload",
+            files=[
+                ("files", ("a.csv", b"col1\nval1", "text/csv")),
+                ("files", ("b.pdf", b"%PDF-fake", "application/pdf")),
+            ],
+        )
+        assert resp.status_code == 200
+        assert resp.json()["file_count"] == 2
+
+    def test_upload_skips_unsupported(self, client: TestClient) -> None:
+        resp = client.post(
+            "/jobs/upload",
+            files=[
+                ("files", (".DS_Store", b"junk", "application/octet-stream")),
+                ("files", ("notes.txt", b"hello", "text/plain")),
+                ("files", ("data.csv", b"col\nval", "text/csv")),
+            ],
+        )
+        assert resp.status_code == 200
+        assert resp.json()["file_count"] == 1
+
+    def test_upload_all_unsupported_returns_400(self, client: TestClient) -> None:
+        resp = client.post(
+            "/jobs/upload",
+            files=[
+                ("files", (".DS_Store", b"junk", "application/octet-stream")),
+                ("files", ("readme.txt", b"hello", "text/plain")),
+            ],
+        )
+        assert resp.status_code == 400
+        assert "No supported files" in resp.json()["detail"]
+
+    def test_create_job_with_upload_id(self, client: TestClient, monkeypatch) -> None:
+        """Two-step flow: upload files, then submit job with upload_id."""
+        # Step 1: upload
+        up_resp = client.post(
+            "/jobs/upload",
+            files=[("files", ("data.csv", b"name\nJohn", "text/csv"))],
+        )
+        assert up_resp.status_code == 200
+        upload_id = up_resp.json()["upload_id"]
+
+        # Step 2: mock pipeline internals and submit with upload_id
+        from unittest.mock import patch, MagicMock
+
+        mock_connector = MagicMock()
+        mock_discovery = MagicMock()
+        mock_discovery.run.return_value = []
+
+        with (
+            patch("app.api.routes.jobs.FilesystemConnector", return_value=mock_connector),
+            patch("app.api.routes.jobs.DiscoveryTask", return_value=mock_discovery),
+            patch("app.api.routes.jobs.EntityResolver") as mock_er,
+            patch("app.api.routes.jobs.Deduplicator") as mock_dedup,
+            patch("app.api.routes.jobs.build_notification_list") as mock_nl,
+        ):
+            mock_er.return_value.resolve.return_value = []
+            mock_dedup.return_value.build_subjects.return_value = []
+            mock_nl.return_value = MagicMock()
+
+            resp = client.post(
+                "/jobs",
+                json={"protocol_id": "hipaa_breach_rule", "upload_id": upload_id},
+            )
+
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "COMPLETE"
+
+    def test_create_job_both_fields_returns_422(self, client: TestClient) -> None:
+        resp = client.post(
+            "/jobs",
+            json={
+                "protocol_id": "hipaa_breach_rule",
+                "source_directory": "/some/path",
+                "upload_id": "some-id",
+            },
+        )
+        assert resp.status_code == 422
+
+    def test_create_job_neither_field_returns_422(self, client: TestClient) -> None:
+        resp = client.post(
+            "/jobs",
+            json={"protocol_id": "hipaa_breach_rule"},
+        )
+        assert resp.status_code == 422
+
+    def test_expired_upload_returns_404(self, client: TestClient) -> None:
+        resp = client.post(
+            "/jobs",
+            json={
+                "protocol_id": "hipaa_breach_rule",
+                "upload_id": "nonexistent-upload-id",
+            },
+        )
+        assert resp.status_code == 404
+        assert "not found or expired" in resp.json()["detail"]
+
+    def test_streaming_run_emits_all_stages(self, client: TestClient) -> None:
+        """POST /jobs/run returns SSE events for each pipeline stage."""
+        from unittest.mock import patch, MagicMock
+
+        # Upload a file first
+        up_resp = client.post(
+            "/jobs/upload",
+            files=[("files", ("data.csv", b"name\nJohn", "text/csv"))],
+        )
+        upload_id = up_resp.json()["upload_id"]
+
+        with (
+            patch("app.api.routes.jobs.FilesystemConnector"),
+            patch("app.api.routes.jobs.DiscoveryTask") as mock_disc,
+            patch("app.api.routes.jobs.EntityResolver") as mock_er,
+            patch("app.api.routes.jobs.Deduplicator") as mock_dedup,
+            patch("app.api.routes.jobs.build_notification_list") as mock_nl,
+        ):
+            mock_disc.return_value.run.return_value = [{"source_path": "/tmp/data.csv"}]
+            mock_er.return_value.resolve.return_value = []
+            mock_dedup.return_value.build_subjects.return_value = []
+            mock_nl.return_value = MagicMock()
+
+            # Mock the reader + engine for the detection stage
+            from app.readers.base import ExtractedBlock
+
+            class _FakeReader:
+                def read(self):
+                    return [ExtractedBlock(text="John", page_or_sheet=1, source_path="/tmp/data.csv", file_type="csv")]
+
+            class _FakeEngine:
+                def analyze(self, blocks):
+                    return []
+
+            with (
+                patch("app.readers.registry.get_reader", return_value=_FakeReader()),
+                patch("app.pii.presidio_engine.PresidioEngine", return_value=_FakeEngine()),
+            ):
+                resp = client.post(
+                    "/jobs/run",
+                    json={"protocol_id": "hipaa_breach_rule", "upload_id": upload_id},
+                )
+
+        assert resp.status_code == 200
+        assert "text/event-stream" in resp.headers["content-type"]
+
+        # Parse SSE events
+        import json
+        events = []
+        for line in resp.text.split("\n"):
+            if line.startswith("data: "):
+                events.append(json.loads(line[6:]))
+
+        # Should have events for all stages
+        stages_seen = [e["stage"] for e in events]
+        assert "discovery" in stages_seen
+        assert "detection" in stages_seen
+        assert "resolution" in stages_seen
+        assert "deduplication" in stages_seen
+        assert "notification" in stages_seen
+        assert "complete" in stages_seen
+
+        # Final event should have the result
+        complete_event = [e for e in events if e["stage"] == "complete"][0]
+        assert complete_event["result"]["status"] == "COMPLETE"
+
+    def test_upload_cleanup_after_job(self, client: TestClient, monkeypatch) -> None:
+        """Upload directory is removed after the job completes."""
+        import os
+
+        up_resp = client.post(
+            "/jobs/upload",
+            files=[("files", ("data.csv", b"name\nJohn", "text/csv"))],
+        )
+        upload_id = up_resp.json()["upload_id"]
+        upload_dir = up_resp.json()["directory"]
+        assert os.path.isdir(upload_dir)
+
+        from unittest.mock import patch, MagicMock
+
+        with (
+            patch("app.api.routes.jobs.FilesystemConnector"),
+            patch("app.api.routes.jobs.DiscoveryTask") as mock_disc,
+            patch("app.api.routes.jobs.EntityResolver") as mock_er,
+            patch("app.api.routes.jobs.Deduplicator") as mock_dedup,
+            patch("app.api.routes.jobs.build_notification_list") as mock_nl,
+        ):
+            mock_disc.return_value.run.return_value = []
+            mock_er.return_value.resolve.return_value = []
+            mock_dedup.return_value.build_subjects.return_value = []
+            mock_nl.return_value = MagicMock()
+
+            client.post(
+                "/jobs",
+                json={"protocol_id": "hipaa_breach_rule", "upload_id": upload_id},
+            )
+
+        assert not os.path.isdir(upload_dir)

@@ -31,7 +31,6 @@ import pdfplumber
 
 from app.readers.base import BaseReader, ExtractedBlock
 from app.readers.classifier import classify_page
-from app.readers.ocr import OCREngine
 from app.readers.onset import find_data_onset
 from app.readers.stitcher import PageStitcher
 
@@ -97,14 +96,15 @@ class PDFReader(BaseReader):
         doc = fitz.open(str(self.path))
         onset_page = find_data_onset(doc)
         stitcher = PageStitcher()
-        ocr_engine = OCREngine()
+        # OCR engine created lazily on first scanned/corrupted page
+        ocr_engine = None
         document_id = str(self.path)
         all_blocks: list[ExtractedBlock] = []
 
         with pdfplumber.open(str(self.path)) as plumber_doc:
             for page_num in range(onset_page, len(doc)):
                 page = doc.load_page(page_num)
-                page_blocks = self._process_page(
+                page_blocks, ocr_engine = self._process_page(
                     page, page_num, plumber_doc, stitcher, ocr_engine
                 )
                 all_blocks.extend(page_blocks)
@@ -124,9 +124,12 @@ class PDFReader(BaseReader):
         page_num: int,
         plumber_doc: object,
         stitcher: PageStitcher,
-        ocr_engine: OCREngine,
-    ) -> list[ExtractedBlock]:
-        """Classify the page and dispatch to the appropriate extraction path."""
+        ocr_engine: object | None,
+    ) -> tuple[list[ExtractedBlock], object | None]:
+        """Classify the page and dispatch to the appropriate extraction path.
+
+        Returns (blocks, ocr_engine) — ocr_engine may be lazily created.
+        """
         label = classify_page(page)
         source = str(self.path)
 
@@ -139,16 +142,29 @@ class PDFReader(BaseReader):
             prose_blocks = self._extract_prose(page, page_num, table_bboxes)
         else:
             # scanned or corrupted: render to raster image and OCR
-            mat = fitz.Matrix(2, 2)  # 2× zoom improves OCR accuracy
-            pix = page.get_pixmap(matrix=mat)
-            prose_blocks = ocr_engine.ocr_page_image(pix, page_num, source)
+            try:
+                if ocr_engine is None:
+                    from app.readers.ocr import OCREngine
+                    ocr_engine = OCREngine()
+                mat = fitz.Matrix(2, 2)  # 2× zoom improves OCR accuracy
+                pix = page.get_pixmap(matrix=mat)
+                prose_blocks = ocr_engine.ocr_page_image(pix, page_num, source)
+            except (ImportError, ModuleNotFoundError):
+                # PaddleOCR not installed — fall back to whatever text
+                # PyMuPDF can extract (may be sparse but better than crashing)
+                logger.warning(
+                    "PaddleOCR not available; falling back to PyMuPDF text "
+                    "for %s page %d (classified as %s)",
+                    label, page_num, label,
+                )
+                prose_blocks = self._extract_prose(page, page_num, table_bboxes)
 
         # Feed prose text through the tail-buffer stitcher so cross-page PII
         # boundaries are tracked for the downstream PII extraction stage.
         page_text = "\n".join(b.text for b in prose_blocks)
         stitcher.stitch(page_num, page_text)
 
-        return table_blocks + prose_blocks
+        return table_blocks + prose_blocks, ocr_engine
 
     def _extract_tables(
         self,
