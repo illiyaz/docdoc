@@ -5,3 +5,13 @@ __pycache__/
 .venv/
 .DS_Store
 *.pptx
+
+# Databases
+*.db
+*.sqlite
+*.sqlite3
+notifai_test.db
+
+# Upload directories
+uploads/
+tmp/
