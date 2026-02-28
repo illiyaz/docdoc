@@ -304,6 +304,195 @@ export function getProtocols(): Promise<Protocol[]> {
 }
 
 // ---------------------------------------------------------------------------
+// Projects
+// ---------------------------------------------------------------------------
+
+export interface ProjectSummary {
+  id: string
+  name: string
+  description: string | null
+  status: string
+  created_by: string | null
+  created_at: string | null
+  updated_at: string | null
+}
+
+export interface ProjectDetail extends ProjectSummary {
+  protocols: ProtocolConfigSummary[]
+}
+
+export interface CreateProjectBody {
+  name: string
+  description?: string | null
+  created_by?: string | null
+}
+
+export interface UpdateProjectBody {
+  name?: string | null
+  description?: string | null
+  status?: string | null
+}
+
+export interface ProtocolConfigSummary {
+  id: string
+  project_id: string
+  base_protocol_id: string | null
+  name: string
+  config_json: Record<string, unknown>
+  status: string
+  created_at: string | null
+  updated_at: string | null
+}
+
+export interface CreateProtocolConfigBody {
+  name: string
+  base_protocol_id?: string | null
+  config_json: Record<string, unknown>
+}
+
+export interface UpdateProtocolConfigBody {
+  name?: string | null
+  config_json?: Record<string, unknown> | null
+  status?: string | null
+}
+
+export interface CatalogSummary {
+  project_id: string
+  total_documents: number
+  auto_processable: number
+  manual_review: number
+  by_file_type: Record<string, number>
+  by_structure_class: Record<string, number>
+}
+
+export interface DensitySummaryItem {
+  id: string
+  document_id: string | null
+  total_entities: number
+  by_category: Record<string, number> | null
+  by_type: Record<string, number> | null
+  confidence: string | null
+  confidence_notes: string | null
+  created_at: string | null
+}
+
+export interface DensityResponse {
+  project_id: string
+  project_summary: DensitySummaryItem | null
+  document_summaries: DensitySummaryItem[]
+}
+
+export interface ExportJobSummary {
+  id: string
+  project_id: string
+  protocol_config_id: string | null
+  export_type: string | null
+  status: string
+  file_path: string | null
+  row_count: number | null
+  filters_json: Record<string, unknown> | null
+  created_at: string | null
+  completed_at: string | null
+}
+
+export interface CreateExportBody {
+  protocol_config_id?: string | null
+  filters?: Record<string, unknown> | null
+}
+
+export function createProject(body: CreateProjectBody): Promise<ProjectSummary> {
+  return api("/projects", {
+    method: "POST",
+    body: JSON.stringify(body),
+  })
+}
+
+export function listProjects(): Promise<ProjectSummary[]> {
+  return api("/projects")
+}
+
+export function getProject(id: string): Promise<ProjectDetail> {
+  return api(`/projects/${id}`)
+}
+
+export function updateProject(id: string, body: UpdateProjectBody): Promise<ProjectSummary> {
+  return api(`/projects/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  })
+}
+
+export function getCatalogSummary(projectId: string): Promise<CatalogSummary> {
+  return api(`/projects/${projectId}/catalog-summary`)
+}
+
+export function getDensity(projectId: string): Promise<DensityResponse> {
+  return api(`/projects/${projectId}/density`)
+}
+
+// ---------------------------------------------------------------------------
+// Protocol Configs
+// ---------------------------------------------------------------------------
+
+export function createProtocolConfig(
+  projectId: string,
+  body: CreateProtocolConfigBody,
+): Promise<ProtocolConfigSummary> {
+  return api(`/projects/${projectId}/protocols`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  })
+}
+
+export function listProtocolConfigs(projectId: string): Promise<ProtocolConfigSummary[]> {
+  return api(`/projects/${projectId}/protocols`)
+}
+
+export function getProtocolConfig(
+  projectId: string,
+  configId: string,
+): Promise<ProtocolConfigSummary> {
+  return api(`/projects/${projectId}/protocols/${configId}`)
+}
+
+export function updateProtocolConfig(
+  projectId: string,
+  configId: string,
+  body: UpdateProtocolConfigBody,
+): Promise<ProtocolConfigSummary> {
+  return api(`/projects/${projectId}/protocols/${configId}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  })
+}
+
+// ---------------------------------------------------------------------------
+// Exports
+// ---------------------------------------------------------------------------
+
+export function createExport(
+  projectId: string,
+  body: CreateExportBody,
+): Promise<ExportJobSummary> {
+  return api(`/projects/${projectId}/exports`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  })
+}
+
+export function listExports(projectId: string): Promise<ExportJobSummary[]> {
+  return api(`/projects/${projectId}/exports`)
+}
+
+export function getExport(projectId: string, exportId: string): Promise<ExportJobSummary> {
+  return api(`/projects/${projectId}/exports/${exportId}`)
+}
+
+export function getExportDownloadUrl(projectId: string, exportId: string): string {
+  return `${BASE_URL}/projects/${projectId}/exports/${exportId}/download`
+}
+
+// ---------------------------------------------------------------------------
 // Diagnostic
 // ---------------------------------------------------------------------------
 

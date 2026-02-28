@@ -27,7 +27,7 @@ export function Dashboard() {
   return (
     <div className="space-y-8">
       <div>
-        <h1 className="text-2xl font-bold">Cyber NotifAI — Review Dashboard</h1>
+        <h1 className="text-2xl font-bold">Forentis AI — Review Dashboard</h1>
         <p className="text-sm text-muted-foreground mt-1">
           {totalPending} pending task{totalPending !== 1 ? "s" : ""} across all queues
         </p>

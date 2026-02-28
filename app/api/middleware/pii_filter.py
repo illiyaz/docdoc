@@ -41,6 +41,11 @@ class PIIFilterMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next) -> Response:
         response = await call_next(request)
 
+        # Skip PII scanning when masking is disabled (MVP testing mode)
+        from app.core.settings import get_settings
+        if not get_settings().pii_masking_enabled:
+            return response
+
         # Only scan JSON payloads — streaming responses (SSE, file
         # downloads, etc.) must pass through without buffering.
         content_type = response.headers.get("content-type", "")

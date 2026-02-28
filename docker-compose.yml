@@ -5,7 +5,7 @@ services:
     ports:
       - "3848:8000"
     environment:
-      APP_NAME: "Cyber NotifAI"
+      APP_NAME: "Forentis AI"
       APP_ENV: docker
       DATABASE_URL: postgresql+psycopg://notifai:notifai@postgres:5432/notifai
       REDIS_URL: redis://redis:6379/0

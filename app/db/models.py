@@ -9,10 +9,51 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base
 
 
+class Project(Base):
+    __tablename__ = "projects"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    name: Mapped[str] = mapped_column(String(512), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="active", server_default=sql_text("'active'")
+    )
+    created_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+    protocol_configs: Mapped[list[ProtocolConfig]] = relationship(back_populates="project")
+    ingestion_runs: Mapped[list[IngestionRun]] = relationship(back_populates="project")
+    density_summaries: Mapped[list[DensitySummary]] = relationship(back_populates="project")
+    export_jobs: Mapped[list[ExportJob]] = relationship(back_populates="project")
+
+
+class ProtocolConfig(Base):
+    __tablename__ = "protocol_configs"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    project_id: Mapped[UUID] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    base_protocol_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    name: Mapped[str] = mapped_column(String(256), nullable=False)
+    config_json: Mapped[dict] = mapped_column(JSON, nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="draft", server_default=sql_text("'draft'")
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+    project: Mapped[Project] = relationship(back_populates="protocol_configs")
+
+
 class IngestionRun(Base):
     __tablename__ = "ingestion_runs"
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    project_id: Mapped[UUID | None] = mapped_column(ForeignKey("projects.id", ondelete="SET NULL"), nullable=True)
     source_path: Mapped[str] = mapped_column(String(1024), nullable=False)
     config_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     code_version: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -29,6 +70,7 @@ class IngestionRun(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
     )
 
+    project: Mapped[Project | None] = relationship(back_populates="ingestion_runs")
     documents: Mapped[list[Document]] = relationship(back_populates="ingestion_run")
     person_entities: Mapped[list[PersonEntity]] = relationship(back_populates="ingestion_run")
 
@@ -52,6 +94,11 @@ class Document(Base):
     )
     page_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     content_onset_page: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    structure_class: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    can_auto_process: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=sql_text("true")
+    )
+    manual_review_reason: Mapped[str | None] = mapped_column(String(256), nullable=True)
     metadata_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
@@ -249,6 +296,7 @@ class NotificationSubject(Base):
     __tablename__ = "notification_subjects"
 
     subject_id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    project_id: Mapped[UUID | None] = mapped_column(ForeignKey("projects.id", ondelete="SET NULL"), nullable=True)
     canonical_name: Mapped[str | None] = mapped_column(String(512), nullable=True)
     canonical_email: Mapped[str | None] = mapped_column(String(512), nullable=True)
     canonical_address: Mapped[dict | None] = mapped_column(JSON, nullable=True)
@@ -280,6 +328,7 @@ class NotificationList(Base):
     __tablename__ = "notification_lists"
 
     notification_list_id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    project_id: Mapped[UUID | None] = mapped_column(ForeignKey("projects.id", ondelete="SET NULL"), nullable=True)
     job_id: Mapped[str] = mapped_column(String(256), nullable=False)
     protocol_id: Mapped[str] = mapped_column(String(128), nullable=False)
     subject_ids: Mapped[list | None] = mapped_column(JSON, nullable=True)
@@ -318,3 +367,86 @@ class AuditEvent(Base):
     immutable: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default=sql_text("true"),
     )
+
+
+class DensitySummary(Base):
+    """PII density summary for a project or individual document.
+
+    ``by_category`` uses the expanded 8-category taxonomy.  A single entity
+    may contribute to multiple categories, so the sum of category counts can
+    exceed ``total_entities``.
+
+    Example ``by_category``::
+
+        {
+            "PII": 12,
+            "SPII": 5,
+            "PHI": 3,
+            "PFI": 4,
+            "PCI": 2,
+            "NPI": 3,
+            "FTI": 1,
+            "CREDENTIALS": 0
+        }
+
+    Categories:
+        PII         Personally Identifiable Information (baseline)
+        SPII        Sensitive PII (SSN, biometrics, government IDs)
+        PHI         Protected Health Information (HIPAA)
+        PFI         Personal Financial Information (GLBA)
+        PCI         Payment Card Industry Data (PCI-DSS)
+        NPI         Nonpublic Personal Information (GLBA / banking)
+        FTI         Federal Tax Information (IRS 1075)
+        CREDENTIALS Authentication secrets (passwords, API keys)
+    """
+
+    __tablename__ = "density_summaries"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    project_id: Mapped[UUID] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    document_id: Mapped[UUID | None] = mapped_column(ForeignKey("documents.id", ondelete="CASCADE"), nullable=True)
+    total_entities: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    by_category: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    by_type: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    confidence: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    confidence_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    project: Mapped[Project] = relationship(back_populates="density_summaries")
+
+
+class ExportJob(Base):
+    __tablename__ = "export_jobs"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    project_id: Mapped[UUID] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    protocol_config_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("protocol_configs.id", ondelete="SET NULL"), nullable=True,
+    )
+    export_type: Mapped[str] = mapped_column(String(32), nullable=False, default="csv")
+    status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="pending", server_default=sql_text("'pending'"),
+    )
+    file_path: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    row_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    filters_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    project: Mapped[Project] = relationship(back_populates="export_jobs")
+
+
+class LLMCallLog(Base):
+    __tablename__ = "llm_call_logs"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    document_id: Mapped[UUID | None] = mapped_column(ForeignKey("documents.id", ondelete="SET NULL"), nullable=True)
+    use_case: Mapped[str] = mapped_column(String(64), nullable=False)
+    model: Mapped[str] = mapped_column(String(128), nullable=False)
+    prompt_text: Mapped[str] = mapped_column(Text, nullable=False)
+    response_text: Mapped[str] = mapped_column(Text, nullable=False)
+    decision: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    accepted: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    token_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())

@@ -9,6 +9,7 @@ export default defineConfig({
     port: 3847,
     proxy: {
       "/health": "http://localhost:3848",
+      "/projects": "http://localhost:3848",
       "/jobs": "http://localhost:3848",
       "/review": "http://localhost:3848",
       "/audit": "http://localhost:3848",

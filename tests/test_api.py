@@ -893,3 +893,135 @@ class TestUploadFiles:
             )
 
         assert not os.path.isdir(upload_dir)
+
+
+# ===========================================================================
+# Projects CRUD
+# ===========================================================================
+
+
+class TestProjectsCRUD:
+    def test_create_project(self, client: TestClient) -> None:
+        resp = client.post("/projects", json={"name": "Test Breach"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["name"] == "Test Breach"
+        assert data["status"] == "active"
+        assert "id" in data
+
+    def test_list_projects(self, client: TestClient) -> None:
+        client.post("/projects", json={"name": "P1"})
+        client.post("/projects", json={"name": "P2"})
+        resp = client.get("/projects")
+        assert resp.status_code == 200
+        assert len(resp.json()) == 2
+
+    def test_get_project(self, client: TestClient) -> None:
+        cr = client.post("/projects", json={"name": "Detail"}).json()
+        resp = client.get(f"/projects/{cr['id']}")
+        assert resp.status_code == 200
+        assert resp.json()["name"] == "Detail"
+        assert "protocols" in resp.json()
+
+    def test_get_project_not_found(self, client: TestClient) -> None:
+        resp = client.get(f"/projects/{uuid4()}")
+        assert resp.status_code == 404
+
+    def test_update_project(self, client: TestClient) -> None:
+        cr = client.post("/projects", json={"name": "Old"}).json()
+        resp = client.patch(f"/projects/{cr['id']}", json={"name": "New", "status": "archived"})
+        assert resp.status_code == 200
+        assert resp.json()["name"] == "New"
+        assert resp.json()["status"] == "archived"
+
+    def test_update_project_invalid_status(self, client: TestClient) -> None:
+        cr = client.post("/projects", json={"name": "P"}).json()
+        resp = client.patch(f"/projects/{cr['id']}", json={"status": "invalid"})
+        assert resp.status_code == 400
+
+    def test_catalog_summary_empty(self, client: TestClient) -> None:
+        cr = client.post("/projects", json={"name": "Empty"}).json()
+        resp = client.get(f"/projects/{cr['id']}/catalog-summary")
+        assert resp.status_code == 200
+        assert resp.json()["total_documents"] == 0
+
+    def test_density_empty(self, client: TestClient) -> None:
+        cr = client.post("/projects", json={"name": "Empty"}).json()
+        resp = client.get(f"/projects/{cr['id']}/density")
+        assert resp.status_code == 200
+        assert resp.json()["project_summary"] is None
+
+
+# ===========================================================================
+# ProtocolConfig CRUD
+# ===========================================================================
+
+
+class TestProtocolConfigCRUD:
+    def test_create_protocol_config(self, client: TestClient) -> None:
+        pr = client.post("/projects", json={"name": "P"}).json()
+        resp = client.post(
+            f"/projects/{pr['id']}/protocols",
+            json={
+                "name": "HIPAA Custom",
+                "base_protocol_id": "hipaa_breach_rule",
+                "config_json": {"target_entity_types": ["US_SSN"], "sampling_rate": 0.1},
+            },
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["name"] == "HIPAA Custom"
+        assert data["status"] == "draft"
+        assert data["config_json"]["sampling_rate"] == 0.1
+
+    def test_list_protocol_configs(self, client: TestClient) -> None:
+        pr = client.post("/projects", json={"name": "P"}).json()
+        client.post(f"/projects/{pr['id']}/protocols", json={"name": "A", "config_json": {}})
+        client.post(f"/projects/{pr['id']}/protocols", json={"name": "B", "config_json": {}})
+        resp = client.get(f"/projects/{pr['id']}/protocols")
+        assert resp.status_code == 200
+        assert len(resp.json()) == 2
+
+    def test_get_protocol_config(self, client: TestClient) -> None:
+        pr = client.post("/projects", json={"name": "P"}).json()
+        pc = client.post(
+            f"/projects/{pr['id']}/protocols",
+            json={"name": "Test", "config_json": {"key": "val"}},
+        ).json()
+        resp = client.get(f"/projects/{pr['id']}/protocols/{pc['id']}")
+        assert resp.status_code == 200
+        assert resp.json()["name"] == "Test"
+
+    def test_update_protocol_config(self, client: TestClient) -> None:
+        pr = client.post("/projects", json={"name": "P"}).json()
+        pc = client.post(
+            f"/projects/{pr['id']}/protocols",
+            json={"name": "Old", "config_json": {}},
+        ).json()
+        resp = client.patch(
+            f"/projects/{pr['id']}/protocols/{pc['id']}",
+            json={"name": "New", "status": "active"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["name"] == "New"
+        assert resp.json()["status"] == "active"
+
+    def test_update_locked_returns_409(self, client: TestClient) -> None:
+        pr = client.post("/projects", json={"name": "P"}).json()
+        pc = client.post(
+            f"/projects/{pr['id']}/protocols",
+            json={"name": "Lock", "config_json": {}},
+        ).json()
+        # Lock it
+        client.patch(f"/projects/{pr['id']}/protocols/{pc['id']}", json={"status": "locked"})
+        # Try to edit
+        resp = client.patch(
+            f"/projects/{pr['id']}/protocols/{pc['id']}",
+            json={"name": "Fail"},
+        )
+        assert resp.status_code == 409
+
+    def test_not_found(self, client: TestClient) -> None:
+        pr = client.post("/projects", json={"name": "P"}).json()
+        resp = client.get(f"/projects/{pr['id']}/protocols/{uuid4()}")
+        assert resp.status_code == 404

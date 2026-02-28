@@ -41,11 +41,18 @@ def _mask_snippet(text: str, start: int, end: int, context: int = 30) -> str:
 
     Any secondary PII (SSN, email, phone, credit-card) in the surrounding
     context is also redacted so the middleware PII filter never fires.
+    When PII masking is disabled, the raw context is returned as-is.
     """
-    from app.core.logging import PII_PATTERNS
+    from app.core.settings import get_settings
 
     snippet_start = max(0, start - context)
     snippet_end = min(len(text), end + context)
+
+    if not get_settings().pii_masking_enabled:
+        return text[snippet_start:snippet_end]
+
+    from app.core.logging import PII_PATTERNS
+
     before = text[snippet_start:start]
     after = text[end:snippet_end]
     snippet = f"{before}[REDACTED]{after}"
@@ -56,8 +63,16 @@ def _mask_snippet(text: str, start: int, end: int, context: int = 30) -> str:
 
 
 def _mask_value(text: str, start: int, end: int) -> str:
-    """Return the matched value with most characters replaced by asterisks."""
+    """Return the matched value with most characters replaced by asterisks.
+
+    When PII masking is disabled, the raw value is returned.
+    """
     raw = text[start:end]
+
+    from app.core.settings import get_settings
+    if not get_settings().pii_masking_enabled:
+        return raw
+
     if len(raw) <= 4:
         return "***"
     return raw[:1] + "*" * (len(raw) - 2) + raw[-1:]

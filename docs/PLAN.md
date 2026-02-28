@@ -74,7 +74,7 @@ Full phase-by-phase implementation details. See [CLAUDE.md](../CLAUDE.md) for pr
 
 Evolving Cyber NotifAI into **Forentis AI** — a full breach-analysis platform with Projects, editable Protocols, structured cataloging, density scoring, CSV export, configurable dedup, and LLM assist (Qwen 2.5 7B via Ollama, governance-gated). Deterministic pipeline remains primary; LLM is additive only.
 
-**Implementation is split into 8 steps. Steps 1–4 are complete. Steps 5–8 are pending.**
+**Implementation is split into 8 steps. All 8 steps are complete.**
 
 ### Step 1 — Schema + Migration (COMPLETE)
 
@@ -256,11 +256,242 @@ Pure-function category mapping + confidence aggregation + ORM task that runs AFT
 
 **All 1171 tests passing after Steps 1–4.**
 
-### Steps 5–8 — Pending
+### Step 5 — Configurable Dedup Anchors (COMPLETE)
 
-| Step | What | Key files to create/modify |
+**Modified file: `app/rra/entity_resolver.py`**
+
+Makes the RRA entity resolver's matching signals configurable via an `active_anchors` parameter. When a project's protocol config specifies `dedup_anchors` (e.g., `["ssn", "email", "phone"]`), only those signals are evaluated during entity resolution. When no anchors are specified (or `None`), all signals are used (backward compatible).
+
+| Component | Details |
+|---|---|
+| `VALID_ANCHORS` | `frozenset({"ssn", "email", "phone", "name_dob", "name_address", "name"})` — exported constant |
+| `ALL_ANCHORS` | Alias for `VALID_ANCHORS` — convenience constant |
+| `_resolve_anchors(active_anchors)` | Pure function: normalizes `None`/empty/list/frozenset to validated frozenset. Raises `ValueError` for invalid anchor names. Case-insensitive, whitespace-stripped. |
+| `build_confidence(r1, r2, *, active_anchors=None)` | Extended with keyword-only `active_anchors` param. Each signal block is gated by anchor membership check. |
+| `EntityResolver.resolve(records, *, active_anchors=None)` | Extended with keyword-only `active_anchors` param. Validates once via `_resolve_anchors`, passes resolved frozenset to all `build_confidence` calls. |
+
+**Anchor → signal mapping:**
+
+| Anchor name | Signal | Confidence boost |
 |---|---|---|
-| 5 | Configurable dedup anchors | `app/rra/entity_resolver.py` (modify) |
-| 6 | CSV export | `app/export/csv_exporter.py` (new), `app/api/routes/exports.py` (new) |
-| 7 | LLM integration (Qwen 2.5 7B via Ollama) | `app/llm/client.py`, `app/llm/prompts.py`, `app/llm/audit.py` (new), `tests/test_llm.py` (new) |
-| 8 | Frontend + rename to Forentis AI | `frontend/src/pages/Projects.tsx`, `frontend/src/pages/ProjectDetail.tsx` (new), `frontend/src/App.tsx` (modify) |
+| `ssn` | Government ID match (SSN, passport, driver license, etc.) | +0.50 |
+| `email` | Exact email match (normalized) | +0.40 |
+| `phone` | Exact phone match | +0.35 |
+| `name_dob` | Name match + DOB match | +0.35 |
+| `name_address` | Name match + address match (fuzzy) | +0.25 |
+| `name` | Name match alone | +0.10 |
+
+**Design decisions:**
+- `name_dob` and `name_address` anchors control their respective compound signals but do NOT automatically include the `name`-alone (+0.10) bonus. The `name` anchor must be explicitly included if the +0.10 bonus is desired. This gives fine-grained control.
+- Empty list `[]` defaults to all anchors (same as `None`) for backward compatibility.
+- Invalid anchor names raise `ValueError` immediately (fail-fast), caught at both `build_confidence` and `resolve` entry points.
+- Anchor validation happens once per `resolve` call, not per-pair, for performance.
+
+**Integration with protocol_configs:** The `config_json` blob in `protocol_configs` already has a `dedup_anchors` field (defined in Step 2). Callers can extract `config_json["dedup_anchors"]` and pass it to `EntityResolver.resolve(records, active_anchors=dedup_anchors)`.
+
+**Tests:** `tests/test_entity_resolver.py` — 3 new test classes (34 new tests):
+- `TestResolveAnchors` (10 tests): None returns all, empty list returns all, single anchor, multiple anchors, case insensitivity, whitespace stripping, invalid raises, frozenset input, all valid, ALL_ANCHORS constant
+- `TestBuildConfidenceWithAnchors` (14 tests): default None, ssn-only, email-only, phone-only, name_dob without name, name_dob+name, name_address without name, name-only, ssn+email stacking, disabled ssn/email/phone, invalid raises, name signals excluded by non-name anchors
+- `TestResolveWithAnchors` (10 tests): backward compat, ssn merges, email prevents ssn merge, phone merges, mixed selective merge, all anchors same as default, invalid raises, empty list uses all, name_dob review flag, review flag with anchors
+
+**All 1205 tests passing after Steps 1–5.**
+
+### Step 6 — CSV Export (COMPLETE)
+
+**New files:**
+
+| File | Purpose |
+|---|---|
+| `app/export/__init__.py` | Package init |
+| `app/export/csv_exporter.py` | CSV export logic — pure functions + ORM-integrated exporter |
+| `app/api/routes/exports.py` | FastAPI routes: create, list, get, download exports |
+
+**`app/export/csv_exporter.py` components:**
+
+| Component | Details |
+|---|---|
+| `DEFAULT_EXPORT_FIELDS` | `["canonical_name", "canonical_email", "canonical_phone", "pii_types_found", "merge_confidence", "review_status"]` |
+| `ALLOWED_EXPORT_FIELDS` | Frozenset of 10 safe-to-export fields (no raw PII fields). Unknown fields silently dropped. |
+| `_mask_email(email)` | Pure function: any email → `"***@***.***"`. None/empty → `""`. |
+| `_mask_phone(phone)` | Pure function: any phone → `"***-***-{last4}"`. None/empty → `""`. |
+| `_mask_address(addr)` | Pure function: dict → state + zip only. Street/city removed. None → `""`, empty dict → `"***"`. |
+| `_format_value(field, value)` | Pure function: applies field-specific masking, JSON-serializes lists/dicts, formats floats to 4 decimal places. |
+| `resolve_export_fields(protocol_config)` | Reads `export_fields` from `config_json`, validates against `ALLOWED_EXPORT_FIELDS`, falls back to `DEFAULT_EXPORT_FIELDS`. |
+| `SubjectRow` | Lightweight dataclass projection of `NotificationSubject`. `from_orm()` class method. `get(field)` accessor. |
+| `build_csv_content(rows, fields)` | Pure function: builds CSV string with header + masked data rows. No DB or IO. |
+| `CSVExporter(db_session)` | ORM task: queries subjects, applies filters, writes CSV file, creates/updates `ExportJob` record. |
+
+**CSVExporter.run() behavior:**
+- Creates `ExportJob` record with `status='pending'`
+- Resolves export fields from optional `ProtocolConfig`
+- Queries `NotificationSubject` rows filtered by `project_id`
+- Applies optional filters: `confidence_threshold` (SQL), `review_status` (SQL), `entity_types` (Python post-filter for SQLite compat)
+- Builds masked CSV content via `build_csv_content()`
+- Writes to `{output_dir}/export_{job_id}.csv`
+- Updates job to `status='completed'` with `file_path`, `row_count`, `completed_at`
+- On exception: sets `status='failed'`, re-raises
+
+**PII safety (critical):**
+- `canonical_email` always masked to `***@***.***`
+- `canonical_phone` always masked to `***-***-{last4}`
+- `canonical_address` stripped to state + zip only (street/city removed)
+- `canonical_name` passes through (not considered raw PII — it is the normalized display name)
+- No raw PII fields (`raw_value`, `raw_value_encrypted`, `hashed_value`) are in `ALLOWED_EXPORT_FIELDS`
+
+**API routes (`app/api/routes/exports.py`):**
+
+| Method + Path | Request body | Response | Notes |
+|---|---|---|---|
+| `POST /projects/{id}/exports` | `{protocol_config_id?, filters?}` | ExportJob dict with `status='completed'` | Triggers synchronous CSV export |
+| `GET /projects/{id}/exports` | — | `[ExportJob, ...]` ordered by created_at desc | List all exports for project |
+| `GET /projects/{id}/exports/{eid}` | — | ExportJob dict | Detail |
+| `GET /projects/{id}/exports/{eid}/download` | — | FileResponse (text/csv) | Returns 400 if not completed, 404 if file missing |
+
+**Wired into `app/api/main.py`:**
+```python
+from app.api.routes.exports import router as exports_router
+app.include_router(exports_router)  # after protocols_router, before jobs_router
+```
+
+**Tests:** `tests/test_export.py` — 8 test classes (61 tests):
+- `TestMaskEmail` (3 tests): real email, None, empty
+- `TestMaskPhone` (5 tests): E.164, formatted, None, empty, short
+- `TestMaskAddress` (4 tests): full address, None, empty dict, state-only
+- `TestFormatValue` (9 tests): None, email/phone/address masking, list→JSON, float formatting, bool, string, UUID
+- `TestResolveExportFields` (6 tests): default, from config, unknown dropped, all unknown fallback, empty list fallback, no key fallback
+- `TestBuildCSVContent` (6 tests): header row, data rows with masking, no raw email/phone, empty, multiple rows
+- `TestSubjectRow` (2 tests): from_orm, get accessor
+- `TestCSVExporter` (12 tests): creates job, file written, no raw email/phone/address, multiple subjects, empty project, protocol config fields, confidence/status/entity_type filters, filters stored, job persisted
+- `TestExportAPI` (13 tests): create, create 404, list, list empty, list 404, get, get 404, download, download no raw email, download 404, with protocol config, with filters, response shape
+
+**All 1266 tests passing after Steps 1–6.**
+
+### Step 7 — LLM Integration (Qwen 2.5 7B via Ollama) (COMPLETE)
+
+**New files:**
+
+| File | Purpose |
+|---|---|
+| `app/llm/__init__.py` | Package init |
+| `app/llm/client.py` | Governance-gated Ollama client wrapper |
+| `app/llm/prompts.py` | Prompt templates for LLM-assisted classification |
+| `app/llm/audit.py` | LLM call auditing (log + query) |
+
+**`app/llm/client.py` — OllamaClient:**
+
+| Component | Details |
+|---|---|
+| `OllamaClient` | Synchronous client wrapping Ollama's `POST /api/generate` endpoint via `httpx` |
+| `generate(prompt, system, *, use_case, document_id)` | Sends prompt to Ollama, returns response text. Governance-gated: raises `LLMDisabledError` when `llm_assist_enabled=False`. Logs all calls to `llm_call_logs` table when `db_session` provided. Measures wall-clock latency. |
+| `is_available()` | Health check via `GET /api/tags`. Returns `False` if Ollama not running (never raises). |
+| `last_latency_ms` | Property: latency of most recent `generate()` call in milliseconds. |
+| `LLMDisabledError` | Raised when `llm_assist_enabled=False` (governance gate). |
+| `LLMConnectionError` | Raised when Ollama is unreachable (`httpx.ConnectError`, `httpx.HTTPError`). |
+| `LLMTimeoutError` | Raised when request exceeds `ollama_timeout_s`. |
+
+**Constructor parameters:** `base_url` (default: `settings.ollama_url`), `model` (default: `settings.ollama_model`), `timeout_s` (default: `settings.ollama_timeout_s`), `db_session` (optional, enables audit logging).
+
+**PII safety:** Lightweight regex scan warns if prompt contains patterns matching SSN (XXX-XX-XXXX), 9-digit numbers, or 16-digit credit card numbers. Warning only (does not block) -- callers are responsible for masking PII before passing to the client.
+
+**`app/llm/prompts.py` — Prompt templates:**
+
+| Template | Use case | Format placeholders |
+|---|---|---|
+| `CLASSIFY_AMBIGUOUS_ENTITY` | Classify an entity with low deterministic confidence | `context_window`, `masked_value`, `detection_method`, `candidate_type`, `confidence_score` |
+| `ASSESS_EXTRACTION_CONFIDENCE` | Assess if a low-confidence extraction is a true positive | `entity_type`, `masked_value`, `extraction_layer`, `pattern_name`, `original_confidence`, `context_window` |
+| `SUGGEST_ENTITY_CATEGORY` | Suggest applicable data categories for an entity type | `entity_type`, `entity_description`, `current_categories` |
+| `SYSTEM_PROMPT` | Shared system prompt for all LLM calls | (none) |
+
+All templates instruct the LLM to respond ONLY with valid JSON. `PROMPT_TEMPLATES` dict provides programmatic access by name.
+
+**`app/llm/audit.py` — LLM call auditing:**
+
+| Function | Details |
+|---|---|
+| `log_llm_call(db_session, *, document_id, use_case, model, prompt_text, response_text, decision, accepted, latency_ms, token_count)` | Creates `LLMCallLog` row. All params map to table columns. `document_id` optional. PII safety check on `prompt_text` (warns if potential raw PII detected). |
+| `get_llm_calls(db_session, *, document_id, use_case, limit)` | Queries `llm_call_logs` with optional filters. Returns list of dicts. Default limit 100. Ordered by `created_at` descending. |
+
+**Design decisions:**
+- LLM is ADDITIVE ONLY -- the deterministic pipeline works without it. `llm_assist_enabled=False` by default.
+- LLM output is NEVER used directly -- validated against Layer 1/2 patterns before acceptance.
+- Every LLM call is logged with full input/output for audit trail (`llm_call_logs` table from migration 0005).
+- Ollama runs locally (air-gap safe). No cloud API calls.
+- `httpx` used for synchronous HTTP calls (matches pipeline execution model).
+- `db_session` is optional on client constructor -- health checks and availability probes do not require DB.
+
+**Tests:** `tests/test_llm.py` — 10 test classes (55 tests):
+- `TestOllamaClientDisabled` (2 tests): governance gate raises `LLMDisabledError`
+- `TestOllamaClientIsAvailable` (4 tests): health check with mocked httpx (connect error, success, 500, timeout)
+- `TestOllamaClientGenerate` (4 tests): successful generation, system prompt, model, stream=false
+- `TestOllamaClientTimeout` (2 tests): timeout → `LLMTimeoutError`, latency still tracked
+- `TestOllamaClientConnectionError` (2 tests): connect error → `LLMConnectionError`, HTTP error handling
+- `TestOllamaClientLatency` (3 tests): None before first call, set after success, updated on second call
+- `TestOllamaClientAuditLogging` (4 tests): logged to DB, no logging without session, document_id logged, prompt text logged
+- `TestOllamaClientPIISafety` (4 tests): SSN detection, clean text, credit card, CC with spaces
+- `TestPromptTemplates` (11 tests): formatting, JSON instruction, ONLY keyword, system prompt, registry, response keys, valid strings
+- `TestLogLLMCall` (5 tests): creates record, all fields, nullable defaults, queryable, multiple records
+- `TestGetLLMCalls` (8 tests): empty, all records, filter by use_case, filter by document_id, limit, default limit, combined filters, result dict shape, null document_id
+- `TestAuditPIISafety` (5 tests): SSN pattern, masked text, credit card, clean text, warns on PII
+
+**All 1400 tests passing after Steps 1–7.**
+
+### Step 8 — Frontend + Rename to Forentis AI (COMPLETE)
+
+**New files:**
+
+| File | Purpose |
+|---|---|
+| `frontend/src/pages/Projects.tsx` | Projects list page with create form, status badges, project cards |
+| `frontend/src/pages/ProjectDetail.tsx` | Project detail page with 5 tabs: Overview, Protocols, Catalog, Density, Exports |
+
+**Modified files:**
+
+| File | Changes |
+|---|---|
+| `frontend/src/App.tsx` | Added `/projects` and `/projects/:id` routes, added Projects nav item, renamed sidebar brand from "Cyber NotifAI" to "Forentis AI" |
+| `frontend/src/api/client.ts` | Added 15 TypeScript interfaces and 12 API functions for projects, protocol configs, catalog summary, density, and exports |
+| `frontend/src/pages/Dashboard.tsx` | Renamed header from "Cyber NotifAI" to "Forentis AI" |
+| `frontend/index.html` | Updated `<title>` to "Forentis AI" |
+| `frontend/package.json` | Renamed package from "frontend" to "forentis-ai" |
+| `frontend/vite.config.ts` | Added `/projects` proxy rule for API forwarding |
+| `app/core/settings.py` | Changed default `app_name` from "DocDoc API" to "Forentis AI" |
+| `.env.example` | Updated `APP_NAME` to "Forentis AI" |
+| `docker-compose.yml` | Updated `APP_NAME` to "Forentis AI" |
+| `PORTS.md` | Renamed all "Cyber NotifAI" references to "Forentis AI" |
+| `CLAUDE.md` | Renamed header and product goal to "Forentis AI", marked Step 8 COMPLETE |
+
+**Projects page (`Projects.tsx`):**
+- Lists all projects fetched from `GET /projects` with status badges, descriptions, and timestamps
+- Create Project form with name, description, and created_by fields
+- Grid layout with clickable project cards that navigate to detail page
+- Empty state with icon when no projects exist
+- Error and loading states handled
+
+**ProjectDetail page (`ProjectDetail.tsx`):**
+- 5-tab interface: Overview, Protocols, Catalog, Density, Exports
+- **Overview tab:** Displays project info (name, status, description, created_by, created_at). Inline edit mode with save/cancel.
+- **Protocols tab:** Lists protocol configurations with expandable JSON config view. Create protocol config form with name, base_protocol_id, and JSON config. Status badges (draft/active/locked).
+- **Catalog tab:** Fetches catalog summary from `GET /projects/{id}/catalog-summary`. Shows total documents, auto-processable vs manual review counts, breakdowns by file type and structure class.
+- **Density tab:** Fetches density from `GET /projects/{id}/density`. Shows project-level summary (total entities, confidence, by category, by type). Per-document density table.
+- **Exports tab:** Lists export jobs from `GET /projects/{id}/exports`. Create export button. Download links for completed exports. Status badges (pending/completed/failed).
+- Breadcrumb navigation (Projects > Project Name)
+
+**API client additions (`client.ts`):**
+- Interfaces: `ProjectSummary`, `ProjectDetail`, `CreateProjectBody`, `UpdateProjectBody`, `ProtocolConfigSummary`, `CreateProtocolConfigBody`, `UpdateProtocolConfigBody`, `CatalogSummary`, `DensitySummaryItem`, `DensityResponse`, `ExportJobSummary`, `CreateExportBody`
+- Functions: `createProject`, `listProjects`, `getProject`, `updateProject`, `getCatalogSummary`, `getDensity`, `createProtocolConfig`, `listProtocolConfigs`, `getProtocolConfig`, `updateProtocolConfig`, `createExport`, `listExports`, `getExport`, `getExportDownloadUrl`
+
+**Branding rename:**
+- All frontend references to "Cyber NotifAI" replaced with "Forentis AI"
+- Backend default app name changed to "Forentis AI"
+- Infrastructure config (.env.example, docker-compose.yml, PORTS.md) updated
+
+**Design decisions:**
+- Followed existing frontend patterns: `@tanstack/react-query` for data fetching, ShadCN Card/Badge components, Tailwind utility classes, `lucide-react` icons
+- No new dependencies added — all features built with existing React + Tailwind + ShadCN stack
+- API base URL configurable via `VITE_API_URL` environment variable (existing pattern)
+- Vite proxy configured for `/projects` routes (matching existing pattern for `/jobs`, `/review`, etc.)
+- Tab-based layout for ProjectDetail to organize multiple data views without cluttering the UI
+
+**All 1400 tests passing after Steps 1–8.**
+
+**Phase 5 gate:** All 8 steps complete. Platform renamed to Forentis AI. Projects page provides project management. Protocol configs, catalog, density, and exports accessible per-project. Full pipeline API coverage in frontend. PASSED

@@ -10,12 +10,15 @@ import {
   Upload,
   FlaskConical,
   Shield,
+  FolderOpen,
 } from "lucide-react"
 import { Dashboard } from "@/pages/Dashboard"
 import { QueueView } from "@/pages/QueueView"
 import { SubjectDetail } from "@/pages/SubjectDetail"
 import { JobSubmit } from "@/pages/JobSubmit"
 import { Diagnostic } from "@/pages/Diagnostic"
+import { Projects } from "@/pages/Projects"
+import { ProjectDetail } from "@/pages/ProjectDetail"
 
 // ---------------------------------------------------------------------------
 // Job ID context — shared across pages so SubjectDetail can fetch results
@@ -38,6 +41,7 @@ const queryClient = new QueryClient({
 
 const NAV_ITEMS = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
+  { to: "/projects", label: "Projects", icon: FolderOpen },
   { to: "/queues/low_confidence", label: "Low Confidence", icon: AlertCircle },
   { to: "/queues/escalation", label: "Escalation", icon: AlertTriangle },
   { to: "/queues/qc_sampling", label: "QC Sampling", icon: ClipboardCheck },
@@ -55,7 +59,7 @@ function Sidebar() {
     <aside className="w-60 shrink-0 border-r bg-sidebar text-sidebar-foreground flex flex-col">
       <div className="flex items-center gap-2 px-4 py-5 border-b">
         <Shield className="h-6 w-6 text-primary" />
-        <span className="text-lg font-bold">Cyber NotifAI</span>
+        <span className="text-lg font-bold">Forentis AI</span>
       </div>
       <nav className="flex-1 px-2 py-3 space-y-1">
         {NAV_ITEMS.map(({ to, label, icon: Icon }) => (
@@ -97,6 +101,8 @@ export default function App() {
               <main className="flex-1 overflow-y-auto p-8">
                 <Routes>
                   <Route path="/" element={<Dashboard />} />
+                  <Route path="/projects" element={<Projects />} />
+                  <Route path="/projects/:id" element={<ProjectDetail />} />
                   <Route path="/queues/:type" element={<QueueView />} />
                   <Route path="/subjects/:id" element={<SubjectDetail />} />
                   <Route path="/jobs" element={<JobSubmit />} />

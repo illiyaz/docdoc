@@ -14,6 +14,13 @@ Confidence ladder (from CLAUDE.md §11):
 
 Pairs with combined confidence ≥ 0.60 are unioned.  Groups whose minimum
 pairwise confidence is < 0.80 are flagged for human review.
+
+Phase 5 Step 5 — Configurable dedup anchors:
+  ``build_confidence`` and ``EntityResolver.resolve`` accept an optional
+  ``active_anchors`` list that controls which matching signals are evaluated.
+  When ``None`` (default), all signals are active (backward compatible).
+  Valid anchor names: ``ssn``, ``email``, ``phone``, ``name_dob``,
+  ``name_address``, ``name``.
 """
 from __future__ import annotations
 
@@ -38,6 +45,19 @@ _GOV_ID_TYPES: frozenset[str] = frozenset({
     "IN_AADHAAR", "IN_PAN",
     "GOVERNMENT_ID",
 })
+
+# Valid anchor names for configurable dedup (Phase 5 Step 5)
+VALID_ANCHORS: frozenset[str] = frozenset({
+    "ssn",           # government ID match (+0.50)
+    "email",         # exact email match (+0.40)
+    "phone",         # exact phone match (+0.35)
+    "name_dob",      # name + DOB match (+0.35, plus name-alone +0.10)
+    "name_address",  # name + address match (+0.25, plus name-alone +0.10)
+    "name",          # name-only match (+0.10)
+})
+
+# Canonical name for "all anchors active" — same as passing None
+ALL_ANCHORS: frozenset[str] = VALID_ANCHORS
 
 
 # ---------------------------------------------------------------------------
@@ -79,44 +99,88 @@ class ResolvedGroup:
 # Confidence builder
 # ---------------------------------------------------------------------------
 
-def build_confidence(r1: PIIRecord, r2: PIIRecord) -> float:
+def _resolve_anchors(
+    active_anchors: list[str] | frozenset[str] | None,
+) -> frozenset[str]:
+    """Normalise *active_anchors* to a validated frozenset.
+
+    Returns ``VALID_ANCHORS`` when *active_anchors* is ``None`` or empty
+    (backward-compatible default — all signals active).
+
+    Raises ``ValueError`` if any anchor name is not in ``VALID_ANCHORS``.
+    """
+    if active_anchors is None:
+        return VALID_ANCHORS
+
+    anchors = frozenset(a.lower().strip() for a in active_anchors)
+    if not anchors:
+        return VALID_ANCHORS
+
+    invalid = anchors - VALID_ANCHORS
+    if invalid:
+        raise ValueError(
+            f"Invalid dedup anchor(s): {sorted(invalid)}. "
+            f"Valid anchors: {sorted(VALID_ANCHORS)}"
+        )
+    return anchors
+
+
+def build_confidence(
+    r1: PIIRecord,
+    r2: PIIRecord,
+    *,
+    active_anchors: list[str] | frozenset[str] | None = None,
+) -> float:
     """Return the pairwise merge confidence for two records.
 
     Signals are additive and capped at 1.0.
+
+    Parameters
+    ----------
+    active_anchors:
+        Optional list of anchor names that controls which matching signals
+        are evaluated.  When ``None`` (default), all signals are active.
+        Valid values: ``"ssn"``, ``"email"``, ``"phone"``, ``"name_dob"``,
+        ``"name_address"``, ``"name"``.
     """
+    anchors = _resolve_anchors(active_anchors)
     score = 0.0
 
     # --- Government ID match (+0.50) ---
-    if (
-        r1.entity_type.upper() in _GOV_ID_TYPES
-        and r2.entity_type.upper() in _GOV_ID_TYPES
-    ):
-        matched, _ = government_ids_match(
-            r1.entity_type, r1.normalized_value,
-            r2.entity_type, r2.normalized_value,
-        )
-        if matched:
-            score += 0.50
+    if "ssn" in anchors:
+        if (
+            r1.entity_type.upper() in _GOV_ID_TYPES
+            and r2.entity_type.upper() in _GOV_ID_TYPES
+        ):
+            matched, _ = government_ids_match(
+                r1.entity_type, r1.normalized_value,
+                r2.entity_type, r2.normalized_value,
+            )
+            if matched:
+                score += 0.50
 
     # --- Email match (+0.40) ---
-    e1 = normalize_email(r1.raw_email) if r1.raw_email else None
-    e2 = normalize_email(r2.raw_email) if r2.raw_email else None
-    if e1 and e2 and e1 == e2:
-        score += 0.40
+    if "email" in anchors:
+        e1 = normalize_email(r1.raw_email) if r1.raw_email else None
+        e2 = normalize_email(r2.raw_email) if r2.raw_email else None
+        if e1 and e2 and e1 == e2:
+            score += 0.40
 
     # --- Phone match (+0.35) ---
-    if r1.raw_phone and r2.raw_phone:
-        if r1.raw_phone == r2.raw_phone:
-            score += 0.35
+    if "phone" in anchors:
+        if r1.raw_phone and r2.raw_phone:
+            if r1.raw_phone == r2.raw_phone:
+                score += 0.35
 
     # --- Name-dependent signals ---
+    has_name_signal = anchors & {"name_dob", "name_address", "name"}
     name_matched = False
-    if r1.raw_name and r2.raw_name:
+    if has_name_signal and r1.raw_name and r2.raw_name:
         name_matched, _ = names_match(r1.raw_name, r2.raw_name)
 
     if name_matched:
         # Name + DOB (+0.35)
-        if r1.raw_dob and r2.raw_dob:
+        if "name_dob" in anchors and r1.raw_dob and r2.raw_dob:
             dob_matched, _ = dobs_match(
                 r1.raw_dob, r1.country,
                 r2.raw_dob, r2.country,
@@ -125,13 +189,14 @@ def build_confidence(r1: PIIRecord, r2: PIIRecord) -> float:
                 score += 0.35
 
         # Name + address (+0.25)
-        if r1.raw_address and r2.raw_address:
+        if "name_address" in anchors and r1.raw_address and r2.raw_address:
             addr_matched, _ = addresses_match(r1.raw_address, r2.raw_address)
             if addr_matched:
                 score += 0.25
 
         # Name alone (+0.10)
-        score += 0.10
+        if "name" in anchors:
+            score += 0.10
 
     return min(score, 1.0)
 
@@ -174,12 +239,29 @@ class EntityResolver:
     MERGE_THRESHOLD: float = 0.30
     REVIEW_THRESHOLD: float = 0.80
 
-    def resolve(self, records: list[PIIRecord]) -> list[ResolvedGroup]:
+    def resolve(
+        self,
+        records: list[PIIRecord],
+        *,
+        active_anchors: list[str] | frozenset[str] | None = None,
+    ) -> list[ResolvedGroup]:
         """Group *records* by individual identity using Union-Find.
+
+        Parameters
+        ----------
+        active_anchors:
+            Optional list of anchor names controlling which matching signals
+            are active during resolution.  When ``None`` (default), all
+            signals are used (backward compatible).  Valid values:
+            ``"ssn"``, ``"email"``, ``"phone"``, ``"name_dob"``,
+            ``"name_address"``, ``"name"``.
 
         Returns one ``ResolvedGroup`` per unique individual (including
         single-record groups for unmatched records).
         """
+        # Validate once, reuse the resolved frozenset for all pair comparisons
+        anchors = _resolve_anchors(active_anchors)
+
         n = len(records)
         if n == 0:
             return []
@@ -190,7 +272,9 @@ class EntityResolver:
 
         for i in range(n):
             for j in range(i + 1, n):
-                conf = build_confidence(records[i], records[j])
+                conf = build_confidence(
+                    records[i], records[j], active_anchors=anchors,
+                )
                 if conf >= self.MERGE_THRESHOLD:
                     uf.union(i, j)
                     key = (min(i, j), max(i, j))
@@ -225,7 +309,10 @@ class EntityResolver:
                         min_conf = min(min_conf, pair_conf[key])
                     else:
                         # Pair not directly merged but transitively linked
-                        c = build_confidence(records[a], records[b])
+                        c = build_confidence(
+                            records[a], records[b],
+                            active_anchors=anchors,
+                        )
                         min_conf = min(min_conf, c)
 
             result.append(ResolvedGroup(

@@ -1,4 +1,4 @@
-# CLAUDE.md — Cyber NotifAI / Forentis AI
+# CLAUDE.md — Forentis AI
 
 Single source of truth for how this codebase is built and maintained. All contributors (human and AI) must follow these rules without exception.
 
@@ -9,7 +9,7 @@ See [docs/SCHEMA.md](docs/SCHEMA.md) for detailed technical architecture (PDF pr
 
 ## 0) Product Goal (non-negotiable)
 
-**Cyber NotifAI** is an end-to-end breach notification platform. The pipeline has three outcomes:
+**Forentis AI** is an end-to-end breach notification platform. The pipeline has three outcomes:
 
 1. **Identify** — extract PII/PHI/FERPA/SPI from every document in a breach dataset
 2. **Resolve** — deduplicate and link records to unique individuals (Rational Relationship Analysis)
@@ -140,7 +140,12 @@ project-root/
 │   ├── notification/              # list builder, email sender, print renderer, templates
 │   ├── audit/                     # events, audit_log
 │   ├── review/                    # roles, queue_manager, workflow, sampling
+│   ├── llm/
+│   │   ├── client.py              # OllamaClient — governance-gated LLM wrapper
+│   │   ├── prompts.py             # Prompt templates (classify, assess, suggest)
+│   │   └── audit.py               # LLM call logging (log_llm_call, get_llm_calls)
 │   ├── core/
+│   │   ├── constants.py           # ENTITY_CATEGORY_MAP, DATA_CATEGORIES (8 categories)
 │   │   ├── policies.py            # STRICT / INVESTIGATION storage policy
 │   │   ├── security.py            # hashing, encryption, EncryptionProvider
 │   │   ├── logging.py             # PIISafeFilter
@@ -152,7 +157,19 @@ project-root/
 │       ├── main.py
 │       ├── middleware/
 │       └── routes/                # health, diagnostic, jobs, projects, protocols
-├── frontend/                      # React human review UI
+├── frontend/                      # React Forentis AI UI
+│   └── src/
+│       ├── api/client.ts          # API client (types + functions)
+│       ├── pages/
+│       │   ├── Dashboard.tsx      # Review dashboard
+│       │   ├── Projects.tsx       # Project list + create
+│       │   ├── ProjectDetail.tsx  # Project detail (5 tabs)
+│       │   ├── QueueView.tsx      # Review queue
+│       │   ├── SubjectDetail.tsx  # Subject detail
+│       │   ├── JobSubmit.tsx      # Job submission
+│       │   └── Diagnostic.tsx     # Diagnostic scan
+│       ├── components/            # Shared components (ShadCN + custom)
+│       └── App.tsx                # Routes + sidebar + Forentis AI branding
 ├── alembic/
 │   └── versions/                  # 0001–0005
 ├── tests/
@@ -163,7 +180,9 @@ project-root/
 │   ├── test_safety.py             # PII never appears in logs or exceptions
 │   ├── test_api.py
 │   ├── test_cataloger.py
-│   └── test_density.py
+│   ├── test_constants.py            # entity category mapping coverage
+│   ├── test_density.py
+│   └── test_llm.py
 ├── models/                        # pre-packaged spaCy and Presidio models
 └── scripts/
     └── retrain.py                 # supervised retraining from human labels
@@ -217,7 +236,7 @@ See [docs/SCHEMA.md](docs/SCHEMA.md) for full storage policy contract and securi
 These are detailed in [docs/SCHEMA.md](docs/SCHEMA.md). Summary:
 
 - **PDF processing:** PyMuPDF page-streaming + PaddleOCR for scanned pages. Dual-path (digital vs scanned). Content onset detection. Cross-page tail-buffer stitching. Checkpointing per page.
-- **PII detection:** Three layers (pattern match → context window → positional header). Presidio + spaCy. 85+ patterns covering PII/PHI/FERPA/SPI/PPRA.
+- **PII detection:** Three layers (pattern match → context window → positional header). Presidio + spaCy. 85+ patterns covering PII/PHI/FERPA/SPI/PPRA. 8 data categories (PII, SPII, PHI, PFI, PCI, NPI, FTI, CREDENTIALS) with multi-category mapping per entity type.
 - **RRA:** Entity resolution via Union-Find. Confidence-weighted merge signals. Threshold: 0.80 auto-accept, 0.60–0.79 human review, <0.60 separate.
 - **Protocols:** 6 built-in (HIPAA, GDPR, CCPA, HITECH, FERPA, state_breach_generic). YAML-configurable. Selected once per job.
 - **HITL:** 4 roles (REVIEWER, LEGAL_REVIEWER, APPROVER, QC_SAMPLER). 4 review queues. State machine: AI_PENDING → HUMAN_REVIEW → LEGAL_REVIEW → APPROVED → NOTIFIED.
@@ -266,20 +285,20 @@ These are detailed in [docs/SCHEMA.md](docs/SCHEMA.md). Summary:
 
 **Product is demo-ready. All pitch deck promises are backed by tested code.**
 
-### Phase 5 — Forentis AI Evolution: IN PROGRESS
+### Phase 5 — Forentis AI Evolution: COMPLETE
 
 | Step | Status | Summary |
 |---|---|---|
 | 1. Schema + Migration | COMPLETE | 5 new tables, 4 extended tables, migration 0005, 17 total tables |
 | 2. Project + Protocol API | COMPLETE | CRUD for projects + protocol configs, catalog-summary + density endpoints |
 | 3. Cataloger Task | COMPLETE | File structure classifier (structured/semi-structured/unstructured/non-extractable) |
-| 4. Density Scoring | COMPLETE | Entity categorization (PHI/PFI/PII), confidence aggregation, per-doc + project summaries |
-| 5. Configurable dedup anchors | PENDING | Modify `app/rra/entity_resolver.py` |
-| 6. CSV export | PENDING | `app/export/csv_exporter.py`, `app/api/routes/exports.py` |
-| 7. LLM integration | PENDING | `app/llm/client.py`, `app/llm/prompts.py`, `app/llm/audit.py` (Qwen 2.5 7B via Ollama) |
-| 8. Frontend + rename | PENDING | `frontend/src/pages/Projects.tsx`, `ProjectDetail.tsx`, `App.tsx` |
+| 4. Density Scoring | COMPLETE | Entity categorization (8 categories: PII/SPII/PHI/PFI/PCI/NPI/FTI/CREDENTIALS), multi-category mapping, confidence aggregation, per-doc + project summaries |
+| 5. Configurable dedup anchors | COMPLETE | `active_anchors` param on `build_confidence` + `EntityResolver.resolve`, 6 anchor types, validated input |
+| 6. CSV export | COMPLETE | `app/export/csv_exporter.py`, `app/api/routes/exports.py`, masked PII, configurable columns |
+| 7. LLM integration | COMPLETE | `app/llm/client.py`, `app/llm/prompts.py`, `app/llm/audit.py` — governance-gated Ollama client, 3 prompt templates, full audit logging, 55 tests |
+| 8. Frontend + rename | COMPLETE | Projects list + detail pages, App.tsx routes, rename Cyber NotifAI to Forentis AI across frontend + backend |
 
-**1171 tests passing after Steps 1–4.**
+**1400 tests passing after Steps 1–8. Phase 5 complete.**
 
 See [docs/PLAN.md](docs/PLAN.md) for full step-by-step implementation details.
 

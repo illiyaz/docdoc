@@ -58,6 +58,8 @@ class CreateJobBody(BaseModel):
     protocol_id: str
     source_directory: str | None = None
     upload_id: str | None = None
+    project_id: str | None = None
+    protocol_config_id: str | None = None
 
     @model_validator(mode="after")
     def exactly_one_source(self):
@@ -86,11 +88,18 @@ def _mask_phone(phone: str | None) -> str | None:
 
 
 def _masked_subject(ns: NotificationSubject) -> dict:
+    settings = get_settings()
+    if settings.pii_masking_enabled:
+        email = _mask_email(ns.canonical_email)
+        phone = _mask_phone(ns.canonical_phone)
+    else:
+        email = ns.canonical_email
+        phone = ns.canonical_phone
     return {
         "subject_id": str(ns.subject_id),
         "canonical_name": ns.canonical_name,
-        "canonical_email": _mask_email(ns.canonical_email),
-        "canonical_phone": _mask_phone(ns.canonical_phone),
+        "canonical_email": email,
+        "canonical_phone": phone,
         "pii_types_found": ns.pii_types_found or [],
         "notification_required": ns.notification_required,
         "review_status": ns.review_status,

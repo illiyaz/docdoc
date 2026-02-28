@@ -1,6 +1,6 @@
-# PORTS.md — Cyber NotifAI Port Assignments
+# PORTS.md — Forentis AI Port Assignments
 
-This file documents all ports reserved by Cyber NotifAI.
+This file documents all ports reserved by Forentis AI.
 **Do not use ports 3847–3854 for any other product or service on shared infrastructure.**
 
 Last updated: 2026-02-23
@@ -111,5 +111,5 @@ is assigned a nearby range.
 
 ## Contact
 
-Questions about port assignments: contact the Cyber NotifAI team before
+Questions about port assignments: contact the Forentis AI team before
 deploying any service on shared infrastructure that uses ports in or near this range.
