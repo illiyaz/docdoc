@@ -22,6 +22,8 @@ CONFIDENCE_THRESHOLD: float = 0.75
 _CONTEXT_WINDOW_CHARS: int = 100
 _BOOST_AMOUNT: float = 0.20
 _MAX_SCORE: float = 1.0
+_INSTITUTIONAL_PENALTY: float = 0.15
+_PRIMARY_BOOST: float = 0.05
 
 # Keywords that corroborate a given entity type when found in the context window.
 _CONTEXT_SIGNALS: dict[str, list[str]] = {
@@ -48,7 +50,13 @@ class Layer2ContextClassifier:
     One instance may be shared across calls — this class holds no mutable state.
     """
 
-    def classify(self, result: DetectionResult, full_text: str) -> DetectionResult:
+    def classify(
+        self,
+        result: DetectionResult,
+        full_text: str,
+        *,
+        entity_role: str | None = None,
+    ) -> DetectionResult:
         """Examine a 100-char window around the match and return an updated result.
 
         Parameters
@@ -57,6 +65,10 @@ class Layer2ContextClassifier:
             Layer 1 DetectionResult, typically with needs_layer2=True.
         full_text:
             Complete text of the block the match came from.  Never logged.
+        entity_role:
+            Optional entity role from structure analysis.  When provided,
+            ``"institutional"`` reduces score by 0.15 and
+            ``"primary_subject"`` boosts score by 0.05.
 
         Returns
         -------
@@ -77,13 +89,20 @@ class Layer2ContextClassifier:
         if matched_signal:
             new_score = min(_MAX_SCORE, result.score + _BOOST_AMOUNT)
 
+        # Apply entity role confidence nudge
+        if entity_role == "institutional":
+            new_score = max(0.0, new_score - _INSTITUTIONAL_PENALTY)
+        elif entity_role == "primary_subject":
+            new_score = min(_MAX_SCORE, new_score + _PRIMARY_BOOST)
+
         # SAFETY: never log raw text — only entity_type, scores, and bool flag
         logger.debug(
-            "Layer2: entity_type=%s old_score=%.3f new_score=%.3f signal_found=%s",
+            "Layer2: entity_type=%s old_score=%.3f new_score=%.3f signal_found=%s role=%s",
             result.entity_type,
             result.score,
             new_score,
             matched_signal is not None,
+            entity_role,
         )
 
         return DetectionResult(

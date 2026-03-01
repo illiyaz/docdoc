@@ -1,12 +1,14 @@
-"""Prefect DAG: wire all five pipeline tasks into a single ingestion flow.
+"""Prefect DAG: wire all pipeline tasks into a single ingestion flow.
 
 Stage order
 -----------
-1. DiscoveryTask      — catalog documents from configured data-source connectors
-2. DetectionTask      — run three-layer PII detection on each document's blocks
-3. ExtractionTask     — persist results under the active storage policy
-4. QATask             — validate completeness and flag anomalies
-5. ErrorHandlerTask   — handle failures at each stage with retry / escalation
+1. DiscoveryTask           — catalog documents from configured data-source connectors
+2. CatalogerTask           — classify document structure (structured/semi/unstructured)
+3. StructureAnalysisTask   — identify document type, sections, entity roles (DSA)
+4. DetectionTask           — run three-layer PII detection on each document's blocks
+5. ExtractionTask          — persist results under the active storage policy
+6. QATask                  — validate completeness and flag anomalies
+7. ErrorHandlerTask        — handle failures at each stage with retry / escalation
 
 Each document is processed independently. After every page, a checkpoint
 is written to PostgreSQL so crashed jobs resume from last_completed_page + 1.

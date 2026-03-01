@@ -100,6 +100,39 @@ SUGGEST_ENTITY_CATEGORY = (
 )
 
 # ---------------------------------------------------------------------------
+# ANALYZE_DOCUMENT_STRUCTURE
+# ---------------------------------------------------------------------------
+
+ANALYZE_DOCUMENT_STRUCTURE = (
+    "Analyze the structure of the following document excerpt.  Identify:\n"
+    "1. The document type (medical_record, student_file, financial_statement, "
+    "employment_record, insurance_document, legal_document, correspondence, "
+    "form_fillable, or unknown)\n"
+    "2. Sections within the document (patient_information, provider_information, "
+    "emergency_contact, student_information, parent_guardian_information, "
+    "school_information, employee_information, employer_information, "
+    "account_holder_information, financial_institution, header_footer, "
+    "legal_boilerplate, or unknown)\n"
+    "3. For each block, the entity role: primary_subject, secondary_contact, "
+    "institutional, provider, or unknown\n"
+    "\n"
+    "Document excerpt (PII values have been masked):\n"
+    "```\n"
+    "{document_excerpt}\n"
+    "```\n"
+    "\n"
+    "Respond with a JSON object containing exactly these keys:\n"
+    "  - \"document_type\": one of the document types listed above\n"
+    "  - \"confidence\": your confidence in the document type (0.0 to 1.0)\n"
+    "  - \"sections\": a list of objects with keys: section_type, page_start, "
+    "page_end, block_indices (list of ints), confidence\n"
+    "  - \"entity_roles\": a list of objects with keys: block_index (int), "
+    "entity_role, confidence, section_type (optional)\n"
+    "\n"
+    "Respond ONLY with valid JSON.  No additional text."
+)
+
+# ---------------------------------------------------------------------------
 # Template registry for programmatic access
 # ---------------------------------------------------------------------------
 
@@ -107,4 +140,5 @@ PROMPT_TEMPLATES: dict[str, str] = {
     "classify_ambiguous_entity": CLASSIFY_AMBIGUOUS_ENTITY,
     "assess_extraction_confidence": ASSESS_EXTRACTION_CONFIDENCE,
     "suggest_entity_category": SUGGEST_ENTITY_CATEGORY,
+    "analyze_document_structure": ANALYZE_DOCUMENT_STRUCTURE,
 }

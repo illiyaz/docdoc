@@ -96,10 +96,20 @@ def test_document_and_chunk_required_columns_exist():
     assert "layout_profile" in chunk_columns
     assert chunk_columns["layout_profile"]["nullable"] is True
 
+    # Phase 5 Step 11: structure_analysis JSON column
+    assert "structure_analysis" in document_columns
+    assert document_columns["structure_analysis"]["nullable"] is True
+
     extraction_columns = {column["name"]: column for column in inspector.get_columns("extractions")}
     assert "storage_policy" in extraction_columns
     assert "retention_until" in extraction_columns
     assert extraction_columns["retention_until"]["nullable"] is True
+
+    # Phase 5 Step 11: entity role columns on extractions
+    assert "entity_role" in extraction_columns
+    assert extraction_columns["entity_role"]["nullable"] is True
+    assert "entity_role_confidence" in extraction_columns
+    assert extraction_columns["entity_role_confidence"]["nullable"] is True
 
 
 def test_server_defaults_exist_for_core_state_fields():

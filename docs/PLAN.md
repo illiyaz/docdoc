@@ -70,11 +70,11 @@ Full phase-by-phase implementation details. See [CLAUDE.md](../CLAUDE.md) for pr
 
 ---
 
-## Phase 5 — Forentis AI Evolution (COMPLETE)
+## Phase 5 — Forentis AI Evolution (IN PROGRESS)
 
 Evolving Cyber NotifAI into **Forentis AI** — a full breach-analysis platform with Projects, editable Protocols, structured cataloging, density scoring, CSV export, configurable dedup, LLM assist (Qwen 2.5 7B via Ollama, governance-gated), guided protocol forms, and catalog upload/linking. Deterministic pipeline remains primary; LLM is additive only.
 
-**Implementation is split into 10 steps. All 10 steps are complete.**
+**Implementation is split into 10 steps + Step 8b. All steps complete (backend + frontend).**
 
 ### Step 1 — Schema + Migration (COMPLETE)
 
@@ -494,6 +494,68 @@ All templates instruct the LLM to respond ONLY with valid JSON. `PROMPT_TEMPLATE
 
 **All 1400 tests passing after Steps 1–8.**
 
+### Step 8b — Job Workflow & Connectivity Fixes (COMPLETE)
+
+Connects the job lifecycle to the project management UI so that jobs are visible, launchable, and trackable from within a project. Updates the pipeline stage model to reflect the full 8-stage architecture.
+
+**Backend endpoints implemented:**
+
+| Method + Path | Response | Notes |
+|---|---|---|
+| `GET /projects/{id}/jobs` | `[JobSummary, ...]` ordered by `created_at` desc | Returns all `ingestion_runs` where `project_id` matches. Each entry: `id`, `status`, `source_path`, `started_at`, `completed_at`, `created_at`, `document_count`, `duration_seconds`, `error_summary`. |
+| `GET /jobs/{id}/status` | `{id, status, project_id, progress_pct, current_stage, stages: [{name, status, started_at, completed_at, error_count}], ...}` | 8-stage pipeline breakdown. Stages: Discovery, Cataloging, PII Detection, PII Extraction, Normalization, Entity Resolution, Quality Assurance, Notification. |
+| `POST /jobs/run` | `{job_id, status, project_id, protocol_config_id}` | Updated: creates `IngestionRun` record with `status="pending"`, returns immediately for polling. Accepts `project_id` and `protocol_config_id`. SSE streaming moved to `POST /jobs/run/stream`. |
+| `GET /jobs/recent?unlinked=true&limit=50` | `[JobSummary, ...]` | Recent jobs optionally filtered to unlinked (no `project_id`). Default limit 50, max 200. |
+| `PATCH /jobs/{id}` | Updated job summary | Associates job with a project. 404 if job/project not found. 409 if already linked to a *different* project. Idempotent for same project. |
+
+**Pipeline stages (8-stage architecture):**
+
+| Stage | Task module | Display name |
+|---|---|---|
+| 1 | `tasks/discovery.py` | Discovery |
+| 2 | `tasks/cataloger.py` | Cataloging |
+| 3 | `tasks/detection.py` | PII Detection |
+| 4 | `tasks/extraction.py` | PII Extraction |
+| 5 | `tasks/normalization.py` | Normalization |
+| 6 | `tasks/rra.py` | Entity Resolution |
+| 7 | `tasks/qa.py` | Quality Assurance |
+| 8 | `tasks/notification.py` | Notification |
+
+**Files modified:**
+
+| File | Changes |
+|---|---|
+| `app/api/routes/jobs.py` | 4 new endpoints (`GET /jobs/recent`, `GET /jobs/{id}/status`, `PATCH /jobs/{id}`, `POST /jobs/run` updated). `PIPELINE_STAGES` constant, `_build_stage_status()`, `_ingestion_run_summary()` helpers. SSE streaming moved to `/jobs/run/stream`. |
+| `app/api/routes/projects.py` | `GET /projects/{id}/jobs` endpoint + `_job_summary()` helper. |
+| `tests/test_api.py` | 32 new tests across 5 classes: `TestProjectJobs` (6), `TestJobStatus` (9), `TestRunJobPolling` (5), `TestRecentJobs` (6), `TestPatchJob` (6). |
+| `CLAUDE.md` | Step 8b marked COMPLETE, test count updated to 1435. |
+
+**Frontend implementation (Step 8b frontend):**
+
+| Feature | Details |
+|---|---|
+| Jobs tab in ProjectDetail | New tab between Catalog and Density. Table with short ID, status badge, created date, doc count, duration. Clickable rows expand to show 8-stage pipeline progress with polling. |
+| Run New Job button | Protocol selector dropdown (base protocols + project protocol configs). Calls `POST /jobs/run` with `project_id` and `protocol_config_id`. |
+| Link Existing Job | Dropdown populated from `GET /jobs/recent?unlinked=true`. Shows date and doc count, not raw UUIDs. Calls `PATCH /jobs/{id}` to link. |
+| Pipeline progress component | 8-stage stepper (Discovery, Cataloging, PII Detection, PII Extraction, Normalization, Entity Resolution, Quality Assurance, Notification). Polls `GET /jobs/{id}/status` every 3s while running. Progress bar with percentage. |
+| JobSubmit project selection | Required project dropdown populated from `GET /projects`. After completion, shows link to project Jobs tab. `project_id` included in submission body. |
+| Auto-refresh on job completion | Catalog and Density tabs invalidate react-query cache when a job linked to the project transitions to completed status. |
+| Updated pipeline stages | `JobSubmit.tsx` PipelineStepper updated from 5 stages to 8 stages matching backend architecture. |
+
+**Files modified (frontend):**
+
+| File | Changes |
+|---|---|
+| `frontend/src/api/client.ts` | 7 new interfaces (`JobSummary`, `PipelineStageStatus`, `JobPipelineStatus`, `RunJobBody`, `RunJobResponse`, `PatchJobBody`). 5 new API functions (`getProjectJobs`, `getJobPipelineStatus`, `runJob`, `getRecentJobs`, `linkJobToProject`). |
+| `frontend/src/pages/ProjectDetail.tsx` | New `JobsTab` component with job table, `PipelineProgressView` with polling, `StageIcon` helper, run/link job forms. Tab type extended to include "jobs". `handleJobCompleted` callback for auto-refresh. |
+| `frontend/src/pages/JobSubmit.tsx` | Required project selection dropdown. Pipeline stages updated to 8. `project_id` passed in submission body. Post-completion link to project. |
+| `frontend/vite.config.ts` | Added `/protocols` proxy rule for base protocols API. |
+
+**Remaining frontend work (not yet implemented):**
+- Review queue filtering by project
+
+**All 1435 tests passing after Step 8b.**
+
 ### Step 9 — Guided Protocol Form (COMPLETE)
 
 **Modified file: `frontend/src/pages/ProjectDetail.tsx`**
@@ -565,4 +627,46 @@ Total built-in protocols: **8** (hipaa, gdpr, ccpa, hitech, ferpa, state_breach_
 
 **All 1403 tests passing after Steps 1–10.**
 
-**Phase 5 gate:** All 10 steps complete. Platform renamed to Forentis AI. Full project management with guided protocol configuration, catalog upload/linking, density scoring, CSV export, and governance-gated LLM. 8 built-in regulatory protocols. PASSED
+---
+
+### Step 11 — Document Structure Analysis (DSA) (COMPLETE)
+
+**Goal:** Add a pre-detection analysis stage that understands document context — identifying document types, detecting sections, and attributing PII to person roles (primary subject vs institutional vs secondary contact).
+
+**New files:**
+
+| File | Purpose |
+|---|---|
+| `app/structure/__init__.py` | Package init |
+| `app/structure/models.py` | Dataclasses: `DocumentStructureAnalysis`, `SectionAnnotation`, `EntityRoleAnnotation`; type literals for `DocumentType` (9 types), `SectionType` (13 types), `EntityRole` (5 roles) |
+| `app/structure/heuristics.py` | `HeuristicAnalyzer` — deterministic doc type classification via keyword density, section detection via heading patterns + column headers, entity role assignment via section mapping |
+| `app/structure/protocol_relevance.py` | `PROTOCOL_TARGET_ROLES` mapping + `get_role_relevance()` — maps 8 protocols to target/deprioritize/non-target per role |
+| `app/structure/masking.py` | `mask_text_for_llm()` — replaces SSN/email/phone/CC patterns with `[SSN]`/`[EMAIL]`/`[PHONE]`/`[CREDIT_CARD]` placeholders |
+| `app/structure/llm_analyzer.py` | `LLMStructureAnalyzer` — sends masked excerpts to Ollama, parses JSON, `merge_analyses()` combines with heuristic (heuristic wins on conflict) |
+| `app/tasks/structure_analysis.py` | `StructureAnalysisTask` — pipeline task, runs after cataloger, before detection |
+| `alembic/versions/0006_document_structure_analysis.py` | Migration: `documents.structure_analysis` (JSON), `extractions.entity_role` (VARCHAR(32)), `extractions.entity_role_confidence` (Float) |
+| `tests/test_structure_analysis.py` | 64 tests across 13 test classes |
+
+**Modified files:**
+
+| File | Change |
+|---|---|
+| `app/db/models.py` | Added `structure_analysis` to Document, `entity_role` + `entity_role_confidence` to Extraction |
+| `app/tasks/detection.py` | Added `entity_role`/`entity_role_confidence` to DetectionResult, `annotate_results_with_structure()` function, `structure` param on `DetectionTask.run()` |
+| `app/pii/layer2_context.py` | Added `entity_role` param to `classify()` — institutional reduces score by 0.15, primary_subject boosts by 0.05 |
+| `app/rra/entity_resolver.py` | Added `entity_role` to `PIIRecord`, cross-role merge prevention (primary+institutional=0.0, primary+provider=0.0) |
+| `app/llm/prompts.py` | Added `ANALYZE_DOCUMENT_STRUCTURE` template, updated `PROMPT_TEMPLATES` dict (now 4 entries) |
+| `app/pipeline/dag.py` | Updated stage order to include StructureAnalysisTask as stage 3 |
+| `tests/test_schema.py` | Asserts `structure_analysis`, `entity_role`, `entity_role_confidence` columns exist |
+| `tests/test_llm.py` | Updated template registry tests for 4 templates |
+
+**Key design decisions:**
+- Annotation overlay: DSA produces a separate analysis object, does not mutate ExtractedBlocks
+- Deprioritize, not discard: non-target roles get reduced confidence, never zero
+- Heuristic wins on conflict: LLM suggestions are additive only
+- Nullable columns: all new schema fields nullable, existing data unaffected
+- Cross-role merge prevention: primary_subject + institutional/provider = 0.0 confidence (never merge)
+
+**All 1499 tests passing after Step 11.**
+
+**Phase 5 gate:** Steps 1–11 + Step 8b (backend + frontend) complete. 1499 tests passing. Platform renamed to Forentis AI. Full project management with guided protocol configuration, catalog upload/linking, density scoring, CSV export, governance-gated LLM, job workflow APIs, job management UI, and document structure analysis with entity role attribution. 8 built-in regulatory protocols. PASSED

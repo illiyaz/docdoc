@@ -79,6 +79,7 @@ class PIIRecord:
     country: str = "US"
     source_document_id: str = ""
     page_or_sheet: str | int = 0
+    entity_role: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -144,6 +145,16 @@ def build_confidence(
         ``"name_address"``, ``"name"``.
     """
     anchors = _resolve_anchors(active_anchors)
+
+    # --- Cross-role merge prevention ---
+    # If one record is primary_subject and the other is institutional,
+    # they cannot be the same person — return 0.0 immediately.
+    roles = {r1.entity_role, r2.entity_role}
+    if "primary_subject" in roles and "institutional" in roles:
+        return 0.0
+    if "primary_subject" in roles and "provider" in roles:
+        return 0.0
+
     score = 0.0
 
     # --- Government ID match (+0.50) ---

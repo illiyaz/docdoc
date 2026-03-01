@@ -38,6 +38,7 @@ A **Prefect DAG pipeline** of well-defined processing stages. Each stage has typ
 | Design doc name | What it actually is |
 |---|---|
 | Discovery Agent | `tasks/discovery.py` — filesystem/DB traversal, document cataloging |
+| Structure Analysis Agent | `tasks/structure_analysis.py` — document type, section detection, entity role attribution |
 | PII Detection Agent | `tasks/detection.py` — Presidio + spaCy NER, confidence scoring |
 | PII Extraction Agent | `tasks/extraction.py` — pattern match + context window extraction |
 | Normalization Agent | `tasks/normalization.py` — phone/address/name/email normalization |
@@ -115,6 +116,7 @@ project-root/
 ├── app/
 │   ├── tasks/                     # pipeline stages (Prefect tasks)
 │   │   ├── discovery.py
+│   │   ├── structure_analysis.py  # Phase 5 Step 11 — DSA pipeline task
 │   │   ├── detection.py
 │   │   ├── extraction.py
 │   │   ├── cataloger.py           # Phase 5 Step 3
@@ -140,9 +142,15 @@ project-root/
 │   ├── notification/              # list builder, email sender, print renderer, templates
 │   ├── audit/                     # events, audit_log
 │   ├── review/                    # roles, queue_manager, workflow, sampling
+│   ├── structure/
+│   │   ├── models.py              # DSA dataclasses (DocumentStructureAnalysis, etc.)
+│   │   ├── heuristics.py          # Deterministic document type/section/role analyzer
+│   │   ├── protocol_relevance.py  # Protocol → entity role relevance mapping
+│   │   ├── masking.py             # PII masking for LLM prompts
+│   │   └── llm_analyzer.py        # LLM-assisted structure analysis (additive)
 │   ├── llm/
 │   │   ├── client.py              # OllamaClient — governance-gated LLM wrapper
-│   │   ├── prompts.py             # Prompt templates (classify, assess, suggest)
+│   │   ├── prompts.py             # Prompt templates (classify, assess, suggest, DSA)
 │   │   └── audit.py               # LLM call logging (log_llm_call, get_llm_calls)
 │   ├── core/
 │   │   ├── constants.py           # ENTITY_CATEGORY_MAP, DATA_CATEGORIES (8 categories)
@@ -163,15 +171,15 @@ project-root/
 │       ├── pages/
 │       │   ├── Dashboard.tsx      # Review dashboard
 │       │   ├── Projects.tsx       # Project list + create
-│       │   ├── ProjectDetail.tsx  # Project detail (5 tabs, guided protocol form)
+│       │   ├── ProjectDetail.tsx  # Project detail (6 tabs: Overview, Protocols, Catalog, Jobs, Density, Exports)
 │       │   ├── QueueView.tsx      # Review queue
 │       │   ├── SubjectDetail.tsx  # Subject detail
-│       │   ├── JobSubmit.tsx      # Job submission
+│       │   ├── JobSubmit.tsx      # Job submission (requires project selection)
 │       │   └── Diagnostic.tsx     # Diagnostic scan
 │       ├── components/            # Shared components (ShadCN + custom)
 │       └── App.tsx                # Routes + sidebar + Forentis AI branding
 ├── alembic/
-│   └── versions/                  # 0001–0005
+│   └── versions/                  # 0001–0006
 ├── tests/
 │   ├── test_schema.py
 │   ├── test_repositories.py
@@ -182,7 +190,8 @@ project-root/
 │   ├── test_cataloger.py
 │   ├── test_constants.py            # entity category mapping coverage
 │   ├── test_density.py
-│   └── test_llm.py
+│   ├── test_llm.py
+│   └── test_structure_analysis.py   # DSA: doc type, sections, roles, masking, RRA prevention
 ├── models/                        # pre-packaged spaCy and Presidio models
 └── scripts/
     └── retrain.py                 # supervised retraining from human labels
@@ -237,7 +246,8 @@ These are detailed in [docs/SCHEMA.md](docs/SCHEMA.md). Summary:
 
 - **PDF processing:** PyMuPDF page-streaming + PaddleOCR for scanned pages. Dual-path (digital vs scanned). Content onset detection. Cross-page tail-buffer stitching. Checkpointing per page.
 - **PII detection:** Three layers (pattern match → context window → positional header). Presidio + spaCy. 85+ patterns covering PII/PHI/FERPA/SPI/PPRA. 8 data categories (PII, SPII, PHI, PFI, PCI, NPI, FTI, CREDENTIALS) with multi-category mapping per entity type.
-- **RRA:** Entity resolution via Union-Find. Confidence-weighted merge signals. Threshold: 0.80 auto-accept, 0.60–0.79 human review, <0.60 separate.
+- **Document Structure Analysis:** Heuristic-first document type classification, section detection, entity role attribution. LLM-assisted analysis additive only (`llm_assist_enabled`). Cross-role merge prevention in RRA (primary_subject + institutional = never merge).
+- **RRA:** Entity resolution via Union-Find. Confidence-weighted merge signals. Cross-role merge prevention. Threshold: 0.80 auto-accept, 0.60–0.79 human review, <0.60 separate.
 - **Protocols:** 8 built-in (HIPAA, GDPR, CCPA, HITECH, FERPA, state_breach_generic, BIPA, DPDPA). YAML-configurable. Selected once per job.
 - **HITL:** 4 roles (REVIEWER, LEGAL_REVIEWER, APPROVER, QC_SAMPLER). 4 review queues. State machine: AI_PENDING → HUMAN_REVIEW → LEGAL_REVIEW → APPROVED → NOTIFIED.
 - **Notification:** SMTP email + WeasyPrint postal letters. Template-driven. Delivery gated on APPROVED status only.
@@ -285,7 +295,7 @@ These are detailed in [docs/SCHEMA.md](docs/SCHEMA.md). Summary:
 
 **Product is demo-ready. All pitch deck promises are backed by tested code.**
 
-### Phase 5 — Forentis AI Evolution: COMPLETE
+### Phase 5 — Forentis AI Evolution: IN PROGRESS
 
 | Step | Status | Summary |
 |---|---|---|
@@ -297,10 +307,12 @@ These are detailed in [docs/SCHEMA.md](docs/SCHEMA.md). Summary:
 | 6. CSV export | COMPLETE | `app/export/csv_exporter.py`, `app/api/routes/exports.py`, masked PII, configurable columns |
 | 7. LLM integration | COMPLETE | `app/llm/client.py`, `app/llm/prompts.py`, `app/llm/audit.py` — governance-gated Ollama client, 3 prompt templates, full audit logging, 55 tests |
 | 8. Frontend + rename | COMPLETE | Projects list + detail pages, App.tsx routes, rename Cyber NotifAI to Forentis AI across frontend + backend |
+| 8b. Job Workflow | COMPLETE | Backend: 5 new endpoints (project jobs, job status, run job, recent jobs, link job). Frontend: Jobs tab in ProjectDetail (table + pipeline progress + run/link), 8-stage pipeline stepper, JobSubmit requires project selection, auto-refresh Catalog/Density on job completion. |
 | 9. Guided Protocol Form | COMPLETE | Replaced raw JSON textarea with guided form: base protocol dropdown (6 presets), entity type checkboxes (Identity/Financial/Health), confidence slider, dedup anchor multi-select, sampling config, storage policy radios, reorderable export fields, raw JSON toggle for power users |
 | 10. Catalog Tab + Base Protocols | COMPLETE | Catalog tab with file upload (drag-and-drop), server path linking (air-gap), Run New Job, Link Existing Job; GET /protocols/base endpoint; base protocol dropdown populated from API (8 YAML protocols); placeholder YAML for bipa, dpdpa |
+| 11. Document Structure Analysis | COMPLETE | Heuristic doc type classification (9 types), section detection (13 section types), entity role attribution (5 roles), protocol relevance mapping (8 protocols), LLM-assisted analysis (additive, governance-gated), cross-role merge prevention in RRA, migration 0006, 64 new tests |
 
-**1403 tests passing after Steps 1–10. Phase 5 complete.**
+**1499 tests passing after Steps 1–11 + 8b backend.**
 
 See [docs/PLAN.md](docs/PLAN.md) for full step-by-step implementation details.
 

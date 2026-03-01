@@ -454,7 +454,8 @@ class TestPromptTemplates:
         assert "classify_ambiguous_entity" in PROMPT_TEMPLATES
         assert "assess_extraction_confidence" in PROMPT_TEMPLATES
         assert "suggest_entity_category" in PROMPT_TEMPLATES
-        assert len(PROMPT_TEMPLATES) == 3
+        assert "analyze_document_structure" in PROMPT_TEMPLATES
+        assert len(PROMPT_TEMPLATES) == 4
 
     def test_classify_template_has_entity_type_key(self) -> None:
         """The template response schema should mention entity_type."""
@@ -488,6 +489,9 @@ class TestPromptTemplates:
                 "entity_type": "SSN",
                 "entity_description": "Social Security Number",
                 "current_categories": "PII, SPII",
+            },
+            "analyze_document_structure": {
+                "document_excerpt": "[Block 0, page 1]: Patient Information\n[Block 1, page 1]: Name: [REDACTED]",
             },
         }
         for name, template in PROMPT_TEMPLATES.items():

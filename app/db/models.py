@@ -100,6 +100,7 @@ class Document(Base):
     )
     manual_review_reason: Mapped[str | None] = mapped_column(String(256), nullable=True)
     metadata_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    structure_analysis: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
@@ -188,6 +189,8 @@ class Extraction(Base):
     )
     retention_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     confidence_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    entity_role: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    entity_role_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
     evidence_page: Mapped[int | None] = mapped_column(Integer, nullable=True)
     evidence_text_start: Mapped[int | None] = mapped_column(Integer, nullable=True)
     evidence_text_end: Mapped[int | None] = mapped_column(Integer, nullable=True)
