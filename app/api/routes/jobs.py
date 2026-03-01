@@ -6,6 +6,9 @@ POST /jobs/run runs the pipeline with SSE streaming progress.
 
 GET /jobs/{job_id} returns job status.
 GET /jobs/{job_id}/results returns masked NotificationSubjects.
+GET /jobs/{job_id}/status returns per-stage pipeline status (Step 8b).
+GET /jobs/recent returns recent jobs, optionally unlinked only (Step 8b).
+PATCH /jobs/{job_id} links a job to a project (Step 8b).
 """
 from __future__ import annotations
 
@@ -14,17 +17,17 @@ import logging
 import shutil
 from pathlib import Path
 from typing import Generator
-from uuid import uuid4
+from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, model_validator
-from sqlalchemy import select
+from sqlalchemy import func as sqla_func, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db, get_protocol_registry
 from app.core.settings import get_settings
-from app.db.models import NotificationList, NotificationSubject
+from app.db.models import Document, IngestionRun, NotificationList, NotificationSubject, Project
 from app.notification.list_builder import build_notification_list, get_notification_subjects
 from app.protocols.registry import ProtocolRegistry
 from app.rra.deduplicator import Deduplicator
@@ -70,6 +73,10 @@ class CreateJobBody(BaseModel):
         if not has_dir and not has_upload:
             raise ValueError("Provide either source_directory or upload_id")
         return self
+
+
+class PatchJobBody(BaseModel):
+    project_id: str
 
 
 # ---------------------------------------------------------------------------
@@ -154,6 +161,25 @@ def list_protocols(registry: ProtocolRegistry = Depends(get_protocol_registry)):
         }
         for p in registry.list_all()
     ]
+
+
+@router.get("/recent", summary="List recent jobs, optionally only unlinked")
+def list_recent_jobs(
+    unlinked: bool = Query(False, description="If true, only return jobs not linked to any project"),
+    limit: int = Query(50, ge=1, le=200, description="Max number of jobs to return"),
+    db: Session = Depends(get_db),
+):
+    """Return recent ingestion runs ordered by created_at desc.
+
+    When ``unlinked=true``, only runs with ``project_id IS NULL`` are returned.
+    """
+    stmt = select(IngestionRun).order_by(IngestionRun.created_at.desc())
+    if unlinked:
+        stmt = stmt.where(IngestionRun.project_id.is_(None))
+    stmt = stmt.limit(limit)
+
+    runs = db.execute(stmt).scalars().all()
+    return [_ingestion_run_summary(run, db) for run in runs]
 
 
 @router.post("/upload", summary="Upload files for a new job")
@@ -389,11 +415,64 @@ def _pipeline_generator(
                 db.close()
 
 
-@router.post("/run", summary="Submit job with streaming progress (SSE)")
+@router.post("/run", summary="Submit job and return job_id for polling")
 def run_job(
+    body: CreateJobBody,
+    db: Session = Depends(get_db),
+    registry: ProtocolRegistry = Depends(get_protocol_registry),
+):
+    """Create an IngestionRun record and return the job_id immediately.
+
+    The caller can then poll ``GET /jobs/{id}/status`` to track progress.
+    The pipeline SSE stream is also returned for clients that support it.
+    """
+    job_uuid = UUID(body.job_id) if body.job_id else uuid4()
+
+    # Validate protocol
+    try:
+        registry.get(body.protocol_id)
+    except KeyError:
+        raise HTTPException(status_code=400, detail=f"Protocol not found: {body.protocol_id!r}")
+
+    # Resolve project_id to UUID if provided
+    project_uuid = None
+    if body.project_id:
+        try:
+            project_uuid = UUID(body.project_id)
+        except (ValueError, AttributeError):
+            raise HTTPException(status_code=400, detail="Invalid project_id format")
+
+    # Create IngestionRun record so it is immediately queryable
+    run = IngestionRun(
+        id=job_uuid,
+        project_id=project_uuid,
+        source_path=body.source_directory or body.upload_id or "",
+        config_hash="",
+        code_version="0.1.0",
+        initiated_by="api",
+        status="pending",
+        config_snapshot={
+            "protocol_id": body.protocol_id,
+            "protocol_config_id": body.protocol_config_id,
+        },
+    )
+    db.add(run)
+    db.flush()
+
+    return {
+        "job_id": str(job_uuid),
+        "status": "pending",
+        "project_id": str(project_uuid) if project_uuid else None,
+        "protocol_config_id": body.protocol_config_id,
+    }
+
+
+@router.post("/run/stream", summary="Submit job with streaming progress (SSE)")
+def run_job_stream(
     body: CreateJobBody,
     registry: ProtocolRegistry = Depends(get_protocol_registry),
 ):
+    """Run the full pipeline with SSE streaming progress events."""
     return StreamingResponse(
         _pipeline_generator(body, None, registry),
         media_type="text/event-stream",
@@ -517,3 +596,165 @@ def get_job_results(job_id: str, db: Session = Depends(get_db)):
 
     subjects = get_notification_subjects(nl, db)
     return [_masked_subject(s) for s in subjects]
+
+
+@router.get("/{job_id}/status", summary="Get job pipeline status with per-stage breakdown")
+def get_job_status(job_id: UUID, db: Session = Depends(get_db)):
+    """Return current pipeline status including per-stage progress.
+
+    The 8-stage pipeline: Discovery, Cataloging, PII Detection, PII Extraction,
+    Normalization, Entity Resolution, Quality Assurance, Notification.
+    """
+    run = db.execute(
+        select(IngestionRun).where(IngestionRun.id == job_id)
+    ).scalar_one_or_none()
+
+    if run is None:
+        raise HTTPException(status_code=404, detail=f"Job {str(job_id)!r} not found")
+
+    # Build per-stage status from metrics JSON
+    stages = _build_stage_status(run)
+
+    # Calculate overall progress percentage
+    completed_stages = sum(1 for s in stages if s["status"] == "completed")
+    total_stages = len(stages)
+    progress_pct = round((completed_stages / total_stages) * 100, 1) if total_stages else 0.0
+
+    # Determine current stage
+    current_stage: str | None = None
+    for s in stages:
+        if s["status"] == "running":
+            current_stage = s["name"]
+            break
+    if current_stage is None and run.status == "pending":
+        current_stage = stages[0]["name"] if stages else None
+
+    return {
+        "id": str(run.id),
+        "status": run.status,
+        "project_id": str(run.project_id) if run.project_id else None,
+        "current_stage": current_stage,
+        "progress_pct": progress_pct,
+        "stages": stages,
+        "started_at": run.started_at.isoformat() if run.started_at else None,
+        "completed_at": run.completed_at.isoformat() if run.completed_at else None,
+        "created_at": run.created_at.isoformat() if run.created_at else None,
+        "error_summary": run.error_summary,
+    }
+
+
+@router.patch("/{job_id}", summary="Update job (e.g. link to a project)")
+def patch_job(job_id: UUID, body: PatchJobBody, db: Session = Depends(get_db)):
+    """Associate an existing job with a project.
+
+    Returns 404 if job or project not found.
+    Returns 409 if the job is already linked to a different project.
+    """
+    run = db.execute(
+        select(IngestionRun).where(IngestionRun.id == job_id)
+    ).scalar_one_or_none()
+
+    if run is None:
+        raise HTTPException(status_code=404, detail=f"Job {str(job_id)!r} not found")
+
+    # Validate project exists
+    try:
+        project_uuid = UUID(body.project_id)
+    except (ValueError, AttributeError):
+        raise HTTPException(status_code=400, detail="Invalid project_id format")
+
+    project = db.get(Project, project_uuid)
+    if project is None:
+        raise HTTPException(status_code=404, detail=f"Project {body.project_id!r} not found")
+
+    # Check if already linked to a different project
+    if run.project_id is not None and run.project_id != project_uuid:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Job is already linked to project {run.project_id!s}",
+        )
+
+    run.project_id = project.id
+    db.flush()
+
+    return _ingestion_run_summary(run, db)
+
+
+# ---------------------------------------------------------------------------
+# Pipeline stage definitions and helpers
+# ---------------------------------------------------------------------------
+
+PIPELINE_STAGES = [
+    "Discovery",
+    "Cataloging",
+    "PII Detection",
+    "PII Extraction",
+    "Normalization",
+    "Entity Resolution",
+    "Quality Assurance",
+    "Notification",
+]
+
+
+def _build_stage_status(run: IngestionRun) -> list[dict]:
+    """Build per-stage status list from an IngestionRun's metrics JSON.
+
+    The ``metrics`` JSON field can contain a ``stages`` dict with keys
+    matching the stage names and values being dicts with ``status``,
+    ``started_at``, ``completed_at``, and optional ``error_count``.
+
+    If no metrics are stored yet, stage status is inferred from the
+    overall run status.
+    """
+    metrics = run.metrics or {}
+    stage_data = metrics.get("stages", {})
+
+    result = []
+    run_completed = run.status in ("completed", "failed")
+
+    for stage_name in PIPELINE_STAGES:
+        info = stage_data.get(stage_name, {})
+        stage_status = info.get("status", "pending")
+
+        # If the overall run is completed/failed and we have no per-stage data,
+        # mark all stages as completed (for backward compat with jobs that
+        # don't store per-stage metrics).
+        if not stage_data and run_completed:
+            if run.status == "completed":
+                stage_status = "completed"
+            else:
+                stage_status = "failed"
+
+        result.append({
+            "name": stage_name,
+            "status": stage_status,
+            "started_at": info.get("started_at"),
+            "completed_at": info.get("completed_at"),
+            "error_count": info.get("error_count", 0),
+        })
+
+    return result
+
+
+def _ingestion_run_summary(run: IngestionRun, db: Session) -> dict:
+    """Build a summary dict for an ingestion run."""
+    doc_count = db.execute(
+        select(sqla_func.count(Document.id)).where(Document.ingestion_run_id == run.id)
+    ).scalar() or 0
+
+    duration_seconds: float | None = None
+    if run.started_at and run.completed_at:
+        duration_seconds = (run.completed_at - run.started_at).total_seconds()
+
+    return {
+        "id": str(run.id),
+        "project_id": str(run.project_id) if run.project_id else None,
+        "status": run.status,
+        "source_path": run.source_path,
+        "started_at": run.started_at.isoformat() if run.started_at else None,
+        "completed_at": run.completed_at.isoformat() if run.completed_at else None,
+        "created_at": run.created_at.isoformat() if run.created_at else None,
+        "document_count": doc_count,
+        "duration_seconds": duration_seconds,
+        "error_summary": run.error_summary,
+    }

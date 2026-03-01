@@ -1,13 +1,13 @@
 import { useState, useContext, useRef, useCallback } from "react"
 import { useQuery } from "@tanstack/react-query"
-import { useNavigate } from "react-router-dom"
+import { useNavigate, Link } from "react-router-dom"
 import {
   Loader2, CheckCircle, Upload, FolderOpen, Server,
-  X, FileText, Circle, AlertCircle,
+  X, FileText, Circle, AlertCircle, FolderOpen as FolderIcon,
 } from "lucide-react"
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
-import { getProtocols, uploadFiles, submitJobStreaming } from "@/api/client"
-import type { JobResult, UploadResult, PipelineProgress } from "@/api/client"
+import { getProtocols, uploadFiles, submitJobStreaming, listProjects } from "@/api/client"
+import type { JobResult, UploadResult, PipelineProgress, ProjectSummary } from "@/api/client"
 import { JobIdSetterContext } from "@/App"
 
 const SUPPORTED_EXTENSIONS = new Set([
@@ -33,11 +33,14 @@ function formatSize(bytes: number): string {
 // ---------------------------------------------------------------------------
 
 const PIPELINE_STAGES = [
-  { id: "discovery", label: "Document Discovery" },
+  { id: "discovery", label: "Discovery" },
+  { id: "cataloging", label: "Cataloging" },
   { id: "detection", label: "PII Detection" },
+  { id: "extraction", label: "PII Extraction" },
+  { id: "normalization", label: "Normalization" },
   { id: "resolution", label: "Entity Resolution" },
-  { id: "deduplication", label: "Deduplication" },
-  { id: "notification", label: "Notification List" },
+  { id: "qa", label: "Quality Assurance" },
+  { id: "notification", label: "Notification" },
 ] as const
 
 type StageStatus = "pending" | "running" | "complete" | "error"
@@ -97,6 +100,13 @@ type Phase = "idle" | "files_selected" | "uploading" | "uploaded" | "running" | 
 export function JobSubmit() {
   const navigate = useNavigate()
   const setJobId = useContext(JobIdSetterContext)
+
+  // Project selection
+  const [selectedProjectId, setSelectedProjectId] = useState("")
+  const { data: projects } = useQuery({
+    queryKey: ["projects"],
+    queryFn: listProjects,
+  })
 
   // Shared state
   const [protocolId, setProtocolId] = useState("")
@@ -256,14 +266,20 @@ export function JobSubmit() {
 
   async function handleRunPipeline() {
     if (!protocolId) return
+    if (!selectedProjectId) {
+      setError("Please select a project before running the pipeline")
+      return
+    }
     setError(null)
     setStageStates({})
     setPhase("running")
 
     try {
-      const body = tab === "upload" && uploadResult
+      const baseBody = tab === "upload" && uploadResult
         ? { protocol_id: protocolId, upload_id: uploadResult.upload_id }
         : { protocol_id: protocolId, source_directory: sourceDir }
+
+      const body = { ...baseBody, project_id: selectedProjectId }
 
       const res = await submitJobStreaming(body, handlePipelineProgress)
       setResult(res)
@@ -294,6 +310,7 @@ export function JobSubmit() {
   function handleReset() {
     setResult(null)
     setProtocolId("")
+    setSelectedProjectId("")
     setSourceDir("")
     setSelectedFiles([])
     setUploadResult(null)
@@ -308,8 +325,8 @@ export function JobSubmit() {
   const totalSize = selectedFiles.reduce((sum, f) => sum + f.size, 0)
   const isUploading = phase === "uploading"
   const isRunning = phase === "running"
-  const canRunUploadTab = tab === "upload" && phase === "uploaded" && protocolId !== ""
-  const canRunServerTab = tab === "server" && sourceDir.trim() !== "" && protocolId !== "" && !isRunning
+  const canRunUploadTab = tab === "upload" && phase === "uploaded" && protocolId !== "" && selectedProjectId !== ""
+  const canRunServerTab = tab === "server" && sourceDir.trim() !== "" && protocolId !== "" && selectedProjectId !== "" && !isRunning
 
   // ---- Result view ----
 
@@ -339,6 +356,17 @@ export function JobSubmit() {
                 Protocol applied: {selectedProtocol.name}
               </p>
             )}
+            {selectedProjectId && (
+              <div className="rounded-md bg-blue-50 border border-blue-200 px-4 py-2 text-sm text-blue-800">
+                Job linked to project.{" "}
+                <Link
+                  to={`/projects/${selectedProjectId}`}
+                  className="font-medium underline hover:text-blue-600"
+                >
+                  View Project Jobs tab &rarr;
+                </Link>
+              </div>
+            )}
             <div className="flex gap-3 pt-2">
               <button
                 onClick={() => navigate("/queues/low_confidence")}
@@ -346,6 +374,14 @@ export function JobSubmit() {
               >
                 View Review Queue &rarr;
               </button>
+              {selectedProjectId && (
+                <button
+                  onClick={() => navigate(`/projects/${selectedProjectId}`)}
+                  className="rounded-md border px-4 py-2 text-sm font-medium hover:bg-accent"
+                >
+                  Go to Project
+                </button>
+              )}
               <button
                 onClick={handleReset}
                 className="rounded-md border px-4 py-2 text-sm font-medium hover:bg-accent"
@@ -575,10 +611,32 @@ export function JobSubmit() {
                 </div>
               )}
 
+              {/* Project select — required */}
+              {(tab === "server" || phase === "uploaded") && (
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium">Project *</label>
+                  <select
+                    value={selectedProjectId}
+                    onChange={(e) => setSelectedProjectId(e.target.value)}
+                    className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+                  >
+                    <option value="">Select a project...</option>
+                    {(projects ?? []).map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name} ({p.status})
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-muted-foreground">
+                    Jobs must be linked to a project for tracking and analysis.
+                  </p>
+                </div>
+              )}
+
               {/* Protocol select — shared */}
               {(tab === "server" || phase === "uploaded") && (
                 <div className="space-y-1.5">
-                  <label className="text-sm font-medium">Protocol</label>
+                  <label className="text-sm font-medium">Protocol *</label>
                   <select
                     value={protocolId}
                     onChange={(e) => setProtocolId(e.target.value)}

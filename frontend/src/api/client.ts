@@ -509,6 +509,104 @@ export function getExportDownloadUrl(projectId: string, exportId: string): strin
 }
 
 // ---------------------------------------------------------------------------
+// Job Workflow (Step 8b)
+// ---------------------------------------------------------------------------
+
+/** Summary of a job (ingestion run) returned by project jobs or recent jobs endpoints. */
+export interface JobSummary {
+  id: string
+  project_id: string | null
+  status: string
+  source_path: string | null
+  started_at: string | null
+  completed_at: string | null
+  created_at: string | null
+  document_count: number
+  duration_seconds: number | null
+  error_summary: string | null
+}
+
+/** A single pipeline stage status within a job. */
+export interface PipelineStageStatus {
+  name: string
+  status: string
+  started_at: string | null
+  completed_at: string | null
+  error_count: number
+}
+
+/** Full pipeline status response from GET /jobs/{id}/status. */
+export interface JobPipelineStatus {
+  id: string
+  status: string
+  project_id: string | null
+  current_stage: string | null
+  progress_pct: number
+  stages: PipelineStageStatus[]
+  started_at: string | null
+  completed_at: string | null
+  created_at: string | null
+  error_summary: string | null
+}
+
+/** Request body for POST /jobs/run (polling mode). */
+export interface RunJobBody {
+  protocol_id: string
+  source_directory?: string
+  upload_id?: string
+  project_id?: string
+  protocol_config_id?: string
+}
+
+/** Response from POST /jobs/run. */
+export interface RunJobResponse {
+  job_id: string
+  status: string
+  project_id: string | null
+  protocol_config_id: string | null
+}
+
+/** Request body for PATCH /jobs/{id} — link job to project. */
+export interface PatchJobBody {
+  project_id: string
+}
+
+/** Get jobs linked to a project. */
+export function getProjectJobs(projectId: string): Promise<JobSummary[]> {
+  return api(`/projects/${projectId}/jobs`)
+}
+
+/** Get pipeline status for a job (8-stage breakdown). */
+export function getJobPipelineStatus(jobId: string): Promise<JobPipelineStatus> {
+  return api(`/jobs/${jobId}/status`)
+}
+
+/** Create a new job and return immediately for polling. */
+export function runJob(body: RunJobBody): Promise<RunJobResponse> {
+  return api("/jobs/run", {
+    method: "POST",
+    body: JSON.stringify(body),
+  })
+}
+
+/** Get recent jobs, optionally filtered to unlinked only. */
+export function getRecentJobs(unlinked = false, limit = 50): Promise<JobSummary[]> {
+  const params = new URLSearchParams()
+  if (unlinked) params.set("unlinked", "true")
+  if (limit !== 50) params.set("limit", String(limit))
+  const qs = params.toString()
+  return api(`/jobs/recent${qs ? `?${qs}` : ""}`)
+}
+
+/** Link an existing job to a project. */
+export function linkJobToProject(jobId: string, projectId: string): Promise<JobSummary> {
+  return api(`/jobs/${jobId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ project_id: projectId }),
+  })
+}
+
+// ---------------------------------------------------------------------------
 // Diagnostic
 // ---------------------------------------------------------------------------
 

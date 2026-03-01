@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo, useRef } from "react"
+import { useState, useCallback, useMemo, useRef, useEffect } from "react"
 import { useParams, Link } from "react-router-dom"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import {
@@ -23,6 +23,10 @@ import {
   Play,
   Link as LinkIcon,
   Search,
+  Circle,
+  AlertCircle,
+  Clock,
+  Briefcase,
 } from "lucide-react"
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -40,6 +44,11 @@ import {
   submitJobStreaming,
   getBaseProtocols,
   getProtocols,
+  getProjectJobs,
+  getJobPipelineStatus,
+  runJob,
+  getRecentJobs,
+  linkJobToProject,
 } from "@/api/client"
 import type {
   ProjectDetail as ProjectDetailType,
@@ -50,18 +59,22 @@ import type {
   UploadResult,
   PipelineProgress,
   JobResult,
+  JobSummary,
+  JobPipelineStatus,
+  PipelineStageStatus,
 } from "@/api/client"
 
 // ---------------------------------------------------------------------------
 // Tab type
 // ---------------------------------------------------------------------------
 
-type TabId = "overview" | "protocols" | "catalog" | "density" | "exports"
+type TabId = "overview" | "protocols" | "catalog" | "jobs" | "density" | "exports"
 
 const TABS: { id: TabId; label: string; icon: typeof FileText }[] = [
   { id: "overview", label: "Overview", icon: FileText },
   { id: "protocols", label: "Protocols", icon: Shield },
   { id: "catalog", label: "Catalog", icon: BarChart3 },
+  { id: "jobs", label: "Jobs", icon: Briefcase },
   { id: "density", label: "Density", icon: BarChart3 },
   { id: "exports", label: "Exports", icon: Download },
 ]
@@ -80,6 +93,20 @@ const PROTOCOL_STATUS_STYLES: Record<string, string> = {
   draft: "bg-yellow-100 text-yellow-800 border-yellow-300",
   active: "bg-green-100 text-green-800 border-green-300",
   locked: "bg-gray-100 text-gray-600 border-gray-300",
+}
+
+const JOB_STATUS_STYLES: Record<string, string> = {
+  pending: "bg-yellow-100 text-yellow-800 border-yellow-300",
+  running: "bg-blue-100 text-blue-800 border-blue-300",
+  completed: "bg-green-100 text-green-800 border-green-300",
+  failed: "bg-red-100 text-red-800 border-red-300",
+}
+
+const STAGE_STATUS_ICON_MAP: Record<string, string> = {
+  completed: "green",
+  running: "blue",
+  failed: "red",
+  pending: "gray",
 }
 
 // ---------------------------------------------------------------------------
@@ -1008,6 +1035,494 @@ function ProtocolConfigCard({ config }: { config: ProtocolConfigSummary }) {
             </pre>
           </div>
         </div>
+      )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Jobs tab — pipeline progress component
+// ---------------------------------------------------------------------------
+
+/** 8-stage pipeline architecture */
+const PIPELINE_STAGES_8 = [
+  "Discovery",
+  "Cataloging",
+  "PII Detection",
+  "PII Extraction",
+  "Normalization",
+  "Entity Resolution",
+  "Quality Assurance",
+  "Notification",
+] as const
+
+function StageIcon({ status }: { status: string }) {
+  switch (status) {
+    case "completed":
+      return <CheckCircle className="h-4 w-4 text-green-600" />
+    case "running":
+      return <Loader2 className="h-4 w-4 text-primary animate-spin" />
+    case "failed":
+      return <AlertCircle className="h-4 w-4 text-red-500" />
+    default:
+      return <Circle className="h-4 w-4 text-muted-foreground/40" />
+  }
+}
+
+function PipelineProgressView({ jobId }: { jobId: string }) {
+  const { data: status, isLoading } = useQuery({
+    queryKey: ["job-status", jobId],
+    queryFn: () => getJobPipelineStatus(jobId),
+    refetchInterval: (query) => {
+      const d = query.state.data
+      if (d && (d.status === "completed" || d.status === "failed")) return false
+      return 3_000
+    },
+  })
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center gap-2 py-2 text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin" />
+        <span className="text-xs">Loading pipeline status...</span>
+      </div>
+    )
+  }
+
+  if (!status) return null
+
+  return (
+    <div className="space-y-2 pt-2">
+      {/* Progress bar */}
+      <div className="flex items-center gap-3">
+        <div className="flex-1 bg-secondary rounded-full h-2">
+          <div
+            className="bg-primary h-2 rounded-full transition-all"
+            style={{ width: `${status.progress_pct}%` }}
+          />
+        </div>
+        <span className="text-xs font-medium text-muted-foreground w-12 text-right">
+          {status.progress_pct}%
+        </span>
+      </div>
+
+      {/* Stage list */}
+      <div className="space-y-0.5">
+        {status.stages.map((stage) => (
+          <div key={stage.name} className="flex items-center gap-2.5 py-1">
+            <StageIcon status={stage.status} />
+            <span
+              className={`text-xs font-medium ${
+                stage.status === "pending" ? "text-muted-foreground/50" : ""
+              }`}
+            >
+              {stage.name}
+            </span>
+            {stage.error_count > 0 && (
+              <span className="text-xs text-red-500">
+                ({stage.error_count} error{stage.error_count !== 1 ? "s" : ""})
+              </span>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {status.error_summary && (
+        <div className="rounded-md bg-red-50 border border-red-200 px-3 py-2 text-xs text-red-800 mt-2">
+          {status.error_summary}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Jobs tab
+// ---------------------------------------------------------------------------
+
+function formatDuration(seconds: number | null): string {
+  if (seconds == null) return "--"
+  if (seconds < 60) return `${Math.round(seconds)}s`
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${Math.round(seconds % 60)}s`
+  return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`
+}
+
+function formatDate(iso: string | null): string {
+  if (!iso) return "--"
+  try {
+    return formatDistanceToNow(parseISO(iso), { addSuffix: true })
+  } catch {
+    return iso
+  }
+}
+
+function JobsTab({
+  projectId,
+  protocols,
+  onJobCompleted,
+}: {
+  projectId: string
+  protocols: ProtocolConfigSummary[]
+  onJobCompleted: () => void
+}) {
+  const queryClient = useQueryClient()
+  const [expandedJobId, setExpandedJobId] = useState<string | null>(null)
+  const [showRunJob, setShowRunJob] = useState(false)
+  const [showLinkJob, setShowLinkJob] = useState(false)
+
+  // Run job state
+  const [runProtocolId, setRunProtocolId] = useState("")
+  const [runProtocolConfigId, setRunProtocolConfigId] = useState("")
+  const [isRunning, setIsRunning] = useState(false)
+  const [runError, setRunError] = useState<string | null>(null)
+
+  // Link job state
+  const [linkError, setLinkError] = useState<string | null>(null)
+  const [linkSuccess, setLinkSuccess] = useState<string | null>(null)
+  const [isLinking, setIsLinking] = useState(false)
+  const [selectedLinkJobId, setSelectedLinkJobId] = useState("")
+
+  // Fetch jobs for this project
+  const { data: jobs, isLoading } = useQuery({
+    queryKey: ["project-jobs", projectId],
+    queryFn: () => getProjectJobs(projectId),
+    refetchInterval: 10_000,
+  })
+
+  // Fetch base protocols for run job selector
+  const { data: baseProtocols } = useQuery({
+    queryKey: ["base-protocols"],
+    queryFn: getBaseProtocols,
+  })
+
+  // Fetch recent unlinked jobs for link dropdown
+  const { data: unlinkedJobs } = useQuery({
+    queryKey: ["recent-unlinked-jobs"],
+    queryFn: () => getRecentJobs(true, 50),
+    enabled: showLinkJob,
+  })
+
+  // Watch for job completion to trigger cache invalidation
+  const prevJobsRef = useRef<JobSummary[] | undefined>(undefined)
+  useEffect(() => {
+    if (!jobs || !prevJobsRef.current) {
+      prevJobsRef.current = jobs
+      return
+    }
+    const prev = prevJobsRef.current
+    for (const job of jobs) {
+      const prevJob = prev.find((j) => j.id === job.id)
+      if (prevJob && prevJob.status !== "completed" && job.status === "completed") {
+        onJobCompleted()
+        break
+      }
+    }
+    prevJobsRef.current = jobs
+  }, [jobs, onJobCompleted])
+
+  // Run new job handler
+  async function handleRunJob() {
+    if (!runProtocolId) return
+    setIsRunning(true)
+    setRunError(null)
+
+    try {
+      const body: Record<string, string> = {
+        protocol_id: runProtocolId,
+        project_id: projectId,
+      }
+      if (runProtocolConfigId) {
+        body.protocol_config_id = runProtocolConfigId
+      }
+
+      await runJob(body as Parameters<typeof runJob>[0])
+      setShowRunJob(false)
+      setRunProtocolId("")
+      setRunProtocolConfigId("")
+      queryClient.invalidateQueries({ queryKey: ["project-jobs", projectId] })
+    } catch (err) {
+      setRunError(err instanceof Error ? err.message : "Failed to start job")
+    } finally {
+      setIsRunning(false)
+    }
+  }
+
+  // Link existing job handler
+  async function handleLinkJob() {
+    if (!selectedLinkJobId) return
+    setIsLinking(true)
+    setLinkError(null)
+    setLinkSuccess(null)
+
+    try {
+      await linkJobToProject(selectedLinkJobId, projectId)
+      setLinkSuccess("Job linked successfully")
+      setSelectedLinkJobId("")
+      queryClient.invalidateQueries({ queryKey: ["project-jobs", projectId] })
+      queryClient.invalidateQueries({ queryKey: ["recent-unlinked-jobs"] })
+    } catch (err) {
+      setLinkError(err instanceof Error ? err.message : "Failed to link job")
+    } finally {
+      setIsLinking(false)
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Action buttons */}
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-semibold">Project Jobs</h3>
+        <div className="flex gap-2">
+          <button
+            onClick={() => {
+              setShowLinkJob(!showLinkJob)
+              if (showRunJob) setShowRunJob(false)
+            }}
+            className="rounded-md border px-3 py-1.5 text-xs font-medium hover:bg-accent flex items-center gap-1"
+          >
+            <LinkIcon className="h-3 w-3" />
+            Link Existing Job
+          </button>
+          <button
+            onClick={() => {
+              setShowRunJob(!showRunJob)
+              if (showLinkJob) setShowLinkJob(false)
+            }}
+            className="rounded-md bg-primary text-primary-foreground px-3 py-1.5 text-xs font-medium flex items-center gap-1"
+          >
+            <Play className="h-3 w-3" />
+            Run New Job
+          </button>
+        </div>
+      </div>
+
+      {/* Run New Job form */}
+      {showRunJob && (
+        <Card>
+          <CardContent className="pt-4 space-y-3">
+            <p className="text-sm font-medium">Run New Job</p>
+            {runError && (
+              <div className="rounded-md bg-red-50 border border-red-200 px-4 py-2 text-sm text-red-800">
+                {runError}
+              </div>
+            )}
+
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">Base Protocol *</label>
+              <select
+                value={runProtocolId}
+                onChange={(e) => setRunProtocolId(e.target.value)}
+                className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+              >
+                <option value="">Select a protocol...</option>
+                {(baseProtocols ?? []).map((p) => (
+                  <option key={p.protocol_id} value={p.protocol_id}>
+                    {p.name} -- {p.jurisdiction} ({p.notification_deadline_days}d deadline)
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {protocols.length > 0 && (
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-muted-foreground">
+                  Project protocol config (optional):
+                </label>
+                <select
+                  value={runProtocolConfigId}
+                  onChange={(e) => {
+                    setRunProtocolConfigId(e.target.value)
+                    const pc = protocols.find((p) => p.id === e.target.value)
+                    if (pc?.base_protocol_id) setRunProtocolId(pc.base_protocol_id)
+                  }}
+                  className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+                >
+                  <option value="">None</option>
+                  {protocols.map((pc) => (
+                    <option key={pc.id} value={pc.id}>
+                      {pc.name} ({pc.status})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            <div className="flex gap-2 pt-1">
+              <button
+                onClick={handleRunJob}
+                disabled={!runProtocolId || isRunning}
+                className="rounded-md bg-primary text-primary-foreground px-4 py-2 text-sm font-medium disabled:opacity-50 flex items-center gap-2"
+              >
+                {isRunning ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Play className="h-4 w-4" />
+                )}
+                {isRunning ? "Starting..." : "Start Job"}
+              </button>
+              <button
+                onClick={() => {
+                  setShowRunJob(false)
+                  setRunError(null)
+                }}
+                className="rounded-md border px-4 py-2 text-sm font-medium hover:bg-accent"
+              >
+                Cancel
+              </button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Link Existing Job form */}
+      {showLinkJob && (
+        <Card>
+          <CardContent className="pt-4 space-y-3">
+            <p className="text-sm font-medium">Link Existing Job</p>
+            <p className="text-xs text-muted-foreground">
+              Associate an unlinked job with this project.
+            </p>
+
+            {linkError && (
+              <div className="rounded-md bg-red-50 border border-red-200 px-4 py-2 text-sm text-red-800">
+                {linkError}
+              </div>
+            )}
+            {linkSuccess && (
+              <div className="rounded-md bg-green-50 border border-green-200 px-4 py-2 text-sm text-green-800 flex items-center gap-2">
+                <CheckCircle className="h-3.5 w-3.5" />
+                {linkSuccess}
+              </div>
+            )}
+
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">Select an unlinked job</label>
+              <select
+                value={selectedLinkJobId}
+                onChange={(e) => setSelectedLinkJobId(e.target.value)}
+                className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+              >
+                <option value="">Select a job...</option>
+                {(unlinkedJobs ?? []).map((j) => (
+                  <option key={j.id} value={j.id}>
+                    {j.id.slice(0, 8)}... -- {formatDate(j.created_at)} -- {j.document_count} doc{j.document_count !== 1 ? "s" : ""} -- {j.status}
+                  </option>
+                ))}
+              </select>
+              {unlinkedJobs && unlinkedJobs.length === 0 && (
+                <p className="text-xs text-muted-foreground">No unlinked jobs available.</p>
+              )}
+            </div>
+
+            <div className="flex gap-2 pt-1">
+              <button
+                onClick={handleLinkJob}
+                disabled={!selectedLinkJobId || isLinking}
+                className="rounded-md bg-primary text-primary-foreground px-4 py-2 text-sm font-medium disabled:opacity-50 flex items-center gap-2"
+              >
+                {isLinking ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <LinkIcon className="h-4 w-4" />
+                )}
+                {isLinking ? "Linking..." : "Link Job"}
+              </button>
+              <button
+                onClick={() => {
+                  setShowLinkJob(false)
+                  setLinkError(null)
+                  setLinkSuccess(null)
+                }}
+                className="rounded-md border px-4 py-2 text-sm font-medium hover:bg-accent"
+              >
+                Cancel
+              </button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Jobs table */}
+      {isLoading ? (
+        <div className="flex items-center justify-center py-12 text-muted-foreground">
+          <Loader2 className="h-5 w-5 animate-spin mr-2" />
+          Loading jobs...
+        </div>
+      ) : !jobs || jobs.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+          <Briefcase className="h-10 w-10 mb-2 opacity-40" />
+          <p className="text-sm">No jobs linked to this project</p>
+          <p className="text-xs mt-1">Run a new job or link an existing one above</p>
+        </div>
+      ) : (
+        <Card>
+          <CardContent className="p-0">
+            <div className="rounded-lg border-0">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b bg-muted/50">
+                    <th className="px-4 py-2.5 text-left font-medium">Job ID</th>
+                    <th className="px-4 py-2.5 text-left font-medium">Status</th>
+                    <th className="px-4 py-2.5 text-left font-medium">Created</th>
+                    <th className="px-4 py-2.5 text-right font-medium">Docs</th>
+                    <th className="px-4 py-2.5 text-right font-medium">Duration</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {jobs.map((job) => {
+                    const isExpanded = expandedJobId === job.id
+                    return (
+                      <tr key={job.id} className="group">
+                        <td colSpan={5} className="p-0">
+                          <button
+                            onClick={() => setExpandedJobId(isExpanded ? null : job.id)}
+                            className="w-full text-left hover:bg-accent/50 transition-colors"
+                          >
+                            <div className="grid grid-cols-[1fr_auto_1fr_auto_auto] items-center">
+                              <span className="px-4 py-2.5 font-mono text-xs">
+                                {job.id.slice(0, 8)}...
+                              </span>
+                              <span className="px-4 py-2.5">
+                                <Badge
+                                  variant="outline"
+                                  className={`${JOB_STATUS_STYLES[job.status] ?? ""} text-xs`}
+                                >
+                                  {job.status}
+                                </Badge>
+                              </span>
+                              <span className="px-4 py-2.5 text-xs text-muted-foreground">
+                                {formatDate(job.created_at)}
+                              </span>
+                              <span className="px-4 py-2.5 text-right text-xs font-medium">
+                                {job.document_count}
+                              </span>
+                              <span className="px-4 py-2.5 text-right text-xs text-muted-foreground">
+                                {formatDuration(job.duration_seconds)}
+                              </span>
+                            </div>
+                          </button>
+                          {isExpanded && (
+                            <div className="border-t bg-muted/20 px-4 py-3">
+                              <p className="text-xs font-medium text-muted-foreground mb-2">
+                                Pipeline Progress
+                              </p>
+                              <PipelineProgressView jobId={job.id} />
+                              {job.error_summary && (
+                                <div className="rounded-md bg-red-50 border border-red-200 px-3 py-2 text-xs text-red-800 mt-3">
+                                  <span className="font-medium">Error:</span> {job.error_summary}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
       )}
     </div>
   )
@@ -2043,6 +2558,12 @@ export function ProjectDetail() {
     queryClient.invalidateQueries({ queryKey: ["projects"] })
   }
 
+  /** Called when a job linked to this project completes -- auto-refresh catalog + density. */
+  const handleJobCompleted = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: ["catalog-summary", projectId] })
+    queryClient.invalidateQueries({ queryKey: ["density", projectId] })
+  }, [queryClient, projectId])
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-16 text-muted-foreground">
@@ -2116,6 +2637,13 @@ export function ProjectDetail() {
       {activeTab === "protocols" && <ProtocolsTab project={project} />}
       {activeTab === "catalog" && (
         <CatalogTab projectId={projectId} protocols={project.protocols} />
+      )}
+      {activeTab === "jobs" && (
+        <JobsTab
+          projectId={projectId}
+          protocols={project.protocols}
+          onJobCompleted={handleJobCompleted}
+        />
       )}
       {activeTab === "density" && <DensityTab projectId={projectId} />}
       {activeTab === "exports" && <ExportsTab projectId={projectId} />}

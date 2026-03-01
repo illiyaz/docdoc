@@ -29,8 +29,10 @@ from app.api.deps import get_db
 from app.db.base import Base
 from app.db.models import (
     AuditEvent,
+    IngestionRun,
     NotificationList,
     NotificationSubject,
+    Project,
     ReviewTask,
 )
 
@@ -796,7 +798,7 @@ class TestUploadFiles:
         assert "not found or expired" in resp.json()["detail"]
 
     def test_streaming_run_emits_all_stages(self, client: TestClient) -> None:
-        """POST /jobs/run returns SSE events for each pipeline stage."""
+        """POST /jobs/run/stream returns SSE events for each pipeline stage."""
         from unittest.mock import patch, MagicMock
 
         # Upload a file first
@@ -834,7 +836,7 @@ class TestUploadFiles:
                 patch("app.pii.presidio_engine.PresidioEngine", return_value=_FakeEngine()),
             ):
                 resp = client.post(
-                    "/jobs/run",
+                    "/jobs/run/stream",
                     json={"protocol_id": "hipaa_breach_rule", "upload_id": upload_id},
                 )
 
@@ -1064,3 +1066,408 @@ class TestBaseProtocols:
             assert "jurisdiction" in p
             assert "regulatory_framework" in p
             assert "notification_deadline_days" in p
+
+
+# ---------------------------------------------------------------------------
+# Step 8b helpers
+# ---------------------------------------------------------------------------
+
+
+def _make_project(db_session: Session, name: str = "Test Project") -> Project:
+    project = Project(name=name)
+    db_session.add(project)
+    db_session.flush()
+    return project
+
+
+def _make_ingestion_run(
+    db_session: Session,
+    *,
+    project_id=None,
+    status: str = "pending",
+    source_path: str = "/data/test",
+    started_at=None,
+    completed_at=None,
+    metrics: dict | None = None,
+    error_summary: str | None = None,
+) -> IngestionRun:
+    run = IngestionRun(
+        id=uuid4(),
+        project_id=project_id,
+        source_path=source_path,
+        config_hash="abc123",
+        code_version="0.1.0",
+        initiated_by="test",
+        status=status,
+        started_at=started_at,
+        completed_at=completed_at,
+        metrics=metrics,
+        error_summary=error_summary,
+    )
+    db_session.add(run)
+    db_session.flush()
+    return run
+
+
+# ===========================================================================
+# GET /projects/{id}/jobs (Step 8b)
+# ===========================================================================
+
+
+class TestProjectJobs:
+    def test_list_jobs_for_project(self, db_session: Session, client: TestClient) -> None:
+        project = _make_project(db_session)
+        run = _make_ingestion_run(db_session, project_id=project.id, status="completed")
+        resp = client.get(f"/projects/{project.id}/jobs")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data) == 1
+        assert data[0]["id"] == str(run.id)
+        assert data[0]["status"] == "completed"
+        assert data[0]["project_id"] == str(project.id)
+
+    def test_empty_project_returns_empty_list(self, db_session: Session, client: TestClient) -> None:
+        project = _make_project(db_session)
+        resp = client.get(f"/projects/{project.id}/jobs")
+        assert resp.status_code == 200
+        assert resp.json() == []
+
+    def test_project_not_found(self, client: TestClient) -> None:
+        resp = client.get(f"/projects/{uuid4()}/jobs")
+        assert resp.status_code == 404
+
+    def test_only_returns_project_jobs(self, db_session: Session, client: TestClient) -> None:
+        """Jobs for other projects or unlinked jobs should not appear."""
+        p1 = _make_project(db_session, name="P1")
+        p2 = _make_project(db_session, name="P2")
+        _make_ingestion_run(db_session, project_id=p1.id)
+        _make_ingestion_run(db_session, project_id=p2.id)
+        _make_ingestion_run(db_session)  # unlinked
+
+        resp = client.get(f"/projects/{p1.id}/jobs")
+        assert resp.status_code == 200
+        assert len(resp.json()) == 1
+
+    def test_response_shape(self, db_session: Session, client: TestClient) -> None:
+        project = _make_project(db_session)
+        _make_ingestion_run(
+            db_session,
+            project_id=project.id,
+            started_at=datetime(2025, 1, 1, tzinfo=timezone.utc),
+            completed_at=datetime(2025, 1, 1, 0, 5, 0, tzinfo=timezone.utc),
+        )
+        resp = client.get(f"/projects/{project.id}/jobs")
+        job = resp.json()[0]
+        assert "id" in job
+        assert "project_id" in job
+        assert "status" in job
+        assert "source_path" in job
+        assert "started_at" in job
+        assert "completed_at" in job
+        assert "created_at" in job
+        assert "document_count" in job
+        assert "duration_seconds" in job
+        assert job["duration_seconds"] == 300.0
+
+    def test_duration_none_when_not_completed(self, db_session: Session, client: TestClient) -> None:
+        project = _make_project(db_session)
+        _make_ingestion_run(db_session, project_id=project.id, status="running")
+        resp = client.get(f"/projects/{project.id}/jobs")
+        assert resp.json()[0]["duration_seconds"] is None
+
+
+# ===========================================================================
+# GET /jobs/{job_id}/status (Step 8b)
+# ===========================================================================
+
+
+class TestJobStatus:
+    def test_returns_status(self, db_session: Session, client: TestClient) -> None:
+        run = _make_ingestion_run(db_session, status="running")
+        resp = client.get(f"/jobs/{run.id}/status")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["id"] == str(run.id)
+        assert data["status"] == "running"
+
+    def test_not_found(self, client: TestClient) -> None:
+        resp = client.get(f"/jobs/{uuid4()}/status")
+        assert resp.status_code == 404
+
+    def test_has_8_stages(self, db_session: Session, client: TestClient) -> None:
+        run = _make_ingestion_run(db_session)
+        resp = client.get(f"/jobs/{run.id}/status")
+        data = resp.json()
+        assert len(data["stages"]) == 8
+        stage_names = [s["name"] for s in data["stages"]]
+        assert "Discovery" in stage_names
+        assert "Cataloging" in stage_names
+        assert "PII Detection" in stage_names
+        assert "PII Extraction" in stage_names
+        assert "Normalization" in stage_names
+        assert "Entity Resolution" in stage_names
+        assert "Quality Assurance" in stage_names
+        assert "Notification" in stage_names
+
+    def test_completed_run_all_stages_completed(self, db_session: Session, client: TestClient) -> None:
+        run = _make_ingestion_run(db_session, status="completed")
+        resp = client.get(f"/jobs/{run.id}/status")
+        data = resp.json()
+        assert data["progress_pct"] == 100.0
+        for stage in data["stages"]:
+            assert stage["status"] == "completed"
+
+    def test_pending_run_no_progress(self, db_session: Session, client: TestClient) -> None:
+        run = _make_ingestion_run(db_session, status="pending")
+        resp = client.get(f"/jobs/{run.id}/status")
+        data = resp.json()
+        assert data["progress_pct"] == 0.0
+        assert data["current_stage"] == "Discovery"
+
+    def test_with_metrics_stages(self, db_session: Session, client: TestClient) -> None:
+        """When metrics.stages is populated, those statuses are used."""
+        metrics = {
+            "stages": {
+                "Discovery": {"status": "completed"},
+                "Cataloging": {"status": "completed"},
+                "PII Detection": {"status": "running"},
+            }
+        }
+        run = _make_ingestion_run(db_session, status="running", metrics=metrics)
+        resp = client.get(f"/jobs/{run.id}/status")
+        data = resp.json()
+        assert data["current_stage"] == "PII Detection"
+        assert data["progress_pct"] == 25.0  # 2/8 completed
+
+    def test_response_shape(self, db_session: Session, client: TestClient) -> None:
+        run = _make_ingestion_run(db_session)
+        resp = client.get(f"/jobs/{run.id}/status")
+        data = resp.json()
+        assert "id" in data
+        assert "status" in data
+        assert "project_id" in data
+        assert "current_stage" in data
+        assert "progress_pct" in data
+        assert "stages" in data
+        assert "started_at" in data
+        assert "completed_at" in data
+        assert "created_at" in data
+        assert "error_summary" in data
+
+    def test_stage_shape(self, db_session: Session, client: TestClient) -> None:
+        run = _make_ingestion_run(db_session)
+        resp = client.get(f"/jobs/{run.id}/status")
+        stage = resp.json()["stages"][0]
+        assert "name" in stage
+        assert "status" in stage
+        assert "started_at" in stage
+        assert "completed_at" in stage
+        assert "error_count" in stage
+
+    def test_failed_run_stages(self, db_session: Session, client: TestClient) -> None:
+        run = _make_ingestion_run(db_session, status="failed", error_summary="Out of memory")
+        resp = client.get(f"/jobs/{run.id}/status")
+        data = resp.json()
+        assert data["error_summary"] == "Out of memory"
+        for stage in data["stages"]:
+            assert stage["status"] == "failed"
+
+
+# ===========================================================================
+# POST /jobs/run (Step 8b — returns job_id for polling)
+# ===========================================================================
+
+
+class TestRunJobPolling:
+    def test_returns_job_id(self, db_session: Session, client: TestClient) -> None:
+        resp = client.post(
+            "/jobs/run",
+            json={
+                "protocol_id": "hipaa_breach_rule",
+                "source_directory": "/data/test",
+            },
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "job_id" in data
+        assert data["status"] == "pending"
+
+    def test_with_project_id(self, db_session: Session, client: TestClient) -> None:
+        project = _make_project(db_session)
+        resp = client.post(
+            "/jobs/run",
+            json={
+                "protocol_id": "hipaa_breach_rule",
+                "source_directory": "/data/test",
+                "project_id": str(project.id),
+            },
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["project_id"] == str(project.id)
+
+    def test_with_protocol_config_id(self, db_session: Session, client: TestClient) -> None:
+        resp = client.post(
+            "/jobs/run",
+            json={
+                "protocol_id": "hipaa_breach_rule",
+                "source_directory": "/data/test",
+                "protocol_config_id": str(uuid4()),
+            },
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["protocol_config_id"] is not None
+
+    def test_invalid_protocol_returns_400(self, client: TestClient) -> None:
+        resp = client.post(
+            "/jobs/run",
+            json={
+                "protocol_id": "nonexistent",
+                "source_directory": "/data/test",
+            },
+        )
+        assert resp.status_code == 400
+
+    def test_job_is_pollable_via_status(self, db_session: Session, client: TestClient) -> None:
+        """After POST /jobs/run, the job should be queryable via GET /jobs/{id}/status."""
+        run_resp = client.post(
+            "/jobs/run",
+            json={
+                "protocol_id": "hipaa_breach_rule",
+                "source_directory": "/data/test",
+            },
+        )
+        job_id = run_resp.json()["job_id"]
+        status_resp = client.get(f"/jobs/{job_id}/status")
+        assert status_resp.status_code == 200
+        assert status_resp.json()["status"] == "pending"
+
+
+# ===========================================================================
+# GET /jobs/recent (Step 8b)
+# ===========================================================================
+
+
+class TestRecentJobs:
+    def test_returns_recent_jobs(self, db_session: Session, client: TestClient) -> None:
+        _make_ingestion_run(db_session)
+        _make_ingestion_run(db_session)
+        resp = client.get("/jobs/recent")
+        assert resp.status_code == 200
+        assert len(resp.json()) == 2
+
+    def test_empty_returns_empty_list(self, client: TestClient) -> None:
+        resp = client.get("/jobs/recent")
+        assert resp.status_code == 200
+        assert resp.json() == []
+
+    def test_unlinked_only(self, db_session: Session, client: TestClient) -> None:
+        project = _make_project(db_session)
+        _make_ingestion_run(db_session, project_id=project.id)  # linked
+        _make_ingestion_run(db_session)  # unlinked
+        _make_ingestion_run(db_session)  # unlinked
+
+        resp = client.get("/jobs/recent?unlinked=true")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data) == 2
+        for job in data:
+            assert job["project_id"] is None
+
+    def test_all_jobs_when_unlinked_false(self, db_session: Session, client: TestClient) -> None:
+        project = _make_project(db_session)
+        _make_ingestion_run(db_session, project_id=project.id)
+        _make_ingestion_run(db_session)
+        resp = client.get("/jobs/recent?unlinked=false")
+        assert resp.status_code == 200
+        assert len(resp.json()) == 2
+
+    def test_limit_parameter(self, db_session: Session, client: TestClient) -> None:
+        for _ in range(5):
+            _make_ingestion_run(db_session)
+        resp = client.get("/jobs/recent?limit=3")
+        assert resp.status_code == 200
+        assert len(resp.json()) == 3
+
+    def test_response_shape(self, db_session: Session, client: TestClient) -> None:
+        _make_ingestion_run(db_session)
+        resp = client.get("/jobs/recent")
+        job = resp.json()[0]
+        assert "id" in job
+        assert "project_id" in job
+        assert "status" in job
+        assert "source_path" in job
+        assert "created_at" in job
+        assert "document_count" in job
+
+
+# ===========================================================================
+# PATCH /jobs/{job_id} (Step 8b — link job to project)
+# ===========================================================================
+
+
+class TestPatchJob:
+    def test_link_job_to_project(self, db_session: Session, client: TestClient) -> None:
+        project = _make_project(db_session)
+        run = _make_ingestion_run(db_session)
+        resp = client.patch(
+            f"/jobs/{run.id}",
+            json={"project_id": str(project.id)},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["project_id"] == str(project.id)
+
+    def test_job_not_found(self, client: TestClient) -> None:
+        resp = client.patch(
+            f"/jobs/{uuid4()}",
+            json={"project_id": str(uuid4())},
+        )
+        assert resp.status_code == 404
+
+    def test_project_not_found(self, db_session: Session, client: TestClient) -> None:
+        run = _make_ingestion_run(db_session)
+        resp = client.patch(
+            f"/jobs/{run.id}",
+            json={"project_id": str(uuid4())},
+        )
+        assert resp.status_code == 404
+        assert "Project" in resp.json()["detail"]
+
+    def test_already_linked_same_project_is_idempotent(self, db_session: Session, client: TestClient) -> None:
+        project = _make_project(db_session)
+        run = _make_ingestion_run(db_session, project_id=project.id)
+        resp = client.patch(
+            f"/jobs/{run.id}",
+            json={"project_id": str(project.id)},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["project_id"] == str(project.id)
+
+    def test_already_linked_different_project_returns_409(self, db_session: Session, client: TestClient) -> None:
+        p1 = _make_project(db_session, name="P1")
+        p2 = _make_project(db_session, name="P2")
+        run = _make_ingestion_run(db_session, project_id=p1.id)
+        resp = client.patch(
+            f"/jobs/{run.id}",
+            json={"project_id": str(p2.id)},
+        )
+        assert resp.status_code == 409
+        assert "already linked" in resp.json()["detail"]
+
+    def test_linked_job_appears_in_project_jobs(self, db_session: Session, client: TestClient) -> None:
+        project = _make_project(db_session)
+        run = _make_ingestion_run(db_session)
+
+        # Initially no jobs for the project
+        resp1 = client.get(f"/projects/{project.id}/jobs")
+        assert len(resp1.json()) == 0
+
+        # Link the job
+        client.patch(f"/jobs/{run.id}", json={"project_id": str(project.id)})
+
+        # Now the job should appear
+        resp2 = client.get(f"/projects/{project.id}/jobs")
+        assert len(resp2.json()) == 1
+        assert resp2.json()[0]["id"] == str(run.id)

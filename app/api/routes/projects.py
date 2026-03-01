@@ -6,6 +6,7 @@ GET    /projects/{id}       — project detail with attached protocols
 PATCH  /projects/{id}       — update project
 GET    /projects/{id}/catalog-summary — catalog breakdown (Step 3)
 GET    /projects/{id}/density         — density summary (Step 4)
+GET    /projects/{id}/jobs            — jobs linked to project (Step 8b)
 """
 from __future__ import annotations
 
@@ -168,6 +169,21 @@ def get_density(project_id: UUID, db: Session = Depends(get_db)):
     }
 
 
+@router.get("/{project_id}/jobs", summary="List jobs linked to project")
+def list_project_jobs(project_id: UUID, db: Session = Depends(get_db)):
+    project = db.get(Project, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    runs = db.execute(
+        select(IngestionRun)
+        .where(IngestionRun.project_id == project_id)
+        .order_by(IngestionRun.created_at.desc())
+    ).scalars().all()
+
+    return [_job_summary(run, db) for run in runs]
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -207,4 +223,29 @@ def _density_dict(ds: DensitySummary) -> dict:
         "confidence": ds.confidence,
         "confidence_notes": ds.confidence_notes,
         "created_at": ds.created_at.isoformat() if ds.created_at else None,
+    }
+
+
+def _job_summary(run: IngestionRun, db: Session) -> dict:
+    from sqlalchemy import func as sqla_func
+
+    doc_count = db.execute(
+        select(sqla_func.count(Document.id)).where(Document.ingestion_run_id == run.id)
+    ).scalar() or 0
+
+    duration_seconds: float | None = None
+    if run.started_at and run.completed_at:
+        duration_seconds = (run.completed_at - run.started_at).total_seconds()
+
+    return {
+        "id": str(run.id),
+        "project_id": str(run.project_id) if run.project_id else None,
+        "status": run.status,
+        "source_path": run.source_path,
+        "started_at": run.started_at.isoformat() if run.started_at else None,
+        "completed_at": run.completed_at.isoformat() if run.completed_at else None,
+        "created_at": run.created_at.isoformat() if run.created_at else None,
+        "document_count": doc_count,
+        "duration_seconds": duration_seconds,
+        "error_summary": run.error_summary,
     }
