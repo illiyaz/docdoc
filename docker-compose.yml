@@ -1,13 +1,13 @@
 services:
-  notifai:
+  forentis:
     build: .
-    container_name: notifai-app
+    container_name: forentis-app
     ports:
-      - "3848:8000"
+      - "${PORT_API:-3848}:8000"
     environment:
       APP_NAME: "Forentis AI"
       APP_ENV: docker
-      DATABASE_URL: postgresql+psycopg://notifai:notifai@postgres:5432/notifai
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-forentis}:${POSTGRES_PASSWORD:-forentis}@postgres:5432/${POSTGRES_DB:-forentis}
       REDIS_URL: redis://redis:6379/0
       MINIO_URL: http://minio:9000
       SMTP_HOST: mailpit
@@ -25,26 +25,26 @@ services:
 
   postgres:
     image: postgres:15-alpine
-    container_name: notifai-postgres
+    container_name: forentis-postgres
     environment:
-      POSTGRES_USER: notifai
-      POSTGRES_PASSWORD: notifai
-      POSTGRES_DB: notifai
+      POSTGRES_USER: ${POSTGRES_USER:-forentis}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-forentis}
+      POSTGRES_DB: ${POSTGRES_DB:-forentis}
     ports:
-      - "3849:5432"
+      - "${PORT_POSTGRES:-5499}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U notifai -d notifai"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-forentis} -d ${POSTGRES_DB:-forentis}"]
       interval: 5s
       timeout: 5s
       retries: 10
 
   redis:
     image: redis:7-alpine
-    container_name: notifai-redis
+    container_name: forentis-redis
     ports:
-      - "3850:6379"
+      - "${PORT_REDIS:-3850}:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -53,11 +53,11 @@ services:
 
   minio:
     image: minio/minio:latest
-    container_name: notifai-minio
+    container_name: forentis-minio
     command: server /data --console-address ":9001"
     ports:
-      - "3851:9000"
-      - "3852:9001"
+      - "${PORT_MINIO_API:-3851}:9000"
+      - "${PORT_MINIO_CONSOLE:-3852}:9001"
     environment:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin
@@ -66,20 +66,20 @@ services:
 
   mailpit:
     image: axllent/mailpit:latest
-    container_name: notifai-mailpit
+    container_name: forentis-mailpit
     ports:
-      - "3854:8025"
-      - "3853:1025"
+      - "${PORT_MAILPIT_UI:-3854}:8025"
+      - "${PORT_MAILPIT_SMTP:-3853}:1025"
 
   frontend:
     build: ./frontend
-    container_name: notifai-frontend
+    container_name: forentis-frontend
     ports:
-      - "3847:80"
+      - "${PORT_FRONTEND:-3847}:80"
     environment:
-      - VITE_API_URL=http://localhost:3848
+      - VITE_API_URL=http://localhost:${PORT_API:-3848}
     depends_on:
-      - notifai
+      - forentis
 
 volumes:
   postgres_data:

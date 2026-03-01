@@ -1,4 +1,4 @@
-# Windsurf Cascade Rules — Cyber NotifAI (AI-Driven Breach Notification Platform)
+# Windsurf Cascade Rules — Forentis AI (AI-Driven Breach Notification Platform)
 
 Read CLAUDE.md at the project root for full architectural detail.
 This file contains the guardrails Cascade must follow at all times.

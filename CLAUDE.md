@@ -163,7 +163,7 @@ project-root/
 │       ├── pages/
 │       │   ├── Dashboard.tsx      # Review dashboard
 │       │   ├── Projects.tsx       # Project list + create
-│       │   ├── ProjectDetail.tsx  # Project detail (5 tabs)
+│       │   ├── ProjectDetail.tsx  # Project detail (5 tabs, guided protocol form)
 │       │   ├── QueueView.tsx      # Review queue
 │       │   ├── SubjectDetail.tsx  # Subject detail
 │       │   ├── JobSubmit.tsx      # Job submission
@@ -297,6 +297,7 @@ These are detailed in [docs/SCHEMA.md](docs/SCHEMA.md). Summary:
 | 6. CSV export | COMPLETE | `app/export/csv_exporter.py`, `app/api/routes/exports.py`, masked PII, configurable columns |
 | 7. LLM integration | COMPLETE | `app/llm/client.py`, `app/llm/prompts.py`, `app/llm/audit.py` — governance-gated Ollama client, 3 prompt templates, full audit logging, 55 tests |
 | 8. Frontend + rename | COMPLETE | Projects list + detail pages, App.tsx routes, rename Cyber NotifAI to Forentis AI across frontend + backend |
+| 9. Guided Protocol Form | COMPLETE | Replaced raw JSON textarea with guided form: base protocol dropdown (6 presets), entity type checkboxes (Identity/Financial/Health), confidence slider, dedup anchor multi-select, sampling config, storage policy radios, reorderable export fields, raw JSON toggle for power users |
 
 **1400 tests passing after Steps 1–8. Phase 5 complete.**
 

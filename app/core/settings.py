@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     app_version: str = Field(default="0.1.0", alias="APP_VERSION")
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
     database_url: str = Field(
-        default="postgresql+psycopg://notifai:notifai@localhost:3849/notifai",
+        default="postgresql+psycopg://forentis:forentis@localhost:5499/forentis",
         alias="DATABASE_URL",
     )
     tenant_salt: str = Field(default="change-me", alias="TENANT_SALT")
@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     secret_key: str = Field(default="change-me-in-production", alias="SECRET_KEY")
     vault_addr: str | None = Field(default=None, alias="VAULT_ADDR")
     pii_masking_enabled: bool = Field(default=True, alias="PII_MASKING_ENABLED")
-    upload_dir: str = Field(default="/tmp/docdoc_uploads", alias="UPLOAD_DIR")
+    upload_dir: str = Field(default="/tmp/forentis_uploads", alias="UPLOAD_DIR")
     upload_max_file_size_mb: int = Field(default=100, alias="UPLOAD_MAX_FILE_SIZE_MB")
     upload_max_total_size_mb: int = Field(default=500, alias="UPLOAD_MAX_TOTAL_SIZE_MB")
     llm_assist_enabled: bool = Field(default=False, alias="LLM_ASSIST_ENABLED")

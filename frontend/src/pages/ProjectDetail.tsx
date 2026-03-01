@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useState, useCallback, useMemo } from "react"
 import { useParams, Link } from "react-router-dom"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import {
@@ -12,6 +12,11 @@ import {
   Plus,
   Lock,
   CheckCircle,
+  ChevronUp,
+  ChevronDown,
+  Code,
+  GripVertical,
+  X,
 } from "lucide-react"
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -235,44 +240,632 @@ function OverviewTab({
 // Protocol configs tab
 // ---------------------------------------------------------------------------
 
-function ProtocolsTab({ project }: { project: ProjectDetailType }) {
-  const queryClient = useQueryClient()
-  const [showForm, setShowForm] = useState(false)
+// ---------------------------------------------------------------------------
+// Protocol form constants & defaults
+// ---------------------------------------------------------------------------
+
+const BASE_PROTOCOLS = [
+  { id: "hipaa", label: "HIPAA Breach Rule" },
+  { id: "gdpr", label: "GDPR (Articles 33-34)" },
+  { id: "ccpa", label: "CCPA" },
+  { id: "pci_dss", label: "PCI-DSS" },
+  { id: "state_breach", label: "State Breach (Generic)" },
+  { id: "custom", label: "Custom" },
+] as const
+
+type BaseProtocolId = (typeof BASE_PROTOCOLS)[number]["id"]
+
+/** Entity types grouped by category for the checkbox UI */
+const ENTITY_TYPE_GROUPS = [
+  {
+    category: "Identity",
+    types: [
+      { id: "US_SSN", label: "SSN" },
+      { id: "US_PASSPORT", label: "Passport" },
+      { id: "US_DRIVER_LICENSE", label: "Driver's License" },
+      { id: "PERSON", label: "Name" },
+      { id: "DATE_OF_BIRTH_MDY", label: "Date of Birth" },
+      { id: "EMAIL_ADDRESS", label: "Email" },
+      { id: "PHONE_NUMBER", label: "Phone" },
+    ],
+  },
+  {
+    category: "Financial",
+    types: [
+      { id: "CREDIT_CARD", label: "Credit Card" },
+      { id: "US_BANK_NUMBER", label: "Bank Account" },
+      { id: "IBAN", label: "IBAN" },
+    ],
+  },
+  {
+    category: "Health",
+    types: [
+      { id: "MEDICAL_LICENSE", label: "Medical License" },
+      { id: "NPI", label: "NPI Number" },
+      { id: "MRN", label: "Medical Record No." },
+      { id: "HICN", label: "Health Insurance No." },
+    ],
+  },
+] as const
+
+const DEDUP_ANCHORS = ["ssn", "email", "phone", "address", "name"] as const
+type DedupAnchor = (typeof DEDUP_ANCHORS)[number]
+
+const DEFAULT_EXPORT_FIELDS = [
+  "subject_id",
+  "canonical_name",
+  "canonical_email",
+  "canonical_phone",
+  "pii_types_found",
+  "notification_required",
+  "review_status",
+]
+
+/** Per-protocol defaults — entity types, confidence, anchors, sampling, storage, export */
+interface ProtocolDefaults {
+  entityTypes: string[]
+  confidence: number
+  dedupAnchors: DedupAnchor[]
+  samplingRate: number
+  samplingMin: number
+  samplingMax: number
+  storagePolicy: "strict" | "investigation"
+  exportFields: string[]
+}
+
+const PROTOCOL_DEFAULTS: Record<BaseProtocolId, ProtocolDefaults> = {
+  hipaa: {
+    entityTypes: ["US_SSN", "MRN", "NPI", "HICN", "MEDICAL_LICENSE"],
+    confidence: 0.75,
+    dedupAnchors: ["ssn", "name"],
+    samplingRate: 10,
+    samplingMin: 5,
+    samplingMax: 100,
+    storagePolicy: "strict",
+    exportFields: [...DEFAULT_EXPORT_FIELDS],
+  },
+  gdpr: {
+    entityTypes: ["EMAIL_ADDRESS", "PHONE_NUMBER", "PERSON", "IBAN"],
+    confidence: 0.70,
+    dedupAnchors: ["email", "name", "phone"],
+    samplingRate: 15,
+    samplingMin: 5,
+    samplingMax: 200,
+    storagePolicy: "strict",
+    exportFields: [...DEFAULT_EXPORT_FIELDS],
+  },
+  ccpa: {
+    entityTypes: ["US_SSN", "CREDIT_CARD", "US_BANK_NUMBER", "MRN"],
+    confidence: 0.75,
+    dedupAnchors: ["ssn", "email", "name"],
+    samplingRate: 10,
+    samplingMin: 5,
+    samplingMax: 100,
+    storagePolicy: "strict",
+    exportFields: [...DEFAULT_EXPORT_FIELDS],
+  },
+  pci_dss: {
+    entityTypes: ["CREDIT_CARD", "US_BANK_NUMBER", "IBAN"],
+    confidence: 0.85,
+    dedupAnchors: ["name", "email"],
+    samplingRate: 20,
+    samplingMin: 10,
+    samplingMax: 50,
+    storagePolicy: "strict",
+    exportFields: [...DEFAULT_EXPORT_FIELDS],
+  },
+  state_breach: {
+    entityTypes: ["US_SSN", "CREDIT_CARD", "US_BANK_NUMBER", "US_DRIVER_LICENSE"],
+    confidence: 0.75,
+    dedupAnchors: ["ssn", "name", "address"],
+    samplingRate: 10,
+    samplingMin: 5,
+    samplingMax: 100,
+    storagePolicy: "strict",
+    exportFields: [...DEFAULT_EXPORT_FIELDS],
+  },
+  custom: {
+    entityTypes: [],
+    confidence: 0.75,
+    dedupAnchors: ["ssn", "email"],
+    samplingRate: 10,
+    samplingMin: 5,
+    samplingMax: 100,
+    storagePolicy: "strict",
+    exportFields: [...DEFAULT_EXPORT_FIELDS],
+  },
+}
+
+// ---------------------------------------------------------------------------
+// Guided Protocol Create Form
+// ---------------------------------------------------------------------------
+
+function ProtocolCreateForm({
+  projectId,
+  onCreated,
+  onCancel,
+}: {
+  projectId: string
+  onCreated: () => void
+  onCancel: () => void
+}) {
   const [pcName, setPcName] = useState("")
-  const [baseProtocolId, setBaseProtocolId] = useState("")
-  const [configJson, setConfigJson] = useState("{}")
+  const [baseProtocol, setBaseProtocol] = useState<BaseProtocolId | "">("")
+  const [entityTypes, setEntityTypes] = useState<Set<string>>(new Set())
+  const [confidence, setConfidence] = useState(0.75)
+  const [dedupAnchors, setDedupAnchors] = useState<Set<DedupAnchor>>(new Set(["ssn", "email"]))
+  const [samplingRate, setSamplingRate] = useState(10)
+  const [samplingMin, setSamplingMin] = useState(5)
+  const [samplingMax, setSamplingMax] = useState(100)
+  const [storagePolicy, setStoragePolicy] = useState<"strict" | "investigation">("strict")
+  const [exportFields, setExportFields] = useState<string[]>([...DEFAULT_EXPORT_FIELDS])
+  const [newFieldInput, setNewFieldInput] = useState("")
+  const [showRawJson, setShowRawJson] = useState(false)
+  const [rawJsonOverride, setRawJsonOverride] = useState("")
+  const [rawJsonMode, setRawJsonMode] = useState(false) // true = editing raw JSON directly
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  async function handleCreate(e: React.FormEvent) {
+  /** Apply protocol defaults when base protocol changes */
+  const handleBaseProtocolChange = useCallback((id: BaseProtocolId) => {
+    setBaseProtocol(id)
+    const defaults = PROTOCOL_DEFAULTS[id]
+    setEntityTypes(new Set(defaults.entityTypes))
+    setConfidence(defaults.confidence)
+    setDedupAnchors(new Set(defaults.dedupAnchors))
+    setSamplingRate(defaults.samplingRate)
+    setSamplingMin(defaults.samplingMin)
+    setSamplingMax(defaults.samplingMax)
+    setStoragePolicy(defaults.storagePolicy)
+    setExportFields([...defaults.exportFields])
+    setRawJsonMode(false)
+    setRawJsonOverride("")
+  }, [])
+
+  /** Toggle an entity type checkbox */
+  const toggleEntityType = useCallback((typeId: string) => {
+    setEntityTypes((prev) => {
+      const next = new Set(prev)
+      if (next.has(typeId)) next.delete(typeId)
+      else next.add(typeId)
+      return next
+    })
+  }, [])
+
+  /** Toggle a dedup anchor checkbox */
+  const toggleAnchor = useCallback((anchor: DedupAnchor) => {
+    setDedupAnchors((prev) => {
+      const next = new Set(prev)
+      if (next.has(anchor)) next.delete(anchor)
+      else next.add(anchor)
+      return next
+    })
+  }, [])
+
+  /** Move export field up/down */
+  const moveField = useCallback((index: number, direction: "up" | "down") => {
+    setExportFields((prev) => {
+      const arr = [...prev]
+      const target = direction === "up" ? index - 1 : index + 1
+      if (target < 0 || target >= arr.length) return prev
+      ;[arr[index], arr[target]] = [arr[target], arr[index]]
+      return arr
+    })
+  }, [])
+
+  /** Remove an export field */
+  const removeField = useCallback((index: number) => {
+    setExportFields((prev) => prev.filter((_, i) => i !== index))
+  }, [])
+
+  /** Add a custom export field */
+  const addField = useCallback(() => {
+    const val = newFieldInput.trim()
+    if (!val) return
+    setExportFields((prev) => (prev.includes(val) ? prev : [...prev, val]))
+    setNewFieldInput("")
+  }, [newFieldInput])
+
+  /** Build config_json from form state */
+  const configJson = useMemo<Record<string, unknown>>(() => {
+    return {
+      target_entity_types: Array.from(entityTypes),
+      confidence_threshold: confidence,
+      dedup_anchors: Array.from(dedupAnchors),
+      sampling: {
+        rate_percent: samplingRate,
+        min: samplingMin,
+        max: samplingMax,
+      },
+      storage_policy: storagePolicy,
+      export_fields: exportFields,
+    }
+  }, [entityTypes, confidence, dedupAnchors, samplingRate, samplingMin, samplingMax, storagePolicy, exportFields])
+
+  /** Raw JSON string for display */
+  const configJsonStr = useMemo(() => JSON.stringify(configJson, null, 2), [configJson])
+
+  /** Handle submission */
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!pcName.trim()) return
     setCreating(true)
     setError(null)
     try {
-      let parsed: Record<string, unknown>
-      try {
-        parsed = JSON.parse(configJson) as Record<string, unknown>
-      } catch {
-        setError("Invalid JSON in config")
-        setCreating(false)
-        return
+      let finalConfig: Record<string, unknown>
+      if (rawJsonMode && rawJsonOverride.trim()) {
+        try {
+          finalConfig = JSON.parse(rawJsonOverride) as Record<string, unknown>
+        } catch {
+          setError("Invalid JSON in raw config editor")
+          setCreating(false)
+          return
+        }
+      } else {
+        finalConfig = configJson
       }
-      await createProtocolConfig(project.id, {
+      await createProtocolConfig(projectId, {
         name: pcName.trim(),
-        base_protocol_id: baseProtocolId.trim() || null,
-        config_json: parsed,
+        base_protocol_id: baseProtocol === "custom" ? null : (baseProtocol || null),
+        config_json: finalConfig,
       })
-      setPcName("")
-      setBaseProtocolId("")
-      setConfigJson("{}")
-      setShowForm(false)
-      queryClient.invalidateQueries({ queryKey: ["project", project.id] })
+      onCreated()
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create protocol config")
     } finally {
       setCreating(false)
     }
+  }
+
+  return (
+    <Card>
+      <CardContent className="pt-4">
+        <form onSubmit={handleSubmit} className="space-y-5">
+          {error && (
+            <div className="rounded-md bg-red-50 border border-red-200 px-4 py-2 text-sm text-red-800">
+              {error}
+            </div>
+          )}
+
+          {/* --- Name --- */}
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium">Name *</label>
+            <input
+              type="text"
+              placeholder="e.g. HIPAA Strict Config"
+              value={pcName}
+              onChange={(e) => setPcName(e.target.value)}
+              className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+              required
+            />
+          </div>
+
+          {/* --- 1. Base Protocol Dropdown --- */}
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium">Base Protocol</label>
+            <p className="text-xs text-muted-foreground">
+              Selecting a base protocol pre-populates all fields below with sensible defaults.
+            </p>
+            <select
+              value={baseProtocol}
+              onChange={(e) => {
+                const val = e.target.value as BaseProtocolId | ""
+                if (val) handleBaseProtocolChange(val)
+                else setBaseProtocol("")
+              }}
+              className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+            >
+              <option value="">-- Select a base protocol --</option>
+              {BASE_PROTOCOLS.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* --- 2. Target Entity Types --- */}
+          <div className="space-y-3">
+            <label className="text-sm font-medium">Target Entity Types</label>
+            <p className="text-xs text-muted-foreground">
+              Select the PII entity types this protocol will detect and process.
+            </p>
+            {ENTITY_TYPE_GROUPS.map((group) => (
+              <div key={group.category} className="space-y-2">
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                  {group.category}
+                </p>
+                <div className="flex flex-wrap gap-x-4 gap-y-1.5">
+                  {group.types.map((t) => (
+                    <label key={t.id} className="flex items-center gap-1.5 text-sm cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={entityTypes.has(t.id)}
+                        onChange={() => toggleEntityType(t.id)}
+                        className="rounded border-gray-300 text-primary focus:ring-primary h-3.5 w-3.5"
+                      />
+                      {t.label}
+                    </label>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* --- 3. Confidence Threshold Slider --- */}
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium">
+              Confidence Threshold:{" "}
+              <span className="font-mono text-primary">{confidence.toFixed(2)}</span>
+            </label>
+            <p className="text-xs text-muted-foreground">
+              Minimum confidence score (0.50 - 1.00) for an entity to be accepted.
+            </p>
+            <div className="flex items-center gap-3">
+              <span className="text-xs text-muted-foreground">0.50</span>
+              <input
+                type="range"
+                min="0.50"
+                max="1.00"
+                step="0.01"
+                value={confidence}
+                onChange={(e) => setConfidence(parseFloat(e.target.value))}
+                className="flex-1 h-2 rounded-lg appearance-none cursor-pointer accent-primary"
+              />
+              <span className="text-xs text-muted-foreground">1.00</span>
+            </div>
+          </div>
+
+          {/* --- 4. Dedup Anchors --- */}
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium">Deduplication Anchors</label>
+            <p className="text-xs text-muted-foreground">
+              Fields used as anchor points for entity resolution and deduplication.
+            </p>
+            <div className="flex flex-wrap gap-x-4 gap-y-1.5">
+              {DEDUP_ANCHORS.map((anchor) => (
+                <label key={anchor} className="flex items-center gap-1.5 text-sm cursor-pointer capitalize">
+                  <input
+                    type="checkbox"
+                    checked={dedupAnchors.has(anchor)}
+                    onChange={() => toggleAnchor(anchor)}
+                    className="rounded border-gray-300 text-primary focus:ring-primary h-3.5 w-3.5"
+                  />
+                  {anchor}
+                </label>
+              ))}
+            </div>
+          </div>
+
+          {/* --- 5. Sampling Config --- */}
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium">Sampling Configuration</label>
+            <p className="text-xs text-muted-foreground">
+              QC sampling parameters for human review.
+            </p>
+            <div className="grid grid-cols-3 gap-3">
+              <div className="space-y-1">
+                <label className="text-xs text-muted-foreground">Rate (%)</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={100}
+                  value={samplingRate}
+                  onChange={(e) => setSamplingRate(Math.max(1, Math.min(100, parseInt(e.target.value) || 1)))}
+                  className="w-full rounded-md border bg-background px-3 py-1.5 text-sm"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs text-muted-foreground">Min</label>
+                <input
+                  type="number"
+                  min={1}
+                  value={samplingMin}
+                  onChange={(e) => setSamplingMin(Math.max(1, parseInt(e.target.value) || 1))}
+                  className="w-full rounded-md border bg-background px-3 py-1.5 text-sm"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs text-muted-foreground">Max</label>
+                <input
+                  type="number"
+                  min={1}
+                  value={samplingMax}
+                  onChange={(e) => setSamplingMax(Math.max(1, parseInt(e.target.value) || 1))}
+                  className="w-full rounded-md border bg-background px-3 py-1.5 text-sm"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* --- 6. Storage Policy --- */}
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium">Storage Policy</label>
+            <p className="text-xs text-muted-foreground">
+              STRICT: no raw PII stored. INVESTIGATION: encrypted PII with retention window.
+            </p>
+            <div className="flex gap-6">
+              <label className="flex items-center gap-2 text-sm cursor-pointer">
+                <input
+                  type="radio"
+                  name="storage_policy"
+                  value="strict"
+                  checked={storagePolicy === "strict"}
+                  onChange={() => setStoragePolicy("strict")}
+                  className="text-primary focus:ring-primary h-3.5 w-3.5"
+                />
+                <span className="font-medium">Strict</span>
+                <span className="text-xs text-muted-foreground">(hash only)</span>
+              </label>
+              <label className="flex items-center gap-2 text-sm cursor-pointer">
+                <input
+                  type="radio"
+                  name="storage_policy"
+                  value="investigation"
+                  checked={storagePolicy === "investigation"}
+                  onChange={() => setStoragePolicy("investigation")}
+                  className="text-primary focus:ring-primary h-3.5 w-3.5"
+                />
+                <span className="font-medium">Investigation</span>
+                <span className="text-xs text-muted-foreground">(encrypted + retention)</span>
+              </label>
+            </div>
+          </div>
+
+          {/* --- 7. Export Fields (reorderable) --- */}
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium">Export Fields</label>
+            <p className="text-xs text-muted-foreground">
+              Columns included in CSV exports. Drag to reorder.
+            </p>
+            <div className="rounded-md border divide-y">
+              {exportFields.map((field, idx) => (
+                <div
+                  key={`${field}-${idx}`}
+                  className="flex items-center gap-2 px-3 py-1.5 text-sm hover:bg-muted/50 group"
+                >
+                  <GripVertical className="h-3.5 w-3.5 text-muted-foreground/50" />
+                  <span className="flex-1 font-mono text-xs">{field}</span>
+                  <button
+                    type="button"
+                    onClick={() => moveField(idx, "up")}
+                    disabled={idx === 0}
+                    className="p-0.5 rounded hover:bg-accent disabled:opacity-20"
+                    title="Move up"
+                  >
+                    <ChevronUp className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => moveField(idx, "down")}
+                    disabled={idx === exportFields.length - 1}
+                    className="p-0.5 rounded hover:bg-accent disabled:opacity-20"
+                    title="Move down"
+                  >
+                    <ChevronDown className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => removeField(idx)}
+                    className="p-0.5 rounded hover:bg-red-100 text-muted-foreground hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity"
+                    title="Remove field"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+            <div className="flex gap-2 mt-1.5">
+              <input
+                type="text"
+                placeholder="Add custom field..."
+                value={newFieldInput}
+                onChange={(e) => setNewFieldInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault()
+                    addField()
+                  }
+                }}
+                className="flex-1 rounded-md border bg-background px-3 py-1.5 text-sm"
+              />
+              <button
+                type="button"
+                onClick={addField}
+                disabled={!newFieldInput.trim()}
+                className="rounded-md border px-3 py-1.5 text-xs font-medium hover:bg-accent disabled:opacity-40"
+              >
+                Add
+              </button>
+            </div>
+          </div>
+
+          {/* --- 8. Show Raw JSON toggle --- */}
+          <div className="border-t pt-4 space-y-2">
+            <button
+              type="button"
+              onClick={() => {
+                const next = !showRawJson
+                setShowRawJson(next)
+                if (next && !rawJsonMode) {
+                  setRawJsonOverride(configJsonStr)
+                }
+              }}
+              className="flex items-center gap-2 text-xs font-medium text-muted-foreground hover:text-foreground"
+            >
+              <Code className="h-3.5 w-3.5" />
+              {showRawJson ? "Hide raw JSON" : "Show raw JSON"}
+            </button>
+
+            {showRawJson && (
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <label className="flex items-center gap-1.5 text-xs cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={rawJsonMode}
+                      onChange={(e) => {
+                        setRawJsonMode(e.target.checked)
+                        if (e.target.checked) {
+                          setRawJsonOverride(configJsonStr)
+                        }
+                      }}
+                      className="rounded border-gray-300 h-3 w-3"
+                    />
+                    Edit raw JSON directly (overrides form fields)
+                  </label>
+                </div>
+                <textarea
+                  value={rawJsonMode ? rawJsonOverride : configJsonStr}
+                  onChange={(e) => {
+                    if (rawJsonMode) setRawJsonOverride(e.target.value)
+                  }}
+                  readOnly={!rawJsonMode}
+                  className={`w-full rounded-md border px-3 py-2 text-xs font-mono min-h-[180px] ${
+                    rawJsonMode
+                      ? "bg-background"
+                      : "bg-muted/50 text-muted-foreground cursor-default"
+                  }`}
+                />
+              </div>
+            )}
+          </div>
+
+          {/* --- Submit / Cancel --- */}
+          <div className="flex gap-2 pt-2">
+            <button
+              type="submit"
+              disabled={creating || !pcName.trim()}
+              className="rounded-md bg-primary text-primary-foreground px-4 py-2 text-sm font-medium disabled:opacity-50 flex items-center gap-2"
+            >
+              {creating && <Loader2 className="h-4 w-4 animate-spin" />}
+              {creating ? "Creating..." : "Create Protocol"}
+            </button>
+            <button
+              type="button"
+              onClick={onCancel}
+              className="rounded-md border px-4 py-2 text-sm font-medium hover:bg-accent"
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
+      </CardContent>
+    </Card>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Protocol configs tab
+// ---------------------------------------------------------------------------
+
+function ProtocolsTab({ project }: { project: ProjectDetailType }) {
+  const queryClient = useQueryClient()
+  const [showForm, setShowForm] = useState(false)
+
+  function handleCreated() {
+    setShowForm(false)
+    queryClient.invalidateQueries({ queryKey: ["project", project.id] })
   }
 
   return (
@@ -289,62 +882,11 @@ function ProtocolsTab({ project }: { project: ProjectDetailType }) {
       </div>
 
       {showForm && (
-        <Card>
-          <CardContent className="pt-4">
-            <form onSubmit={handleCreate} className="space-y-3">
-              {error && (
-                <div className="rounded-md bg-red-50 border border-red-200 px-4 py-2 text-sm text-red-800">
-                  {error}
-                </div>
-              )}
-              <div className="space-y-1.5">
-                <label className="text-sm font-medium">Name *</label>
-                <input
-                  type="text"
-                  placeholder="e.g. HIPAA Strict Config"
-                  value={pcName}
-                  onChange={(e) => setPcName(e.target.value)}
-                  className="w-full rounded-md border bg-background px-3 py-2 text-sm"
-                  required
-                />
-              </div>
-              <div className="space-y-1.5">
-                <label className="text-sm font-medium">Base Protocol ID</label>
-                <input
-                  type="text"
-                  placeholder="e.g. hipaa, gdpr, ccpa"
-                  value={baseProtocolId}
-                  onChange={(e) => setBaseProtocolId(e.target.value)}
-                  className="w-full rounded-md border bg-background px-3 py-2 text-sm"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <label className="text-sm font-medium">Config JSON</label>
-                <textarea
-                  value={configJson}
-                  onChange={(e) => setConfigJson(e.target.value)}
-                  className="w-full rounded-md border bg-background px-3 py-2 text-sm font-mono min-h-[100px]"
-                />
-              </div>
-              <div className="flex gap-2">
-                <button
-                  type="submit"
-                  disabled={creating || !pcName.trim()}
-                  className="rounded-md bg-primary text-primary-foreground px-4 py-2 text-sm font-medium disabled:opacity-50"
-                >
-                  {creating ? "Creating..." : "Create"}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowForm(false)}
-                  className="rounded-md border px-4 py-2 text-sm font-medium hover:bg-accent"
-                >
-                  Cancel
-                </button>
-              </div>
-            </form>
-          </CardContent>
-        </Card>
+        <ProtocolCreateForm
+          projectId={project.id}
+          onCreated={handleCreated}
+          onCancel={() => setShowForm(false)}
+        />
       )}
 
       {project.protocols.length === 0 ? (

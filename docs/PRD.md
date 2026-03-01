@@ -1,4 +1,4 @@
-# PRD — Cyber NotifAI: AI-Driven Breach Notification Platform
+# PRD — Forentis AI: AI-Driven Breach Notification Platform
 
 ## 1. Problem Statement
 

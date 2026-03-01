@@ -1,4 +1,4 @@
-# Offline PII Breach Analysis & Extraction System
+# Forentis AI — Offline PII Breach Analysis & Notification Platform
 
 An **offline, audit-grade system** to discover, extract, group, and review
 Personally Identifiable Information (PII) from large document corpora
@@ -199,10 +199,10 @@ cp .env.example .env
 docker-compose up -d
 
 # 3. Run database migrations
-docker-compose exec notifai bash scripts/init_db.sh
+docker-compose exec forentis bash scripts/init_db.sh
 
 # 4. (Optional) Seed demo data
-docker-compose exec notifai python scripts/seed_demo.py
+docker-compose exec forentis python scripts/seed_demo.py
 ```
 
 ### Services
@@ -212,7 +212,7 @@ docker-compose exec notifai python scripts/seed_demo.py
 | Frontend (React) | 3847 | http://localhost:3847 |
 | FastAPI Backend | 3848 | http://localhost:3848 |
 | API docs (Swagger) | 3848 | http://localhost:3848/docs |
-| PostgreSQL | 3849 | `localhost:3849` |
+| PostgreSQL | 5499 | `localhost:5499` |
 | Redis | 3850 | `localhost:3850` |
 | MinIO API | 3851 | http://localhost:3851 |
 | MinIO Console | 3852 | http://localhost:3852 |
