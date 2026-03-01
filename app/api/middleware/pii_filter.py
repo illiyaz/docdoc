@@ -30,6 +30,20 @@ logger = logging.getLogger(__name__)
 # invalid once we re-buffer the body into a new Response.
 _SKIP_HEADERS = frozenset({"content-length", "transfer-encoding"})
 
+# Paths that structurally cannot contain raw PII in their JSON responses.
+# These endpoints return project metadata, protocol configs, job summaries,
+# etc.  Scanning them causes false positives because UUIDs match the
+# credit-card regex pattern.  The /jobs/{id}/results endpoint is *not*
+# listed here because it returns notification subjects with PII fields.
+_PII_SAFE_PATH_PREFIXES: tuple[str, ...] = (
+    "/health",
+    "/projects",
+    "/protocols",
+    "/jobs/recent",
+    "/jobs/protocols",
+    "/jobs/run",
+)
+
 
 class PIIFilterMiddleware(BaseHTTPMiddleware):
     """Starlette middleware that blocks JSON responses containing raw PII.
@@ -44,6 +58,11 @@ class PIIFilterMiddleware(BaseHTTPMiddleware):
         # Skip PII scanning when masking is disabled (MVP testing mode)
         from app.core.settings import get_settings
         if not get_settings().pii_masking_enabled:
+            return response
+
+        # Skip scanning for paths that structurally cannot contain raw PII.
+        path = request.url.path
+        if any(path.startswith(prefix) for prefix in _PII_SAFE_PATH_PREFIXES):
             return response
 
         # Only scan JSON payloads — streaming responses (SSE, file

@@ -46,7 +46,6 @@ import {
   getProtocols,
   getProjectJobs,
   getJobPipelineStatus,
-  runJob,
   getRecentJobs,
   linkJobToProject,
 } from "@/api/client"
@@ -60,8 +59,6 @@ import type {
   PipelineProgress,
   JobResult,
   JobSummary,
-  JobPipelineStatus,
-  PipelineStageStatus,
 } from "@/api/client"
 
 // ---------------------------------------------------------------------------
@@ -1158,23 +1155,14 @@ function formatDate(iso: string | null): string {
 
 function JobsTab({
   projectId,
-  protocols,
   onJobCompleted,
 }: {
   projectId: string
-  protocols: ProtocolConfigSummary[]
   onJobCompleted: () => void
 }) {
   const queryClient = useQueryClient()
   const [expandedJobId, setExpandedJobId] = useState<string | null>(null)
-  const [showRunJob, setShowRunJob] = useState(false)
   const [showLinkJob, setShowLinkJob] = useState(false)
-
-  // Run job state
-  const [runProtocolId, setRunProtocolId] = useState("")
-  const [runProtocolConfigId, setRunProtocolConfigId] = useState("")
-  const [isRunning, setIsRunning] = useState(false)
-  const [runError, setRunError] = useState<string | null>(null)
 
   // Link job state
   const [linkError, setLinkError] = useState<string | null>(null)
@@ -1187,12 +1175,6 @@ function JobsTab({
     queryKey: ["project-jobs", projectId],
     queryFn: () => getProjectJobs(projectId),
     refetchInterval: 10_000,
-  })
-
-  // Fetch base protocols for run job selector
-  const { data: baseProtocols } = useQuery({
-    queryKey: ["base-protocols"],
-    queryFn: getBaseProtocols,
   })
 
   // Fetch recent unlinked jobs for link dropdown
@@ -1219,33 +1201,6 @@ function JobsTab({
     }
     prevJobsRef.current = jobs
   }, [jobs, onJobCompleted])
-
-  // Run new job handler
-  async function handleRunJob() {
-    if (!runProtocolId) return
-    setIsRunning(true)
-    setRunError(null)
-
-    try {
-      const body: Record<string, string> = {
-        protocol_id: runProtocolId,
-        project_id: projectId,
-      }
-      if (runProtocolConfigId) {
-        body.protocol_config_id = runProtocolConfigId
-      }
-
-      await runJob(body as Parameters<typeof runJob>[0])
-      setShowRunJob(false)
-      setRunProtocolId("")
-      setRunProtocolConfigId("")
-      queryClient.invalidateQueries({ queryKey: ["project-jobs", projectId] })
-    } catch (err) {
-      setRunError(err instanceof Error ? err.message : "Failed to start job")
-    } finally {
-      setIsRunning(false)
-    }
-  }
 
   // Link existing job handler
   async function handleLinkJob() {
@@ -1274,105 +1229,18 @@ function JobsTab({
         <h3 className="text-sm font-semibold">Project Jobs</h3>
         <div className="flex gap-2">
           <button
-            onClick={() => {
-              setShowLinkJob(!showLinkJob)
-              if (showRunJob) setShowRunJob(false)
-            }}
+            onClick={() => setShowLinkJob(!showLinkJob)}
             className="rounded-md border px-3 py-1.5 text-xs font-medium hover:bg-accent flex items-center gap-1"
           >
             <LinkIcon className="h-3 w-3" />
             Link Existing Job
           </button>
-          <button
-            onClick={() => {
-              setShowRunJob(!showRunJob)
-              if (showLinkJob) setShowLinkJob(false)
-            }}
-            className="rounded-md bg-primary text-primary-foreground px-3 py-1.5 text-xs font-medium flex items-center gap-1"
-          >
-            <Play className="h-3 w-3" />
-            Run New Job
-          </button>
         </div>
       </div>
 
-      {/* Run New Job form */}
-      {showRunJob && (
-        <Card>
-          <CardContent className="pt-4 space-y-3">
-            <p className="text-sm font-medium">Run New Job</p>
-            {runError && (
-              <div className="rounded-md bg-red-50 border border-red-200 px-4 py-2 text-sm text-red-800">
-                {runError}
-              </div>
-            )}
-
-            <div className="space-y-1.5">
-              <label className="text-sm font-medium">Base Protocol *</label>
-              <select
-                value={runProtocolId}
-                onChange={(e) => setRunProtocolId(e.target.value)}
-                className="w-full rounded-md border bg-background px-3 py-2 text-sm"
-              >
-                <option value="">Select a protocol...</option>
-                {(baseProtocols ?? []).map((p) => (
-                  <option key={p.protocol_id} value={p.protocol_id}>
-                    {p.name} -- {p.jurisdiction} ({p.notification_deadline_days}d deadline)
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {protocols.length > 0 && (
-              <div className="space-y-1.5">
-                <label className="text-xs font-medium text-muted-foreground">
-                  Project protocol config (optional):
-                </label>
-                <select
-                  value={runProtocolConfigId}
-                  onChange={(e) => {
-                    setRunProtocolConfigId(e.target.value)
-                    const pc = protocols.find((p) => p.id === e.target.value)
-                    if (pc?.base_protocol_id) setRunProtocolId(pc.base_protocol_id)
-                  }}
-                  className="w-full rounded-md border bg-background px-3 py-2 text-sm"
-                >
-                  <option value="">None</option>
-                  {protocols.map((pc) => (
-                    <option key={pc.id} value={pc.id}>
-                      {pc.name} ({pc.status})
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
-
-            <div className="flex gap-2 pt-1">
-              <button
-                onClick={handleRunJob}
-                disabled={!runProtocolId || isRunning}
-                className="rounded-md bg-primary text-primary-foreground px-4 py-2 text-sm font-medium disabled:opacity-50 flex items-center gap-2"
-              >
-                {isRunning ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Play className="h-4 w-4" />
-                )}
-                {isRunning ? "Starting..." : "Start Job"}
-              </button>
-              <button
-                onClick={() => {
-                  setShowRunJob(false)
-                  setRunError(null)
-                }}
-                className="rounded-md border px-4 py-2 text-sm font-medium hover:bg-accent"
-              >
-                Cancel
-              </button>
-            </div>
-          </CardContent>
-        </Card>
-      )}
+      <p className="text-xs text-muted-foreground">
+        To run a new job, go to the <span className="font-medium">Catalog</span> tab to upload files and start a pipeline.
+      </p>
 
       {/* Link Existing Job form */}
       {showLinkJob && (
@@ -2641,7 +2509,6 @@ export function ProjectDetail() {
       {activeTab === "jobs" && (
         <JobsTab
           projectId={projectId}
-          protocols={project.protocols}
           onJobCompleted={handleJobCompleted}
         />
       )}

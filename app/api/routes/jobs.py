@@ -278,9 +278,14 @@ def _pipeline_generator(
     manages its own session), a session is created lazily from the
     default session factory.
     """
+    import hashlib
+    from datetime import datetime, timezone
+
     job_id = body.job_id or str(uuid4())
+    job_uuid = UUID(job_id) if body.job_id else uuid4()
     settings = get_settings()
     owns_db = False
+    run: IngestionRun | None = None
 
     try:
         if db is None:
@@ -308,6 +313,31 @@ def _pipeline_generator(
         yield _sse({"stage": "error", "message": f"Protocol not found: {body.protocol_id!r}"})
         return
 
+    # --- Create IngestionRun record ---
+    project_uuid = None
+    if body.project_id:
+        try:
+            project_uuid = UUID(body.project_id)
+        except (ValueError, AttributeError):
+            pass
+
+    run = IngestionRun(
+        id=job_uuid,
+        project_id=project_uuid,
+        source_path=source_directory,
+        config_hash="",
+        code_version="0.1.0",
+        initiated_by="api",
+        status="running",
+        started_at=datetime.now(timezone.utc),
+        config_snapshot={
+            "protocol_id": body.protocol_id,
+            "protocol_config_id": body.protocol_config_id,
+        },
+    )
+    db.add(run)
+    db.flush()
+
     try:
         # --- Stage 1: Discovery ---
         yield _sse({"stage": "discovery", "status": "running", "message": "Discovering documents..."})
@@ -320,7 +350,40 @@ def _pipeline_generator(
             "detail": {"document_count": len(docs)},
         })
 
-        # --- Stage 2: PII Detection ---
+        # --- Stage 1.5: Create Document records ---
+        doc_records: list[Document] = []
+        for doc_info in docs:
+            src = Path(doc_info["source_path"])
+            try:
+                sha = hashlib.sha256(src.read_bytes()).hexdigest()
+            except Exception:
+                sha = hashlib.sha256(str(src).encode()).hexdigest()
+            doc = Document(
+                ingestion_run_id=run.id,
+                source_path=doc_info["source_path"],
+                file_name=doc_info.get("file_name", src.name),
+                file_type=doc_info.get("file_type", src.suffix.lstrip(".") or "unknown"),
+                size_bytes=doc_info.get("size_bytes"),
+                sha256=sha,
+            )
+            db.add(doc)
+            doc_records.append(doc)
+        db.flush()
+
+        # --- Stage 2: Cataloging ---
+        yield _sse({"stage": "cataloging", "status": "running", "message": "Classifying documents..."})
+        try:
+            from app.tasks.cataloger import CatalogerTask
+            cataloger = CatalogerTask(db)
+            cataloger.run(doc_records)
+        except Exception:
+            pass  # cataloger is best-effort; don't fail the pipeline
+        yield _sse({
+            "stage": "cataloging", "status": "complete",
+            "message": f"Cataloged {len(doc_records)} document(s)",
+        })
+
+        # --- Stage 3: PII Detection ---
         yield _sse({
             "stage": "detection", "status": "running",
             "message": "Starting PII detection...",
@@ -360,7 +423,7 @@ def _pipeline_generator(
             "detail": {"records_found": len(all_records)},
         })
 
-        # --- Stage 3: Entity Resolution ---
+        # --- Stage 4: Entity Resolution ---
         yield _sse({"stage": "resolution", "status": "running", "message": "Resolving entities..."})
         resolver = EntityResolver()
         groups = resolver.resolve(all_records)
@@ -369,7 +432,7 @@ def _pipeline_generator(
             "message": f"Resolved into {len(groups)} group(s)",
         })
 
-        # --- Stage 4: Deduplication ---
+        # --- Stage 5: Deduplication ---
         yield _sse({"stage": "deduplication", "status": "running", "message": "Building notification subjects..."})
         dedup = Deduplicator(db)
         subjects = dedup.build_subjects(groups)
@@ -378,20 +441,25 @@ def _pipeline_generator(
             "message": f"Built {len(subjects)} subject(s)",
         })
 
-        # --- Stage 5: Notification ---
+        # --- Stage 6: Notification ---
         yield _sse({"stage": "notification", "status": "running", "message": "Building notification list..."})
-        nl = build_notification_list(job_id, protocol, subjects, db)
+        nl = build_notification_list(str(job_uuid), protocol, subjects, db)
         notif_count = sum(1 for s in subjects if s.notification_required)
         yield _sse({
             "stage": "notification", "status": "complete",
             "message": f"{notif_count} notification(s) required",
         })
 
+        # --- Mark run as completed ---
+        run.status = "completed"
+        run.completed_at = datetime.now(timezone.utc)
+        db.flush()
+
         # --- Complete ---
         yield _sse({
             "stage": "complete",
             "result": {
-                "job_id": job_id,
+                "job_id": str(job_uuid),
                 "status": "COMPLETE",
                 "subjects_found": len(subjects),
                 "notification_required": notif_count,
@@ -399,7 +467,15 @@ def _pipeline_generator(
         })
 
     except Exception as exc:
-        logger.error("Job %s failed at streaming pipeline: %s", job_id, type(exc).__name__)
+        logger.error("Job %s failed at streaming pipeline: %s", str(job_uuid), type(exc).__name__)
+        if run is not None:
+            run.status = "failed"
+            run.error_summary = str(type(exc).__name__)
+            run.completed_at = datetime.now(timezone.utc)
+            try:
+                db.flush()
+            except Exception:
+                pass
         yield _sse({"stage": "error", "message": f"Pipeline failed: {type(exc).__name__}"})
 
     finally:

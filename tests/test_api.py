@@ -797,7 +797,7 @@ class TestUploadFiles:
         assert resp.status_code == 404
         assert "not found or expired" in resp.json()["detail"]
 
-    def test_streaming_run_emits_all_stages(self, client: TestClient) -> None:
+    def test_streaming_run_emits_all_stages(self, db_session: Session, client: TestClient) -> None:
         """POST /jobs/run/stream returns SSE events for each pipeline stage."""
         from unittest.mock import patch, MagicMock
 
@@ -808,14 +808,18 @@ class TestUploadFiles:
         )
         upload_id = up_resp.json()["upload_id"]
 
+        # Patch the session factory so the streaming endpoint uses the test DB
+        _test_factory = sessionmaker(bind=db_session.get_bind())
+
         with (
             patch("app.api.routes.jobs.FilesystemConnector"),
             patch("app.api.routes.jobs.DiscoveryTask") as mock_disc,
             patch("app.api.routes.jobs.EntityResolver") as mock_er,
             patch("app.api.routes.jobs.Deduplicator") as mock_dedup,
             patch("app.api.routes.jobs.build_notification_list") as mock_nl,
+            patch("app.api.deps._get_session_factory", return_value=_test_factory),
         ):
-            mock_disc.return_value.run.return_value = [{"source_path": "/tmp/data.csv"}]
+            mock_disc.return_value.run.return_value = [{"source_path": "/tmp/data.csv", "file_name": "data.csv"}]
             mock_er.return_value.resolve.return_value = []
             mock_dedup.return_value.build_subjects.return_value = []
             mock_nl.return_value = MagicMock()
@@ -853,6 +857,7 @@ class TestUploadFiles:
         # Should have events for all stages
         stages_seen = [e["stage"] for e in events]
         assert "discovery" in stages_seen
+        assert "cataloging" in stages_seen
         assert "detection" in stages_seen
         assert "resolution" in stages_seen
         assert "deduplication" in stages_seen
@@ -1471,3 +1476,67 @@ class TestPatchJob:
         resp2 = client.get(f"/projects/{project.id}/jobs")
         assert len(resp2.json()) == 1
         assert resp2.json()[0]["id"] == str(run.id)
+
+
+# ===========================================================================
+# PII filter allowlist — catalog-summary not blocked by UUID patterns
+# ===========================================================================
+
+
+class TestPIIFilterAllowlist:
+    """Verify that project/protocol endpoints are not blocked by the PII
+    filter middleware when pii_masking_enabled is True.
+
+    UUIDs in JSON responses (project_id, etc.) previously matched the
+    credit-card regex, causing false 500 responses.
+    """
+
+    def test_catalog_summary_not_blocked(
+        self, db_session: Session, client: TestClient, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from app.core.settings import get_settings
+        get_settings.cache_clear()
+        monkeypatch.setenv("PII_MASKING_ENABLED", "true")
+        get_settings.cache_clear()
+
+        pr = client.post("/projects", json={"name": "PII Test"})
+        assert pr.status_code == 200
+        pid = pr.json()["id"]
+
+        resp = client.get(f"/projects/{pid}/catalog-summary")
+        assert resp.status_code == 200
+        assert resp.json()["total_documents"] == 0
+        get_settings.cache_clear()
+
+    def test_project_detail_not_blocked(
+        self, db_session: Session, client: TestClient, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from app.core.settings import get_settings
+        get_settings.cache_clear()
+        monkeypatch.setenv("PII_MASKING_ENABLED", "true")
+        get_settings.cache_clear()
+
+        pr = client.post("/projects", json={"name": "PII Detail"})
+        assert pr.status_code == 200
+        pid = pr.json()["id"]
+
+        resp = client.get(f"/projects/{pid}")
+        assert resp.status_code == 200
+        assert resp.json()["name"] == "PII Detail"
+        get_settings.cache_clear()
+
+    def test_density_not_blocked(
+        self, db_session: Session, client: TestClient, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from app.core.settings import get_settings
+        get_settings.cache_clear()
+        monkeypatch.setenv("PII_MASKING_ENABLED", "true")
+        get_settings.cache_clear()
+
+        pr = client.post("/projects", json={"name": "PII Density"})
+        assert pr.status_code == 200
+        pid = pr.json()["id"]
+
+        resp = client.get(f"/projects/{pid}/density")
+        assert resp.status_code == 200
+        get_settings.cache_clear()

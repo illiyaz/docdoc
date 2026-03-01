@@ -228,7 +228,7 @@ export async function submitJobStreaming(
   body: SubmitJobBody,
   onProgress: (event: PipelineProgress) => void,
 ): Promise<JobResult> {
-  const res = await fetch(`${BASE_URL}/jobs/run`, {
+  const res = await fetch(`${BASE_URL}/jobs/run/stream`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
