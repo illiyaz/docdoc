@@ -1025,3 +1025,42 @@ class TestProtocolConfigCRUD:
         pr = client.post("/projects", json={"name": "P"}).json()
         resp = client.get(f"/projects/{pr['id']}/protocols/{uuid4()}")
         assert resp.status_code == 404
+
+
+# ===========================================================================
+# GET /protocols/base
+# ===========================================================================
+
+
+class TestBaseProtocols:
+    def test_returns_all_base_protocols(self, client: TestClient) -> None:
+        resp = client.get("/protocols/base")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert isinstance(data, list)
+        assert len(data) >= 6  # at least the original 6 built-in protocols
+        ids = [p["protocol_id"] for p in data]
+        # Verify original protocols are present
+        assert "hipaa_breach_rule" in ids
+        assert "gdpr_article_33" in ids
+        assert "ccpa" in ids
+        assert "hitech" in ids
+        assert "ferpa" in ids
+        assert "state_breach_generic" in ids
+
+    def test_new_protocols_included(self, client: TestClient) -> None:
+        resp = client.get("/protocols/base")
+        data = resp.json()
+        ids = [p["protocol_id"] for p in data]
+        assert "bipa" in ids
+        assert "dpdpa" in ids
+
+    def test_response_shape(self, client: TestClient) -> None:
+        resp = client.get("/protocols/base")
+        data = resp.json()
+        for p in data:
+            assert "protocol_id" in p
+            assert "name" in p
+            assert "jurisdiction" in p
+            assert "regulatory_framework" in p
+            assert "notification_deadline_days" in p

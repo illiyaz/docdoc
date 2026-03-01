@@ -4,6 +4,8 @@ POST   /projects/{id}/protocols       — create protocol config
 GET    /projects/{id}/protocols       — list protocol configs for project
 GET    /projects/{id}/protocols/{pid} — get protocol config detail
 PATCH  /projects/{id}/protocols/{pid} — update protocol config
+
+GET    /protocols/base                — list available base protocol IDs from YAML files
 """
 from __future__ import annotations
 
@@ -15,12 +17,14 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db
+from app.api.deps import get_db, get_protocol_registry
 from app.db.models import Project, ProtocolConfig
+from app.protocols.registry import ProtocolRegistry
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/projects/{project_id}/protocols", tags=["protocols"])
+base_router = APIRouter(prefix="/protocols", tags=["protocols"])
 
 
 # ---------------------------------------------------------------------------
@@ -141,3 +145,28 @@ def _pc_dict(pc: ProtocolConfig) -> dict:
         "created_at": pc.created_at.isoformat() if pc.created_at else None,
         "updated_at": pc.updated_at.isoformat() if pc.updated_at else None,
     }
+
+
+# ---------------------------------------------------------------------------
+# Base protocol IDs (standalone, not project-scoped)
+# ---------------------------------------------------------------------------
+
+@base_router.get("/base", summary="List available base protocol IDs from YAML files")
+def list_base_protocols(
+    registry: ProtocolRegistry = Depends(get_protocol_registry),
+):
+    """Return all base protocol IDs loaded from config/protocols/*.yaml.
+
+    Each entry contains the protocol_id, human-readable name, jurisdiction,
+    and regulatory framework so the frontend can populate a dropdown.
+    """
+    return [
+        {
+            "protocol_id": p.protocol_id,
+            "name": p.name,
+            "jurisdiction": p.jurisdiction,
+            "regulatory_framework": p.regulatory_framework,
+            "notification_deadline_days": p.notification_deadline_days,
+        }
+        for p in registry.list_all()
+    ]

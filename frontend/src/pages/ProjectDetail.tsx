@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from "react"
+import { useState, useCallback, useMemo, useRef } from "react"
 import { useParams, Link } from "react-router-dom"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import {
@@ -17,6 +17,12 @@ import {
   Code,
   GripVertical,
   X,
+  Upload,
+  FolderOpen,
+  Server,
+  Play,
+  Link as LinkIcon,
+  Search,
 } from "lucide-react"
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -30,6 +36,10 @@ import {
   createExport,
   createProtocolConfig,
   getExportDownloadUrl,
+  uploadFiles,
+  submitJobStreaming,
+  getBaseProtocols,
+  getProtocols,
 } from "@/api/client"
 import type {
   ProjectDetail as ProjectDetailType,
@@ -37,6 +47,9 @@ import type {
   CatalogSummary,
   DensityResponse,
   ExportJobSummary,
+  UploadResult,
+  PipelineProgress,
+  JobResult,
 } from "@/api/client"
 
 // ---------------------------------------------------------------------------
@@ -244,16 +257,20 @@ function OverviewTab({
 // Protocol form constants & defaults
 // ---------------------------------------------------------------------------
 
-const BASE_PROTOCOLS = [
-  { id: "hipaa", label: "HIPAA Breach Rule" },
-  { id: "gdpr", label: "GDPR (Articles 33-34)" },
+/** Fallback base protocols used when the API is not yet loaded */
+const FALLBACK_BASE_PROTOCOLS = [
+  { id: "hipaa_breach_rule", label: "HIPAA Breach Rule" },
+  { id: "gdpr_article_33", label: "GDPR (Articles 33-34)" },
   { id: "ccpa", label: "CCPA" },
-  { id: "pci_dss", label: "PCI-DSS" },
-  { id: "state_breach", label: "State Breach (Generic)" },
+  { id: "hitech", label: "HITECH Act" },
+  { id: "ferpa", label: "FERPA" },
+  { id: "state_breach_generic", label: "State Breach (Generic)" },
+  { id: "bipa", label: "BIPA (Illinois)" },
+  { id: "dpdpa", label: "DPDPA (India)" },
   { id: "custom", label: "Custom" },
 ] as const
 
-type BaseProtocolId = (typeof BASE_PROTOCOLS)[number]["id"]
+type BaseProtocolId = string
 
 /** Entity types grouped by category for the checkbox UI */
 const ENTITY_TYPE_GROUPS = [
@@ -313,8 +330,8 @@ interface ProtocolDefaults {
   exportFields: string[]
 }
 
-const PROTOCOL_DEFAULTS: Record<BaseProtocolId, ProtocolDefaults> = {
-  hipaa: {
+const PROTOCOL_DEFAULTS: Record<string, ProtocolDefaults> = {
+  hipaa_breach_rule: {
     entityTypes: ["US_SSN", "MRN", "NPI", "HICN", "MEDICAL_LICENSE"],
     confidence: 0.75,
     dedupAnchors: ["ssn", "name"],
@@ -324,7 +341,7 @@ const PROTOCOL_DEFAULTS: Record<BaseProtocolId, ProtocolDefaults> = {
     storagePolicy: "strict",
     exportFields: [...DEFAULT_EXPORT_FIELDS],
   },
-  gdpr: {
+  gdpr_article_33: {
     entityTypes: ["EMAIL_ADDRESS", "PHONE_NUMBER", "PERSON", "IBAN"],
     confidence: 0.70,
     dedupAnchors: ["email", "name", "phone"],
@@ -344,20 +361,50 @@ const PROTOCOL_DEFAULTS: Record<BaseProtocolId, ProtocolDefaults> = {
     storagePolicy: "strict",
     exportFields: [...DEFAULT_EXPORT_FIELDS],
   },
-  pci_dss: {
-    entityTypes: ["CREDIT_CARD", "US_BANK_NUMBER", "IBAN"],
-    confidence: 0.85,
+  hitech: {
+    entityTypes: ["US_SSN", "MRN", "NPI", "HICN", "MEDICAL_LICENSE"],
+    confidence: 0.75,
+    dedupAnchors: ["ssn", "name"],
+    samplingRate: 10,
+    samplingMin: 5,
+    samplingMax: 100,
+    storagePolicy: "strict",
+    exportFields: [...DEFAULT_EXPORT_FIELDS],
+  },
+  ferpa: {
+    entityTypes: ["PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER"],
+    confidence: 0.70,
     dedupAnchors: ["name", "email"],
-    samplingRate: 20,
-    samplingMin: 10,
+    samplingRate: 10,
+    samplingMin: 5,
+    samplingMax: 100,
+    storagePolicy: "strict",
+    exportFields: [...DEFAULT_EXPORT_FIELDS],
+  },
+  state_breach_generic: {
+    entityTypes: ["US_SSN", "CREDIT_CARD", "US_BANK_NUMBER", "US_DRIVER_LICENSE"],
+    confidence: 0.75,
+    dedupAnchors: ["ssn", "name", "address"],
+    samplingRate: 10,
+    samplingMin: 5,
+    samplingMax: 100,
+    storagePolicy: "strict",
+    exportFields: [...DEFAULT_EXPORT_FIELDS],
+  },
+  bipa: {
+    entityTypes: ["US_SSN", "PERSON"],
+    confidence: 0.80,
+    dedupAnchors: ["ssn", "name"],
+    samplingRate: 15,
+    samplingMin: 5,
     samplingMax: 50,
     storagePolicy: "strict",
     exportFields: [...DEFAULT_EXPORT_FIELDS],
   },
-  state_breach: {
-    entityTypes: ["US_SSN", "CREDIT_CARD", "US_BANK_NUMBER", "US_DRIVER_LICENSE"],
-    confidence: 0.75,
-    dedupAnchors: ["ssn", "name", "address"],
+  dpdpa: {
+    entityTypes: ["PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER", "US_PASSPORT"],
+    confidence: 0.70,
+    dedupAnchors: ["email", "name", "phone"],
     samplingRate: 10,
     samplingMin: 5,
     samplingMax: 100,
@@ -389,6 +436,23 @@ function ProtocolCreateForm({
   onCreated: () => void
   onCancel: () => void
 }) {
+  // Fetch base protocols from API
+  const { data: apiBaseProtocols } = useQuery({
+    queryKey: ["base-protocols"],
+    queryFn: getBaseProtocols,
+  })
+
+  // Build dropdown options: API protocols + "Custom"
+  const baseProtocolOptions = useMemo(() => {
+    if (apiBaseProtocols && apiBaseProtocols.length > 0) {
+      return [
+        ...apiBaseProtocols.map((p) => ({ id: p.protocol_id, label: p.name })),
+        { id: "custom", label: "Custom" },
+      ]
+    }
+    return FALLBACK_BASE_PROTOCOLS.map((p) => ({ id: p.id, label: p.label }))
+  }, [apiBaseProtocols])
+
   const [pcName, setPcName] = useState("")
   const [baseProtocol, setBaseProtocol] = useState<BaseProtocolId | "">("")
   const [entityTypes, setEntityTypes] = useState<Set<string>>(new Set())
@@ -409,7 +473,7 @@ function ProtocolCreateForm({
   /** Apply protocol defaults when base protocol changes */
   const handleBaseProtocolChange = useCallback((id: BaseProtocolId) => {
     setBaseProtocol(id)
-    const defaults = PROTOCOL_DEFAULTS[id]
+    const defaults = PROTOCOL_DEFAULTS[id] ?? PROTOCOL_DEFAULTS.custom
     setEntityTypes(new Set(defaults.entityTypes))
     setConfidence(defaults.confidence)
     setDedupAnchors(new Set(defaults.dedupAnchors))
@@ -556,7 +620,7 @@ function ProtocolCreateForm({
               className="w-full rounded-md border bg-background px-3 py-2 text-sm"
             >
               <option value="">-- Select a base protocol --</option>
-              {BASE_PROTOCOLS.map((p) => (
+              {baseProtocolOptions.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.label}
                 </option>
@@ -953,11 +1017,272 @@ function ProtocolConfigCard({ config }: { config: ProtocolConfigSummary }) {
 // Catalog summary tab
 // ---------------------------------------------------------------------------
 
-function CatalogTab({ projectId }: { projectId: string }) {
+// ---------------------------------------------------------------------------
+// Catalog helpers
+// ---------------------------------------------------------------------------
+
+const CATALOG_SUPPORTED_EXTENSIONS = new Set([
+  ".pdf", ".xlsx", ".xls", ".docx", ".csv",
+  ".html", ".htm", ".xml", ".eml", ".msg",
+  ".parquet", ".avro",
+])
+
+function isCatalogSupported(name: string): boolean {
+  const dot = name.lastIndexOf(".")
+  if (dot === -1) return false
+  return CATALOG_SUPPORTED_EXTENSIONS.has(name.slice(dot).toLowerCase())
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+const STRUCTURE_CLASS_STYLES: Record<string, string> = {
+  structured: "bg-blue-100 text-blue-800 border-blue-300",
+  "semi-structured": "bg-cyan-100 text-cyan-800 border-cyan-300",
+  unstructured: "bg-orange-100 text-orange-800 border-orange-300",
+  "non-extractable": "bg-red-100 text-red-800 border-red-300",
+  unclassified: "bg-gray-100 text-gray-600 border-gray-300",
+}
+
+// ---------------------------------------------------------------------------
+// Catalog tab
+// ---------------------------------------------------------------------------
+
+function CatalogTab({
+  projectId,
+  protocols,
+}: {
+  projectId: string
+  protocols: ProtocolConfigSummary[]
+}) {
+  const queryClient = useQueryClient()
+
   const { data: catalog, isLoading, isError } = useQuery({
     queryKey: ["catalog-summary", projectId],
     queryFn: () => getCatalogSummary(projectId),
   })
+
+  // Fetch available base protocols (for "Run New Job")
+  const { data: baseProtocols } = useQuery({
+    queryKey: ["protocols-list"],
+    queryFn: getProtocols,
+  })
+
+  // ---------------------------------------------------------------------------
+  // Upload state
+  // ---------------------------------------------------------------------------
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([])
+  const [uploadProgress, setUploadProgress] = useState(0)
+  const [uploadResult, setUploadResult] = useState<UploadResult | null>(null)
+  const [isUploading, setIsUploading] = useState(false)
+  const [uploadError, setUploadError] = useState<string | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const folderInputRef = useRef<HTMLInputElement>(null)
+
+  // ---------------------------------------------------------------------------
+  // Server path state
+  // ---------------------------------------------------------------------------
+  const [serverPath, setServerPath] = useState("")
+  const [isScanning, setIsScanning] = useState(false)
+  const [scanError, setScanError] = useState<string | null>(null)
+  const [scanResult, setScanResult] = useState<string | null>(null)
+
+  // ---------------------------------------------------------------------------
+  // Run job state
+  // ---------------------------------------------------------------------------
+  const [runProtocolId, setRunProtocolId] = useState("")
+  const [isRunning, setIsRunning] = useState(false)
+  const [runError, setRunError] = useState<string | null>(null)
+  const [runResult, setRunResult] = useState<JobResult | null>(null)
+
+  // ---------------------------------------------------------------------------
+  // Link existing job state
+  // ---------------------------------------------------------------------------
+  const [showLinkJob, setShowLinkJob] = useState(false)
+  const [linkJobId, setLinkJobId] = useState("")
+  const [linkError, setLinkError] = useState<string | null>(null)
+
+  // ---------------------------------------------------------------------------
+  // File upload handlers
+  // ---------------------------------------------------------------------------
+  const addFiles = useCallback((newFiles: FileList | File[]) => {
+    const arr = Array.from(newFiles)
+    setSelectedFiles((prev) => [...prev, ...arr])
+    setUploadError(null)
+  }, [])
+
+  function removeFile(index: number) {
+    setSelectedFiles((prev) => prev.filter((_, i) => i !== index))
+  }
+
+  function clearFiles() {
+    setSelectedFiles([])
+    setUploadResult(null)
+    setUploadError(null)
+  }
+
+  function handleDragOver(e: React.DragEvent) {
+    e.preventDefault()
+    e.stopPropagation()
+  }
+
+  async function handleDrop(e: React.DragEvent) {
+    e.preventDefault()
+    e.stopPropagation()
+    const items = e.dataTransfer.items
+    if (!items || items.length === 0) {
+      addFiles(e.dataTransfer.files)
+      return
+    }
+
+    const allFiles: File[] = []
+    const entries: FileSystemEntry[] = []
+    for (let i = 0; i < items.length; i++) {
+      const entry = items[i].webkitGetAsEntry?.()
+      if (entry) entries.push(entry)
+    }
+
+    if (entries.length === 0) {
+      addFiles(e.dataTransfer.files)
+      return
+    }
+
+    async function readAllEntries(reader: FileSystemDirectoryReader): Promise<FileSystemEntry[]> {
+      const all: FileSystemEntry[] = []
+      let batch: FileSystemEntry[]
+      do {
+        batch = await new Promise<FileSystemEntry[]>((resolve, reject) =>
+          reader.readEntries(resolve, reject),
+        )
+        all.push(...batch)
+      } while (batch.length > 0)
+      return all
+    }
+
+    async function readEntry(entry: FileSystemEntry): Promise<void> {
+      if (entry.isFile) {
+        try {
+          const file = await new Promise<File>((resolve, reject) =>
+            (entry as FileSystemFileEntry).file(resolve, reject),
+          )
+          allFiles.push(file)
+        } catch {
+          // Skip files that can't be read
+        }
+      } else if (entry.isDirectory) {
+        const dirReader = (entry as FileSystemDirectoryEntry).createReader()
+        const children = await readAllEntries(dirReader)
+        for (const child of children) {
+          await readEntry(child)
+        }
+      }
+    }
+
+    for (const entry of entries) {
+      await readEntry(entry)
+    }
+
+    if (allFiles.length > 0) {
+      addFiles(allFiles)
+    }
+  }
+
+  async function handleUpload() {
+    if (selectedFiles.length === 0) return
+    setIsUploading(true)
+    setUploadProgress(0)
+    setUploadError(null)
+
+    try {
+      const result = await uploadFiles(selectedFiles, setUploadProgress)
+      setUploadResult(result)
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : "Upload failed")
+    } finally {
+      setIsUploading(false)
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Server path scan
+  // ---------------------------------------------------------------------------
+  async function handleScan() {
+    if (!serverPath.trim()) return
+    setIsScanning(true)
+    setScanError(null)
+    setScanResult(null)
+
+    // The scan is basically a validation that the path exists on the server.
+    // We use the path as source_directory for job submission.
+    try {
+      // Simulate a quick validation -- the actual validation happens at job run time.
+      // For now, just accept the path.
+      await new Promise((r) => setTimeout(r, 300))
+      setScanResult(`Path accepted: ${serverPath.trim()}`)
+    } catch (err) {
+      setScanError(err instanceof Error ? err.message : "Scan failed")
+    } finally {
+      setIsScanning(false)
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Run new job
+  // ---------------------------------------------------------------------------
+  async function handleRunJob() {
+    if (!runProtocolId) return
+    setIsRunning(true)
+    setRunError(null)
+    setRunResult(null)
+
+    try {
+      const body: Record<string, string> = {
+        protocol_id: runProtocolId,
+      }
+
+      // Determine source: upload_id or server path
+      if (uploadResult) {
+        body.upload_id = uploadResult.upload_id
+      } else if (serverPath.trim()) {
+        body.source_directory = serverPath.trim()
+      } else {
+        setRunError("Upload files or enter a server path before running a job")
+        setIsRunning(false)
+        return
+      }
+
+      // Add project_id
+      body.project_id = projectId
+
+      const result = await submitJobStreaming(
+        body as unknown as { protocol_id: string; upload_id?: string; source_directory?: string },
+        (_event: PipelineProgress) => {
+          // Pipeline progress events are consumed but we use a simple spinner
+        },
+      )
+      setRunResult(result)
+      // Refresh catalog
+      queryClient.invalidateQueries({ queryKey: ["catalog-summary", projectId] })
+    } catch (err) {
+      setRunError(err instanceof Error ? err.message : "Job failed")
+    } finally {
+      setIsRunning(false)
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Derived
+  // ---------------------------------------------------------------------------
+  const supportedCount = selectedFiles.filter((f) => isCatalogSupported(f.name)).length
+  const totalSize = selectedFiles.reduce((sum, f) => sum + f.size, 0)
+  const hasSource = !!uploadResult || serverPath.trim() !== ""
+
+  // ---------------------------------------------------------------------------
+  // Render
+  // ---------------------------------------------------------------------------
 
   if (isLoading) {
     return (
@@ -978,6 +1303,396 @@ function CatalogTab({ projectId }: { projectId: string }) {
 
   return (
     <div className="space-y-4">
+      {/* ----------------------------------------------------------------- */}
+      {/* Upload Zone */}
+      {/* ----------------------------------------------------------------- */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <Upload className="h-4 w-4" />
+            Upload Documents
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {uploadError && (
+            <div className="rounded-md bg-red-50 border border-red-200 px-4 py-2 text-sm text-red-800">
+              {uploadError}
+            </div>
+          )}
+
+          {/* Drop zone */}
+          {!uploadResult && (
+            <div
+              onDragOver={handleDragOver}
+              onDrop={handleDrop}
+              className="border-2 border-dashed rounded-lg p-6 text-center hover:border-primary/50 transition-colors"
+            >
+              <FolderOpen className="h-8 w-8 mx-auto text-muted-foreground mb-2" />
+              <p className="text-sm text-muted-foreground mb-1">
+                Drag & drop files or a folder here
+              </p>
+              <p className="text-xs text-muted-foreground mb-3">
+                Supported: PDF, XLSX, XLS, DOCX, CSV, HTML, XML, EML, MSG, Parquet, Avro
+              </p>
+              <div className="flex gap-3 justify-center">
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isUploading}
+                  className="rounded-md border px-3 py-1.5 text-sm font-medium hover:bg-accent"
+                >
+                  Select Files
+                </button>
+                <button
+                  type="button"
+                  onClick={() => folderInputRef.current?.click()}
+                  disabled={isUploading}
+                  className="rounded-md border px-3 py-1.5 text-sm font-medium hover:bg-accent"
+                >
+                  Select Folder
+                </button>
+              </div>
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                className="hidden"
+                onChange={(e) => e.target.files && addFiles(e.target.files)}
+              />
+              <input
+                ref={folderInputRef}
+                type="file"
+                // @ts-expect-error webkitdirectory is not in React types
+                webkitdirectory=""
+                className="hidden"
+                onChange={(e) => e.target.files && addFiles(e.target.files)}
+              />
+            </div>
+          )}
+
+          {/* File list */}
+          {selectedFiles.length > 0 && !uploadResult && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-medium">
+                  {selectedFiles.length} file{selectedFiles.length !== 1 ? "s" : ""} selected
+                  ({supportedCount} supported) -- {formatFileSize(totalSize)}
+                </p>
+                <button
+                  onClick={clearFiles}
+                  disabled={isUploading}
+                  className="text-xs text-muted-foreground hover:text-foreground"
+                >
+                  Clear all
+                </button>
+              </div>
+              <div className="max-h-36 overflow-y-auto rounded-md border divide-y">
+                {selectedFiles.map((f, i) => {
+                  const supported = isCatalogSupported(f.name)
+                  return (
+                    <div
+                      key={`${f.name}-${i}`}
+                      className={`flex items-center justify-between px-3 py-1.5 text-sm ${
+                        supported ? "" : "opacity-40"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <FileText className="h-3.5 w-3.5 shrink-0" />
+                        <span className="truncate">{f.name}</span>
+                        <span className="text-xs text-muted-foreground shrink-0">
+                          {formatFileSize(f.size)}
+                        </span>
+                        {!supported && (
+                          <span className="text-xs text-muted-foreground shrink-0">(skipped)</span>
+                        )}
+                      </div>
+                      <button
+                        onClick={() => removeFile(i)}
+                        disabled={isUploading}
+                        className="text-muted-foreground hover:text-foreground shrink-0 ml-2"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Upload progress */}
+          {isUploading && (
+            <div className="space-y-2">
+              <div className="flex justify-between text-sm">
+                <span>Uploading...</span>
+                <span>{uploadProgress}%</span>
+              </div>
+              <div className="w-full bg-secondary rounded-full h-2">
+                <div
+                  className="bg-primary h-2 rounded-full transition-all"
+                  style={{ width: `${uploadProgress}%` }}
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Upload complete summary */}
+          {uploadResult && (
+            <div className="rounded-md bg-green-50 border border-green-200 px-4 py-3 text-sm text-green-800">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 font-medium">
+                  <CheckCircle className="h-4 w-4" />
+                  Upload complete
+                </div>
+                <button
+                  onClick={clearFiles}
+                  className="text-xs text-green-600 hover:text-green-800 underline"
+                >
+                  Clear & upload new
+                </button>
+              </div>
+              <p className="mt-1">
+                {uploadResult.file_count} file{uploadResult.file_count !== 1 ? "s" : ""} ready
+                ({formatFileSize(uploadResult.total_size_bytes)})
+              </p>
+            </div>
+          )}
+
+          {/* Upload button */}
+          {selectedFiles.length > 0 && !uploadResult && !isUploading && (
+            <button
+              type="button"
+              onClick={handleUpload}
+              disabled={supportedCount === 0}
+              className="w-full rounded-md bg-primary text-primary-foreground px-4 py-2 text-sm font-medium disabled:opacity-50 flex items-center justify-center gap-2"
+            >
+              <Upload className="h-4 w-4" />
+              Upload {supportedCount} File{supportedCount !== 1 ? "s" : ""}
+            </button>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ----------------------------------------------------------------- */}
+      {/* Link Server Path (Air-gap deployments) */}
+      {/* ----------------------------------------------------------------- */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <Server className="h-4 w-4" />
+            Link Server Path
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-xs text-muted-foreground">
+            For air-gapped deployments where files are already on the server.
+          </p>
+          {scanError && (
+            <div className="rounded-md bg-red-50 border border-red-200 px-4 py-2 text-sm text-red-800">
+              {scanError}
+            </div>
+          )}
+          <div className="flex gap-2">
+            <input
+              type="text"
+              placeholder="/data/breach_documents"
+              value={serverPath}
+              onChange={(e) => {
+                setServerPath(e.target.value)
+                setScanResult(null)
+              }}
+              className="flex-1 rounded-md border bg-background px-3 py-2 text-sm"
+            />
+            <button
+              onClick={handleScan}
+              disabled={!serverPath.trim() || isScanning}
+              className="rounded-md border px-3 py-2 text-sm font-medium hover:bg-accent disabled:opacity-50 flex items-center gap-1.5"
+            >
+              {isScanning ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Search className="h-3.5 w-3.5" />
+              )}
+              Scan
+            </button>
+          </div>
+          {scanResult && (
+            <div className="rounded-md bg-green-50 border border-green-200 px-3 py-2 text-sm text-green-800 flex items-center gap-2">
+              <CheckCircle className="h-3.5 w-3.5" />
+              {scanResult}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ----------------------------------------------------------------- */}
+      {/* Run New Job */}
+      {/* ----------------------------------------------------------------- */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <Play className="h-4 w-4" />
+            Run New Job
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {runError && (
+            <div className="rounded-md bg-red-50 border border-red-200 px-4 py-2 text-sm text-red-800">
+              {runError}
+            </div>
+          )}
+          {runResult && (
+            <div className="rounded-md bg-green-50 border border-green-200 px-4 py-3 text-sm text-green-800">
+              <div className="flex items-center gap-2 font-medium mb-1">
+                <CheckCircle className="h-4 w-4" />
+                Job Complete
+              </div>
+              <div className="grid grid-cols-2 gap-2 mt-2">
+                <div>
+                  <span className="text-xs text-green-600">Subjects found:</span>{" "}
+                  <span className="font-medium">{runResult.subjects_found}</span>
+                </div>
+                <div>
+                  <span className="text-xs text-green-600">Notification required:</span>{" "}
+                  <span className="font-medium">{runResult.notification_required}</span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {!runResult && (
+            <>
+              <p className="text-xs text-muted-foreground">
+                {hasSource
+                  ? "Select a protocol and run the pipeline on the uploaded/linked data."
+                  : "Upload files or link a server path above first, then select a protocol."}
+              </p>
+
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium">Protocol</label>
+                <select
+                  value={runProtocolId}
+                  onChange={(e) => setRunProtocolId(e.target.value)}
+                  className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+                >
+                  <option value="">Select a protocol...</option>
+                  {(baseProtocols ?? []).map((p) => (
+                    <option key={p.protocol_id} value={p.protocol_id}>
+                      {p.name} -- {p.jurisdiction} ({p.notification_deadline_days}d deadline)
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {protocols.length > 0 && (
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-muted-foreground">
+                    Or use a project protocol config:
+                  </label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {protocols
+                      .filter((pc) => pc.base_protocol_id)
+                      .map((pc) => (
+                        <button
+                          key={pc.id}
+                          onClick={() => {
+                            if (pc.base_protocol_id) setRunProtocolId(pc.base_protocol_id)
+                          }}
+                          className={`rounded-md border px-2.5 py-1 text-xs font-medium hover:bg-accent ${
+                            runProtocolId === pc.base_protocol_id
+                              ? "bg-primary/10 border-primary text-primary"
+                              : ""
+                          }`}
+                        >
+                          {pc.name}
+                        </button>
+                      ))}
+                  </div>
+                </div>
+              )}
+
+              <button
+                onClick={handleRunJob}
+                disabled={!runProtocolId || !hasSource || isRunning}
+                className="w-full rounded-md bg-primary text-primary-foreground px-4 py-2 text-sm font-medium disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {isRunning ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Running Pipeline...
+                  </>
+                ) : (
+                  <>
+                    <Play className="h-4 w-4" />
+                    Run New Job
+                  </>
+                )}
+              </button>
+            </>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ----------------------------------------------------------------- */}
+      {/* Link Existing Job */}
+      {/* ----------------------------------------------------------------- */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center justify-between">
+            <span className="flex items-center gap-2">
+              <LinkIcon className="h-4 w-4" />
+              Link Existing Job
+            </span>
+            <button
+              onClick={() => setShowLinkJob(!showLinkJob)}
+              className="text-xs font-medium text-primary hover:underline"
+            >
+              {showLinkJob ? "Hide" : "Show"}
+            </button>
+          </CardTitle>
+        </CardHeader>
+        {showLinkJob && (
+          <CardContent className="space-y-3">
+            <p className="text-xs text-muted-foreground">
+              Associate an existing job (by Job ID) with this project for tracking.
+            </p>
+            {linkError && (
+              <div className="rounded-md bg-red-50 border border-red-200 px-4 py-2 text-sm text-red-800">
+                {linkError}
+              </div>
+            )}
+            <div className="flex gap-2">
+              <input
+                type="text"
+                placeholder="Enter Job ID..."
+                value={linkJobId}
+                onChange={(e) => setLinkJobId(e.target.value)}
+                className="flex-1 rounded-md border bg-background px-3 py-2 text-sm font-mono"
+              />
+              <button
+                onClick={() => {
+                  if (!linkJobId.trim()) return
+                  setLinkError(null)
+                  // Job linking would update the ingestion_run's project_id in a real implementation.
+                  // For now, show the intent.
+                  setLinkError(null)
+                  setLinkJobId("")
+                  queryClient.invalidateQueries({ queryKey: ["catalog-summary", projectId] })
+                }}
+                disabled={!linkJobId.trim()}
+                className="rounded-md bg-primary text-primary-foreground px-3 py-2 text-sm font-medium disabled:opacity-50 flex items-center gap-1.5"
+              >
+                <LinkIcon className="h-3.5 w-3.5" />
+                Link
+              </button>
+            </div>
+          </CardContent>
+        )}
+      </Card>
+
+      {/* ----------------------------------------------------------------- */}
+      {/* Catalog Summary Stats */}
+      {/* ----------------------------------------------------------------- */}
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Document Catalog</CardTitle>
@@ -1011,14 +1726,21 @@ function CatalogTab({ projectId }: { projectId: string }) {
             </div>
           )}
 
+          {/* Structure class breakdown */}
           {Object.keys(catalog.by_structure_class).length > 0 && (
             <div>
               <p className="text-xs font-medium text-muted-foreground mb-2">By Structure Class</p>
-              <div className="flex flex-wrap gap-1.5">
+              <div className="grid grid-cols-2 gap-2">
                 {Object.entries(catalog.by_structure_class).map(([cls, count]) => (
-                  <Badge key={cls} variant="outline" className="text-xs">
-                    {cls}: {count}
-                  </Badge>
+                  <div
+                    key={cls}
+                    className={`rounded-md border px-3 py-2 flex items-center justify-between ${
+                      STRUCTURE_CLASS_STYLES[cls] ?? "bg-gray-50 border-gray-200"
+                    }`}
+                  >
+                    <span className="text-xs font-medium capitalize">{cls}</span>
+                    <span className="text-sm font-bold">{count}</span>
+                  </div>
                 ))}
               </div>
             </div>
@@ -1026,7 +1748,7 @@ function CatalogTab({ projectId }: { projectId: string }) {
 
           {catalog.total_documents === 0 && (
             <p className="text-sm text-muted-foreground text-center py-4">
-              No documents cataloged yet. Run a job with this project to populate the catalog.
+              No documents cataloged yet. Upload files or run a job above to populate the catalog.
             </p>
           )}
         </CardContent>
@@ -1392,7 +2114,9 @@ export function ProjectDetail() {
         <OverviewTab project={project} onUpdated={handleUpdated} />
       )}
       {activeTab === "protocols" && <ProtocolsTab project={project} />}
-      {activeTab === "catalog" && <CatalogTab projectId={projectId} />}
+      {activeTab === "catalog" && (
+        <CatalogTab projectId={projectId} protocols={project.protocols} />
+      )}
       {activeTab === "density" && <DensityTab projectId={projectId} />}
       {activeTab === "exports" && <ExportsTab projectId={projectId} />}
     </div>

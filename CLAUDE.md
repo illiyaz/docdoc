@@ -111,7 +111,7 @@ project-root/
 │   └── SCHEMA.md                  # detailed technical architecture
 ├── config/
 │   ├── config.yaml                # all environment config, no secrets
-│   └── protocols/                 # 6 built-in YAML protocol files
+│   └── protocols/                 # 8 built-in YAML protocol files
 ├── app/
 │   ├── tasks/                     # pipeline stages (Prefect tasks)
 │   │   ├── discovery.py
@@ -238,7 +238,7 @@ These are detailed in [docs/SCHEMA.md](docs/SCHEMA.md). Summary:
 - **PDF processing:** PyMuPDF page-streaming + PaddleOCR for scanned pages. Dual-path (digital vs scanned). Content onset detection. Cross-page tail-buffer stitching. Checkpointing per page.
 - **PII detection:** Three layers (pattern match → context window → positional header). Presidio + spaCy. 85+ patterns covering PII/PHI/FERPA/SPI/PPRA. 8 data categories (PII, SPII, PHI, PFI, PCI, NPI, FTI, CREDENTIALS) with multi-category mapping per entity type.
 - **RRA:** Entity resolution via Union-Find. Confidence-weighted merge signals. Threshold: 0.80 auto-accept, 0.60–0.79 human review, <0.60 separate.
-- **Protocols:** 6 built-in (HIPAA, GDPR, CCPA, HITECH, FERPA, state_breach_generic). YAML-configurable. Selected once per job.
+- **Protocols:** 8 built-in (HIPAA, GDPR, CCPA, HITECH, FERPA, state_breach_generic, BIPA, DPDPA). YAML-configurable. Selected once per job.
 - **HITL:** 4 roles (REVIEWER, LEGAL_REVIEWER, APPROVER, QC_SAMPLER). 4 review queues. State machine: AI_PENDING → HUMAN_REVIEW → LEGAL_REVIEW → APPROVED → NOTIFIED.
 - **Notification:** SMTP email + WeasyPrint postal letters. Template-driven. Delivery gated on APPROVED status only.
 - **Audit:** Every extraction decision traceable to a specific rule/pattern/classifier. Append-only audit trail.
@@ -298,8 +298,9 @@ These are detailed in [docs/SCHEMA.md](docs/SCHEMA.md). Summary:
 | 7. LLM integration | COMPLETE | `app/llm/client.py`, `app/llm/prompts.py`, `app/llm/audit.py` — governance-gated Ollama client, 3 prompt templates, full audit logging, 55 tests |
 | 8. Frontend + rename | COMPLETE | Projects list + detail pages, App.tsx routes, rename Cyber NotifAI to Forentis AI across frontend + backend |
 | 9. Guided Protocol Form | COMPLETE | Replaced raw JSON textarea with guided form: base protocol dropdown (6 presets), entity type checkboxes (Identity/Financial/Health), confidence slider, dedup anchor multi-select, sampling config, storage policy radios, reorderable export fields, raw JSON toggle for power users |
+| 10. Catalog Tab + Base Protocols | COMPLETE | Catalog tab with file upload (drag-and-drop), server path linking (air-gap), Run New Job, Link Existing Job; GET /protocols/base endpoint; base protocol dropdown populated from API (8 YAML protocols); placeholder YAML for bipa, dpdpa |
 
-**1400 tests passing after Steps 1–8. Phase 5 complete.**
+**1403 tests passing after Steps 1–10. Phase 5 complete.**
 
 See [docs/PLAN.md](docs/PLAN.md) for full step-by-step implementation details.
 

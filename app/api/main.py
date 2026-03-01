@@ -22,6 +22,7 @@ from app.api.routes.exports import router as exports_router
 from app.api.routes.health import router as health_router
 from app.api.routes.jobs import router as jobs_router
 from app.api.routes.projects import router as projects_router
+from app.api.routes.protocols import base_router as base_protocols_router
 from app.api.routes.protocols import router as protocols_router
 from app.api.routes.review import router as review_router
 from app.core.logging import setup_logging
@@ -86,6 +87,7 @@ app.add_middleware(PIIFilterMiddleware)
 app.include_router(health_router)
 app.include_router(projects_router)
 app.include_router(protocols_router)
+app.include_router(base_protocols_router)
 app.include_router(exports_router)
 app.include_router(jobs_router)
 app.include_router(review_router)

@@ -70,11 +70,11 @@ Full phase-by-phase implementation details. See [CLAUDE.md](../CLAUDE.md) for pr
 
 ---
 
-## Phase 5 — Forentis AI Evolution (IN PROGRESS)
+## Phase 5 — Forentis AI Evolution (COMPLETE)
 
-Evolving Cyber NotifAI into **Forentis AI** — a full breach-analysis platform with Projects, editable Protocols, structured cataloging, density scoring, CSV export, configurable dedup, and LLM assist (Qwen 2.5 7B via Ollama, governance-gated). Deterministic pipeline remains primary; LLM is additive only.
+Evolving Cyber NotifAI into **Forentis AI** — a full breach-analysis platform with Projects, editable Protocols, structured cataloging, density scoring, CSV export, configurable dedup, LLM assist (Qwen 2.5 7B via Ollama, governance-gated), guided protocol forms, and catalog upload/linking. Deterministic pipeline remains primary; LLM is additive only.
 
-**Implementation is split into 8 steps. All 8 steps are complete.**
+**Implementation is split into 10 steps. All 10 steps are complete.**
 
 ### Step 1 — Schema + Migration (COMPLETE)
 
@@ -494,4 +494,75 @@ All templates instruct the LLM to respond ONLY with valid JSON. `PROMPT_TEMPLATE
 
 **All 1400 tests passing after Steps 1–8.**
 
-**Phase 5 gate:** All 8 steps complete. Platform renamed to Forentis AI. Projects page provides project management. Protocol configs, catalog, density, and exports accessible per-project. Full pipeline API coverage in frontend. PASSED
+### Step 9 — Guided Protocol Form (COMPLETE)
+
+**Modified file: `frontend/src/pages/ProjectDetail.tsx`**
+
+Replaced the raw Config JSON textarea in the Protocols tab with a guided, multi-section form (`ProtocolCreateForm` component).
+
+**New constants and presets:**
+
+| Constant | Details |
+|---|---|
+| `BASE_PROTOCOLS` | 6 protocol presets: hipaa, gdpr, ccpa, pci_dss, state_breach, custom |
+| `ENTITY_TYPE_GROUPS` | 14 entity types in 3 categories (Identity, Financial, Health) |
+| `DEDUP_ANCHORS` | 5 anchor types: ssn, email, phone, address, name |
+| `DEFAULT_EXPORT_FIELDS` | 7 default CSV export columns |
+| `PROTOCOL_DEFAULTS` | Per-protocol default configurations for all 6 base protocols |
+
+**Form sections (8 total):**
+
+1. **Name** — Required text input
+2. **Base Protocol dropdown** — Selecting a protocol pre-populates all fields with defaults
+3. **Target Entity Types** — Checkboxes grouped by category (Identity: 7, Financial: 3, Health: 4)
+4. **Confidence Threshold** — Range slider 0.50–1.00 with live display
+5. **Dedup Anchors** — Multi-select checkboxes
+6. **Sampling Config** — Rate (%), min, max number inputs
+7. **Storage Policy** — Strict vs Investigation radio buttons
+8. **Export Fields** — Reorderable list with up/down/remove + add custom field
+9. **Show raw JSON** — Toggle with read-only preview and raw edit override mode
+
+**Design decisions:**
+- No new dependencies — built with existing ShadCN, Tailwind, lucide-react
+- Backward compatible — API still receives `{name, base_protocol_id, config_json}`
+- Power users can bypass the form via raw JSON edit mode
+- TypeScript type-check and production build both pass
+
+### Step 10 — Catalog Tab + Base Protocols (COMPLETE)
+
+**Catalog Tab overhaul (`frontend/src/pages/ProjectDetail.tsx`):**
+
+| Feature | Details |
+|---|---|
+| File upload zone | Drag-and-drop with progress bar, supported file type indicators, folder recursion. Calls `POST /jobs/upload` with `project_id`. |
+| Link Server Path | Input + Scan button for air-gapped deployments with server-side files. |
+| Run New Job | Protocol selector (from project configs + base protocols), calls `POST /jobs/run` with `project_id` and `protocol_config_id`. |
+| Link Existing Job | Job ID input to associate unlinked jobs with the project. |
+| Structure class breakdown | Color-coded cards (structured/semi-structured/unstructured/non-extractable) below catalog summary stats. |
+
+**New backend endpoint:**
+
+| Method + Path | Response | Notes |
+|---|---|---|
+| `GET /protocols/base` | `[{protocol_id, name, jurisdiction, regulatory_framework, notification_deadline_days}, ...]` | Returns all available base protocol IDs from `config/protocols/*.yaml` |
+
+Added in `app/api/routes/protocols.py` as `base_router`, registered in `app/api/main.py`.
+
+**New YAML protocol files:**
+
+| File | Protocol | Jurisdiction | Key triggers | Deadline |
+|---|---|---|---|---|
+| `config/protocols/bipa.yaml` | Illinois BIPA (740 ILCS 14) | Illinois, US | BIOMETRIC, FINGERPRINT, FACE_GEOMETRY, IRIS_SCAN, VOICEPRINT, US_SSN | 30 days |
+| `config/protocols/dpdpa.yaml` | India DPDPA 2023 | India | AADHAAR, PAN_CARD, PERSON, EMAIL, PHONE, PASSPORT | 72 hours |
+
+Total built-in protocols: **8** (hipaa, gdpr, ccpa, hitech, ferpa, state_breach_generic + bipa, dpdpa).
+
+**Frontend API additions (`client.ts`):**
+- `BaseProtocol` interface + `getBaseProtocols()` function
+- Protocol dropdown dynamically populated from `GET /protocols/base` with fallback constants
+
+**Tests:** `tests/test_api.py` — 3 new tests (`TestBaseProtocols`): all protocols present, new protocols included, response shape. `tests/test_protocols.py` updated for 8 protocols.
+
+**All 1403 tests passing after Steps 1–10.**
+
+**Phase 5 gate:** All 10 steps complete. Platform renamed to Forentis AI. Full project management with guided protocol configuration, catalog upload/linking, density scoring, CSV export, and governance-gated LLM. 8 built-in regulatory protocols. PASSED

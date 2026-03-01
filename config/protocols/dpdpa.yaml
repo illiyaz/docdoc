@@ -1,0 +1,19 @@
+protocol_id: dpdpa
+name: Digital Personal Data Protection Act (India)
+jurisdiction: IN
+triggering_entity_types:
+  - AADHAAR
+  - PAN_CARD
+  - PERSON
+  - EMAIL
+  - PHONE
+  - PASSPORT
+notification_threshold: 1
+notification_deadline_days: 72
+required_notification_content:
+  - nature of the personal data breach
+  - description of safeguards in place
+  - steps taken to remediate the breach
+  - contact information of data fiduciary
+  - recommendations for individuals to mitigate harm
+regulatory_framework: "Digital Personal Data Protection Act 2023 (India)"

@@ -130,9 +130,9 @@ class TestLoadProtocol:
         assert p.individual_deadline_days == 30
         assert p.requires_hhs_notification is True
 
-    def test_all_six_builtins_load(self):
+    def test_all_builtins_load(self):
         protocols = load_all_protocols(BUILTIN_DIR)
-        assert len(protocols) == 6
+        assert len(protocols) == 8
         ids = {p.protocol_id for p in protocols}
         assert ids == {
             "hipaa_breach_rule",
@@ -141,6 +141,8 @@ class TestLoadProtocol:
             "hitech",
             "ferpa",
             "state_breach_generic",
+            "bipa",
+            "dpdpa",
         }
 
     def test_non_yaml_files_skipped(self, tmp_path):
@@ -180,10 +182,10 @@ class TestProtocolRegistry:
         with pytest.raises(KeyError, match="nonexistent"):
             registry.get("nonexistent")
 
-    def test_list_all_returns_six_sorted(self):
+    def test_list_all_returns_all_sorted(self):
         registry = ProtocolRegistry.default()
         protocols = registry.list_all()
-        assert len(protocols) == 6
+        assert len(protocols) == 8
         ids = [p.protocol_id for p in protocols]
         assert ids == sorted(ids)
 

@@ -304,6 +304,22 @@ export function getProtocols(): Promise<Protocol[]> {
 }
 
 // ---------------------------------------------------------------------------
+// Base Protocols (from YAML files)
+// ---------------------------------------------------------------------------
+
+export interface BaseProtocol {
+  protocol_id: string
+  name: string
+  jurisdiction: string
+  regulatory_framework: string
+  notification_deadline_days: number
+}
+
+export function getBaseProtocols(): Promise<BaseProtocol[]> {
+  return api("/protocols/base")
+}
+
+// ---------------------------------------------------------------------------
 // Projects
 // ---------------------------------------------------------------------------
 

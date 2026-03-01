@@ -1,0 +1,19 @@
+protocol_id: bipa
+name: Illinois Biometric Information Privacy Act (BIPA)
+jurisdiction: US-IL
+triggering_entity_types:
+  - BIOMETRIC
+  - FINGERPRINT
+  - FACE_GEOMETRY
+  - IRIS_SCAN
+  - VOICEPRINT
+  - US_SSN
+notification_threshold: 1
+notification_deadline_days: 30
+required_notification_content:
+  - description of the biometric data collected
+  - purpose for collection
+  - duration of storage
+  - written consent documentation
+  - data destruction policy
+regulatory_framework: "740 ILCS 14 (BIPA)"
