@@ -1378,12 +1378,49 @@ Stored in `AuditEvent` table (existing) with event_type `"detection_suppressed"`
 7. Add tests: schema creation, filtering, table filtering, suppression log, fallback behavior
 8. Measure: should reduce 38 → 5-6 detections on this document
 
-**Phase 14c (integration):**
-1. Update entity analysis (Step 13) to accept DocumentSchema
-2. Wire suppression audit trail into AuditEvent table
-3. Update analysis review API to return DocumentSchema + suppression log
-4. Frontend: show document understanding results in review panel (document type, field map, suppression summary)
-5. End-to-end test: Boosey & Hawkes PDF → 5 clean detections → correct entity groups → clean notification list
+**Phase 14c (detection tuning + integration + Catalog UX):**
+
+Post-14b testing revealed three remaining detection quality issues and one UX problem:
+
+**Detection tuning issues (observed):**
+
+1. **Low-confidence FPs still showing:** US_DRIVER_LICENSE at 1% for values 001968, 1121799, 001967 on the Boosey & Hawkes doc. The schema filter should have caught these but the 1% confidence detections slip through. Fix: add a minimum confidence floor (drop detections below 10% confidence before they reach the schema filter).
+
+2. **Dollar amounts matching as phone numbers:** On the Washington CMD employment record, payroll amounts like `153.84 160.00`, `252.73 505.46`, `493.25 986.50`, `0.30 0.60` match PHONE_NUMBER at 40%. These are pairs of decimal numbers (current pay + YTD) that Presidio reads as phone-number-length digit strings. Fix: add a currency pattern detector to `context_deny_list.py` — two decimal numbers (###.##) adjacent to each other are financial data, not phone numbers.
+
+3. **Duplicate detections for same value/page:** Same PERSON "Kristin B Aleshire" appearing twice, same LOCATION "Hagerstown" appearing 4+ times on the same page. Fix: deduplicate detections by (value, entity_type, page) — keep highest confidence match only.
+
+**Expected improvement:** Boosey & Hawkes 8 → ~4, Washington CMD 16 → ~6-7.
+
+**Catalog UX issue (observed):**
+
+After uploading files, the Catalog tab shows "Job Complete — Subjects found: 0, Notification required: 0" which is from a previous unrelated job. The user sees this immediately after upload and thinks the analysis already ran and found nothing. The upload zone, job status, and catalog stats are all mixed together without clear state separation.
+
+Fix: Clear separation between upload state and job results. After upload, show "X files uploaded, ready for analysis" with a clear CTA to the Jobs tab. Previous job results should be in a collapsible section, not prominently displayed next to the upload zone.
+
+**Full Phase 14c scope:**
+
+1. **Detection tuning:**
+   - Minimum confidence threshold (10%) — drop sub-threshold detections before processing
+   - Currency pattern detector — suppress adjacent decimal number pairs as financial data
+   - Detection deduplication — same value + type + page → keep highest confidence only
+
+2. **Integration:**
+   - Update entity analysis (Step 13) to accept DocumentSchema
+   - Wire suppression audit trail into AuditEvent table
+   - Update analysis review API to return DocumentSchema + suppression log
+   - Frontend: show document understanding results in review panel (document type, field map, suppression summary)
+
+3. **Catalog UX:**
+   - Separate upload state from job results
+   - Post-upload: show file count + clear "Run Analysis" CTA
+   - Move previous job status to collapsible section
+   - Document Catalog stats only show after a job completes for this project
+
+4. **Regression tests:**
+   - Boosey & Hawkes: 38 → ~4 clean detections
+   - Washington CMD: 68 → ~6-7 clean detections
+   - Entity groups correct for both documents
 
 #### Execution Prompts
 
@@ -1650,6 +1687,136 @@ Phase 14b: LLM Document Understanding + Schema Filter.
    - Integration: schema + Presidio → filtered output
 
 7. Run pytest on changed files. Fix failures. Update CLAUDE.md.
+```
+
+**Phase 14c prompt (detection tuning + integration + Catalog UX):**
+
+```
+@agent-general-purpose Read CLAUDE.md and docs/PLAN.md Step 14 for context.
+
+Phase 14c: Detection tuning, integration, and Catalog UX fixes. Three areas.
+
+=== AREA 1: DETECTION QUALITY TUNING ===
+
+1a. Add minimum confidence threshold to the detection pipeline.
+    In app/pii/schema_filter.py (or app/tasks/detection.py if schema_filter
+    is not the right place), add a pre-filter that drops ALL detections
+    with confidence < 0.10 (10%). This eliminates 1% confidence driver's
+    license matches on reference numbers. The threshold should be
+    configurable via a constant MIN_DETECTION_CONFIDENCE = 0.10.
+    Log dropped detections at debug level.
+
+1b. Add currency/financial pattern detection to app/pii/context_deny_list.py:
+    - Add a function is_currency_pattern(text: str) -> bool that detects:
+      * Two decimal numbers adjacent to each other: "153.84 160.00"
+      * Numbers with comma thousands separators: "1,153.84"
+      * Numbers preceded by $ or currency symbols
+      * Numbers in patterns like "###.## ###.##" (current + YTD pairs)
+    - In is_likely_false_positive(), if entity_type is PHONE_NUMBER and
+      the detected text matches a currency pattern, return True.
+    - This fixes: "153.84 160.00" → PHONE_NUMBER, "493.25 986.50" → PHONE_NUMBER,
+      "0.30 0.60" → PHONE_NUMBER on payroll documents.
+
+1c. Add detection deduplication:
+    In app/tasks/detection.py or app/pii/schema_filter.py, add a
+    deduplicate_detections(detections) function that:
+    - Groups detections by (normalized_value, entity_type, page_number)
+    - For each group, keeps only the detection with highest confidence
+    - Returns deduplicated list + count of duplicates removed
+    - This fixes: PERSON "Kristin B Aleshire" appearing 2x,
+      LOCATION "Hagerstown" appearing 4x on same page.
+
+1d. Wire all three into the pipeline in this order:
+    Presidio runs → min confidence filter → schema filter → currency filter → dedup
+    Each filter logs what it removed for the suppression audit trail.
+
+=== AREA 2: INTEGRATION (14c core) ===
+
+2a. Update entity analysis (Step 13) to accept DocumentSchema.
+    In app/structure/llm_entity_analyzer.py, modify analyze() to accept
+    an optional document_schema parameter. When provided:
+    - Pre-seed entity groups from schema.people
+    - Filter sample_detections through schema before analysis
+    - Include schema context in the LLM prompt for better grouping
+
+2b. Wire suppression audit trail into AuditEvent table.
+    In app/audit/events.py, add two new event types:
+    "detection_suppressed" and "detection_reclassified".
+    In the schema filter and deny-list filter, log each suppression
+    as an AuditEvent with: document_id, original_type, original_value
+    (masked), confidence, suppression_reason, filter_source
+    (schema_filter | deny_list | min_confidence | dedup | currency).
+
+2c. Update analysis review API (app/api/routes/analysis_review.py):
+    GET /jobs/{id}/analysis response should now include:
+    - document_schema: the DocumentSchema JSON (if available)
+    - suppression_summary: {total_suppressed, by_reason: {schema: N, deny_list: N, ...}}
+    - suppressed_detections: list of what was filtered out (for transparency)
+
+2d. Frontend: show document understanding results in the analysis review panel
+    (frontend/src/pages/ProjectDetail.tsx AnalysisReviewPanel):
+    - Above entity groups, show a "Document Understanding" card:
+      * Document type badge (e.g., "financial_statement")
+      * Issuing entity if available
+      * Field map as a compact table (label → semantic type → PII?)
+      * Tables detected with column types
+    - Below sample PII, show "Filtered Detections" collapsible:
+      * Count: "23 false positives suppressed"
+      * Expandable list showing what was filtered and why
+
+=== AREA 3: CATALOG TAB UX FIX ===
+
+3a. Fix the Catalog tab in frontend/src/pages/ProjectDetail.tsx:
+    The current layout mixes upload state with previous job results,
+    causing confusion. Restructure:
+
+    STATE 1 — No files uploaded yet:
+      Show upload zone prominently. No job status visible.
+      Document Catalog section says "No documents yet."
+
+    STATE 2 — Files uploaded, no job run:
+      Upload zone shows "X files uploaded, ready for analysis"
+      Show a prominent button: "Go to Jobs tab to run analysis" or
+      an inline "Run Analysis Now" button with protocol selector.
+      Document Catalog section says "Upload complete. Run analysis
+      to catalog documents."
+      Do NOT show "Job Complete: 0 subjects" from a previous job.
+
+    STATE 3 — Job running:
+      Upload zone collapses to single line "X files uploaded"
+      Show "Analysis in progress..." with link to Jobs tab for details.
+
+    STATE 4 — Job complete:
+      Upload zone collapses. "Clear & upload new" link available.
+      Document Catalog shows full stats (total, auto-processable,
+      manual review, by file type, by structure class).
+      "Run New Job" section shows previous job result summary.
+
+3b. The "Run New Job" section in Catalog tab should NOT show old job
+    results by default. If there's a completed job from a previous run,
+    show it in a collapsed "Previous Results" section, not prominently.
+
+3c. After a successful upload, auto-scroll or highlight the next step
+    ("Run Analysis" button) so the user knows what to do.
+
+=== TESTING ===
+
+4. Create tests/test_detection_tuning.py:
+   - Min confidence filter: 1% detections dropped, 50%+ detections kept
+   - Currency pattern: "153.84 160.00" detected, "1,153.84" detected,
+     real phone "212-541-6600" NOT suppressed
+   - Dedup: 4x same LOCATION on same page → 1 detection kept
+   - End-to-end: Boosey & Hawkes mock → ~4 detections after all filters
+   - End-to-end: Washington CMD mock → ~6-7 detections after all filters
+
+5. Add suppression audit trail tests:
+   - AuditEvent created for each suppressed detection
+   - Event includes masked value, original type, reason, filter source
+   - Analysis review API returns suppression_summary
+
+6. Run pytest on ALL changed files. Fix failures up to 3 attempts.
+   Document any blockers in docs/BLOCKERS.md. Update CLAUDE.md with
+   everything done including test counts.
 ```
 
 #### Key Constraints
