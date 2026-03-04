@@ -455,7 +455,8 @@ class TestPromptTemplates:
         assert "assess_extraction_confidence" in PROMPT_TEMPLATES
         assert "suggest_entity_category" in PROMPT_TEMPLATES
         assert "analyze_document_structure" in PROMPT_TEMPLATES
-        assert len(PROMPT_TEMPLATES) == 4
+        assert "analyze_entity_relationships" in PROMPT_TEMPLATES
+        assert len(PROMPT_TEMPLATES) == 5
 
     def test_classify_template_has_entity_type_key(self) -> None:
         """The template response schema should mention entity_type."""
@@ -492,6 +493,13 @@ class TestPromptTemplates:
             },
             "analyze_document_structure": {
                 "document_excerpt": "[Block 0, page 1]: Patient Information\n[Block 1, page 1]: Name: [REDACTED]",
+            },
+            "analyze_entity_relationships": {
+                "document_type": "employment_record",
+                "structure_summary": "Document type: employment_record",
+                "onset_page": 3,
+                "document_excerpt": "[Page 3]: Name: John Doe SSN: ***-**-6789",
+                "pii_detections": "  1. Type: PERSON, Value: \"John Doe\", Page: 3, Confidence: 0.95",
             },
         }
         for name, template in PROMPT_TEMPLATES.items():

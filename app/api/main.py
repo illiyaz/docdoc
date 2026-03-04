@@ -16,6 +16,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.middleware.pii_filter import PIIFilterMiddleware
+from app.api.routes.analysis_review import router as analysis_review_router
 from app.api.routes.audit import router as audit_router
 from app.api.routes.diagnostic import router as diagnostic_router
 from app.api.routes.exports import router as exports_router
@@ -89,6 +90,7 @@ app.include_router(projects_router)
 app.include_router(protocols_router)
 app.include_router(base_protocols_router)
 app.include_router(exports_router)
+app.include_router(analysis_review_router)
 app.include_router(jobs_router)
 app.include_router(review_router)
 app.include_router(audit_router)

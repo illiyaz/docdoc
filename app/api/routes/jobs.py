@@ -63,6 +63,7 @@ class CreateJobBody(BaseModel):
     upload_id: str | None = None
     project_id: str | None = None
     protocol_config_id: str | None = None
+    pipeline_mode: str = "full"
 
     @model_validator(mode="after")
     def exactly_one_source(self):
@@ -551,6 +552,43 @@ def run_job_stream(
     """Run the full pipeline with SSE streaming progress events."""
     return StreamingResponse(
         _pipeline_generator(body, None, registry),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@router.post("/analyze/stream", summary="Run analysis phase (two-phase pipeline)")
+def analyze_stream(
+    body: CreateJobBody,
+    registry: ProtocolRegistry = Depends(get_protocol_registry),
+):
+    """Run the analysis phase of the two-phase pipeline with SSE streaming.
+
+    Stages: discovery, cataloging, structure analysis, sample extraction,
+    auto-approve decisions.
+    """
+    from app.pipeline.two_phase import analyze_generator
+
+    return StreamingResponse(
+        analyze_generator(body, None, registry),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@router.post("/{job_id}/extract/stream", summary="Run extraction phase (two-phase pipeline)")
+def extract_stream(
+    job_id: str,
+    registry: ProtocolRegistry = Depends(get_protocol_registry),
+):
+    """Run the extraction phase for approved documents with SSE streaming.
+
+    Requires the job to have status='analyzed' and pipeline_mode='two_phase'.
+    """
+    from app.pipeline.two_phase import extract_generator
+
+    return StreamingResponse(
+        extract_generator(job_id, None, registry),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

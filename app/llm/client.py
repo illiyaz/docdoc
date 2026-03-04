@@ -147,8 +147,9 @@ class OllamaClient:
                 "Enable it in settings to use LLM features."
             )
 
-        # PII safety check
-        if _prompt_contains_potential_pii(prompt):
+        # PII safety check (only warn when masking is enabled — if masking
+        # is off, raw PII in prompts is expected for analysis/classification)
+        if settings.pii_masking_enabled and _prompt_contains_potential_pii(prompt):
             import logging
 
             logging.getLogger(__name__).warning(

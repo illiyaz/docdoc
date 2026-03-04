@@ -91,17 +91,22 @@ def _mask_address(addr: dict | None) -> str:
 def _format_value(field: str, value: Any) -> str:
     """Convert a NotificationSubject field value to a safe CSV string.
 
-    Applies masking to PII-sensitive fields.  JSON-serializable lists/dicts
-    are rendered as compact JSON.
+    Applies masking to PII-sensitive fields when pii_masking_enabled is True.
+    JSON-serializable lists/dicts are rendered as compact JSON.
     """
     if value is None:
         return ""
-    if field == "canonical_email":
-        return _mask_email(value)
-    if field == "canonical_phone":
-        return _mask_phone(value)
-    if field == "canonical_address":
-        return _mask_address(value)
+
+    from app.core.settings import get_settings
+    masking_on = get_settings().pii_masking_enabled
+
+    if masking_on:
+        if field == "canonical_email":
+            return _mask_email(value)
+        if field == "canonical_phone":
+            return _mask_phone(value)
+        if field == "canonical_address":
+            return _mask_address(value)
     if isinstance(value, (list, dict)):
         return json.dumps(value, separators=(",", ":"))
     if isinstance(value, UUID):

@@ -669,4 +669,297 @@ Total built-in protocols: **8** (hipaa, gdpr, ccpa, hitech, ferpa, state_breach_
 
 **All 1499 tests passing after Step 11.**
 
-**Phase 5 gate:** Steps 1–11 + Step 8b (backend + frontend) complete. 1499 tests passing. Platform renamed to Forentis AI. Full project management with guided protocol configuration, catalog upload/linking, density scoring, CSV export, governance-gated LLM, job workflow APIs, job management UI, and document structure analysis with entity role attribution. 8 built-in regulatory protocols. PASSED
+---
+
+### Step 12 — Two-Phase Pipeline: Analyze → Review → Extract (COMPLETE)
+
+**Goal:** Add a two-phase pipeline workflow where documents are first analyzed (content onset detection + sample PII extraction from first page), shown to a reviewer for confirmation, then fully extracted after approval. Enables reviewers to validate extraction approach before processing 1000+ page documents.
+
+**Workflow:**
+1. **Phase 1 (Analyze):** Discovery → Cataloging → Structure Analysis → Content Onset Detection → Sample Extraction (first content page) → Auto-Approve Check → Job pauses in `analyzed` state
+2. **Review:** Reviewer sees per-document analysis cards (document type, onset page, sample PII masked). Approve/Reject/Approve-All. Auto-approve for high-confidence docs.
+3. **Phase 2 (Extract):** Full PII detection on ALL pages of approved docs → Entity Resolution → Deduplication → Notification → Complete
+
+**Migration 0007 (`alembic/versions/0007_two_phase_pipeline.py`):**
+- New table: `document_analysis_reviews` (11 columns: id, document_id FK, ingestion_run_id FK, status, reviewer_id, rationale, auto_approve_reason, sample_confidence_avg/min, reviewed_at, created_at)
+- Extended `documents`: `analysis_phase_status`, `sample_onset_page`, `sample_extraction_count`
+- Extended `ingestion_runs`: `pipeline_mode` (full|two_phase), `analysis_completed_at`
+- Extended `extractions`: `is_sample` (Boolean, default=False)
+- **18 total tables**
+
+**New files:**
+
+| File | Purpose |
+|---|---|
+| `app/pipeline/content_onset.py` | Generalized onset detection for all file types (PDF delegates to `find_data_onset`, tabular=0, prose scans for ONSET_SIGNALS) |
+| `app/pipeline/auto_approve.py` | `should_auto_approve()` — confidence-based + protocol-configurable auto-approve logic |
+| `app/pipeline/two_phase.py` | `analyze_generator()` and `extract_generator()` — SSE streaming generators for both phases |
+| `app/api/routes/analysis_review.py` | Review endpoints: GET analysis results, POST approve/reject/approve-all |
+| `tests/test_two_phase.py` | 21 tests: content onset (7), sample filtering (4), auto-approve (10) |
+
+**API endpoints added:**
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/jobs/analyze/stream` | SSE Phase 1 — analyze pipeline |
+| `POST` | `/jobs/{id}/extract/stream` | SSE Phase 2 — extract pipeline |
+| `GET` | `/jobs/{id}/analysis` | Get analysis results per document |
+| `POST` | `/jobs/{id}/documents/{doc_id}/approve` | Approve document |
+| `POST` | `/jobs/{id}/documents/{doc_id}/reject` | Reject document |
+| `POST` | `/jobs/{id}/approve-all` | Batch approve all pending |
+
+**Frontend changes:**
+- `client.ts`: New types (`AnalysisReviewDetail`, `SampleExtraction`), 5 new API functions, `submitJobStreaming` routes to `/jobs/analyze/stream` when `pipeline_mode=two_phase`
+- `ProjectDetail.tsx`: Pipeline mode toggle ("Analyze First" / "Full Pipeline") in CatalogTab, `AnalysisReviewPanel` component in JobsTab (per-doc cards with sample PII, approve/reject, approve-all, start extraction with SSE progress), `analyzed`/`extracting` status badges
+
+**Tests:** 28 new tests (21 in `test_two_phase.py` + 7 in `test_api.py` `TestAnalysisReview`). **1530+ tests passing.**
+
+**Phase 5 gate (Steps 1–12):** Steps 1–12 + Step 8b complete. 1530+ tests passing. Platform renamed to Forentis AI. Full project management with guided protocol configuration, catalog upload/linking, density scoring, CSV export, governance-gated LLM, job workflow APIs, job management UI, document structure analysis, and two-phase analyze-review-extract pipeline. 8 built-in regulatory protocols. PASSED
+
+---
+
+### Step 13 — LLM Entity Relationship Analysis (COMPLETE)
+
+**Goal:** Elevate the LLM from a document structure classifier to the "understanding brain" of the pipeline. The LLM should read document content, understand entity relationships (which PII belongs to which person), and present this understanding to a human reviewer for confirmation before full extraction.
+
+**Current gaps:**
+1. The LLM currently only classifies document type/sections/roles from masked excerpts. It has no awareness of detected PII, entity relationships, or grouping decisions.
+2. **Content onset detection is heuristic-only.** The current `find_data_onset()` uses keyword patterns ("name", "SSN", "account") to guess where PII starts. It does NOT run actual PII detection (Presidio) to verify. This means:
+   - A disclaimer page mentioning "SSN" in legal text triggers a false onset
+   - A document where PII starts on page 10 but no keywords appear until page 10 works — but if "account" appears on page 2 in a table of contents, the system incorrectly samples page 1 (cover page)
+   - The `max(0, page-1)` logic can land on a blank/irrelevant page
+
+**New workflow (three-phase):**
+1. **Phase 1 — Analyze:** Discovery → Cataloging → Structure Analysis → **PII-Verified Onset Detection** → Sample PII Detection → **LLM Entity Relationship Analysis** → Present to reviewer
+2. **Phase 1.5 — Review:** Reviewer sees LLM's understanding: document structure, detected entities, proposed entity groups (which PII belongs to which person), relationship confidence. Reviewer confirms/adjusts entity groups.
+3. **Phase 2 — Extract:** Full PII detection on all pages, seeded by confirmed entity groups from Phase 1.5.
+
+#### 13-onset. PII-Verified Onset Detection (Smart Onset)
+
+**Problem:** Current onset detection uses text keyword heuristics only. For a 1000-page PDF where actual PII starts on page 47, the heuristic may incorrectly identify page 3 (which mentions "account" in a disclaimer) as the onset. The sample extraction then runs on pages 2-3, finds zero PII, and the document gets flagged for review unnecessarily.
+
+**Solution: Two-pass onset detection.**
+
+**File: `app/pipeline/content_onset.py`** — New function `find_verified_onset()`:
+
+```
+Pass 1 (Heuristic — fast, existing logic):
+  Scan pages for ONSET_SIGNALS text patterns.
+  Returns list of candidate pages (up to 5 candidates).
+
+Pass 2 (PII Verification — targeted):
+  For each candidate page (and the page after it):
+    Run PresidioEngine.analyze() on that page's blocks.
+    If ≥1 high-confidence PII detection (score ≥ 0.70) found → this is the verified onset.
+
+  If no candidates had PII: scan pages sequentially from page 0,
+    running Presidio on each page until PII is found (capped at first 20 pages).
+    This handles documents with no keyword signals but real PII data.
+
+  If still no PII found in first 20 pages → onset = 0 (fall back to beginning).
+```
+
+**Key design decisions:**
+- Pass 1 is cheap (text pattern matching only) — narrows 1000 pages to ~5 candidates
+- Pass 2 runs Presidio on at most ~10-15 pages (5 candidates × 2 pages each, or 20 sequential scan) — still fast
+- Memory-safe: uses `fitz_doc._forget_page()` after each page (existing pattern)
+- For tabular files (CSV/Excel), onset is always 0 — no change needed
+- The verified onset page is stored in `documents.sample_onset_page` (existing column)
+
+**File: `app/pipeline/two_phase.py`** — Update `analyze_generator` to use `find_verified_onset()` instead of `find_data_onset()`.
+
+#### 13a. LLM Entity Analysis Prompt
+
+**File: `app/llm/prompts.py`** — New prompt template `ANALYZE_ENTITY_RELATIONSHIPS`:
+
+Input to LLM:
+- Document excerpt from the **verified onset page** (raw text when `pii_masking_enabled=false`, masked when true)
+- List of PII detections from sample extraction on that page: `[{type: "US_SSN", value: "***-**-6789", page: 3, confidence: 0.95}, ...]`
+- Document structure analysis (doc type, sections, entity roles)
+
+LLM asked to produce:
+```json
+{
+  "document_summary": "Payroll records for 3 employees at Acme Corp",
+  "entity_groups": [
+    {
+      "group_id": "G1",
+      "label": "Kristin B Aleshire (Employee)",
+      "role": "primary_subject",
+      "confidence": 0.92,
+      "members": [
+        {"pii_type": "PERSON", "value_ref": "Kristin B Aleshire", "page": 3},
+        {"pii_type": "US_SSN", "value_ref": "***-**-6789", "page": 3},
+        {"pii_type": "PHONE_US", "value_ref": "***-***-4567", "page": 3},
+        {"pii_type": "DATE_OF_BIRTH_MDY", "value_ref": "01/15/1985", "page": 3}
+      ],
+      "rationale": "Name, SSN, phone, and DOB appear in same employee record section on page 3"
+    },
+    {
+      "group_id": "G2",
+      "label": "Acme Corporation (Employer)",
+      "role": "institutional",
+      "confidence": 0.98,
+      "members": [
+        {"pii_type": "ORGANIZATION", "value_ref": "Acme Corporation", "page": 1},
+        {"pii_type": "PHONE_US", "value_ref": "***-***-8900", "page": 1}
+      ],
+      "rationale": "Company name and main phone on letterhead/header"
+    }
+  ],
+  "relationships": [
+    {"from": "G1", "to": "G2", "type": "employed_by", "confidence": 0.95}
+  ],
+  "estimated_unique_individuals": 3,
+  "extraction_guidance": "Each page contains one employee record. PII block repeats per employee: name, SSN, address, phone, DOB, salary."
+}
+```
+
+#### 13b. Entity Group Model
+
+**File: `app/structure/entity_groups.py`** (new):
+
+```python
+@dataclass
+class EntityGroupMember:
+    pii_type: str
+    value_ref: str          # masked or raw depending on policy
+    page: int | None
+    confidence: float
+
+@dataclass
+class EntityGroup:
+    group_id: str
+    label: str              # human-readable label (e.g., "John Smith (Patient)")
+    role: str               # primary_subject | institutional | provider | secondary_contact
+    confidence: float
+    members: list[EntityGroupMember]
+    rationale: str          # LLM's reasoning for this grouping
+    detected_by: str        # "llm" | "heuristic" | "llm+heuristic"
+
+@dataclass
+class EntityRelationship:
+    from_group: str
+    to_group: str
+    relationship_type: str  # employed_by | patient_of | parent_of | emergency_contact_for
+    confidence: float
+
+@dataclass
+class EntityRelationshipAnalysis:
+    document_id: str
+    document_summary: str
+    entity_groups: list[EntityGroup]
+    relationships: list[EntityRelationship]
+    estimated_unique_individuals: int
+    extraction_guidance: str
+```
+
+#### 13c. LLM Entity Analyzer
+
+**File: `app/structure/llm_entity_analyzer.py`** (new):
+
+- `LLMEntityAnalyzer.analyze(blocks, sample_detections, structure_analysis, document_id)` → `EntityRelationshipAnalysis`
+- Builds prompt from document excerpt + PII detection list + structure analysis
+- Sends to Ollama via `OllamaClient.generate()`
+- Parses JSON response into `EntityRelationshipAnalysis`
+- Falls back gracefully: if LLM fails, returns None (heuristic-only grouping)
+
+#### 13d. Pipeline Integration
+
+**File: `app/pipeline/two_phase.py`** — Extend `analyze_generator`:
+
+After sample extraction, add new stage `entity_analysis`:
+1. Collect sample detections per document
+2. Call `LLMEntityAnalyzer.analyze()` with blocks + detections + structure analysis
+3. Store `EntityRelationshipAnalysis` on document (JSON column or new table)
+4. Include entity groups in the analysis review API response
+5. SSE event: `{"stage": "entity_analysis", "status": "complete", "message": "Found 3 unique individuals"}`
+
+Updated analyze stages: `discovery → cataloging → structure_analysis → sample_extraction → entity_analysis → auto_approve → complete`
+
+#### 13e. Analysis Review API Extension
+
+**File: `app/api/routes/analysis_review.py`** — Extend GET `/jobs/{id}/analysis` response:
+
+```json
+{
+  "document_id": "uuid",
+  "file_name": "payroll.pdf",
+  "document_summary": "Payroll records for 3 employees at Acme Corp",
+  "entity_groups": [
+    {
+      "group_id": "G1",
+      "label": "Kristin B Aleshire (Employee)",
+      "role": "primary_subject",
+      "confidence": 0.92,
+      "members": [...],
+      "rationale": "Name, SSN, phone appear in same section"
+    }
+  ],
+  "relationships": [...],
+  "estimated_unique_individuals": 3,
+  "extraction_guidance": "Each page = one employee record",
+  "sample_extractions": [...],
+  "review_status": "pending_review"
+}
+```
+
+#### 13f. Frontend Entity Review Panel
+
+**File: `frontend/src/pages/ProjectDetail.tsx`** — Extend `AnalysisReviewPanel`:
+
+- Show LLM's `document_summary` at top of each document card
+- Show entity groups as collapsible cards:
+  - Group label + role badge + confidence score
+  - Members listed (pii_type + masked value + page)
+  - LLM rationale displayed
+  - Relationship lines between groups
+- Show `extraction_guidance` to help reviewer understand extraction plan
+- Show `estimated_unique_individuals` count
+- Approve/Reject at entity group level (future: merge/split controls)
+
+#### 13g. Schema Extension (if needed)
+
+**Option A (minimal):** Store `EntityRelationshipAnalysis` as JSON on `documents.entity_analysis` column (new column, migration 0008)
+
+**Option B (full):** New tables `entity_groups` + `entity_group_members` + `entity_relationships` with FKs to documents — enables per-group approval tracking
+
+Start with Option A for rapid iteration; evolve to Option B when entity-level approval is needed.
+
+#### Execution Order
+
+1. **13-onset**: PII-verified onset detection (two-pass: heuristic candidates → Presidio verification)
+2. **13a**: New LLM prompt template (`ANALYZE_ENTITY_RELATIONSHIPS`)
+3. **13b**: Entity group data models (`entity_groups.py`)
+4. **13c**: LLM entity analyzer (calls Ollama with onset page content + PII detections, parses response)
+5. **13d**: Pipeline integration (update `analyze_generator`: verified onset → sample extraction → entity analysis)
+6. **13e**: API response extension (return entity groups + document summary in analysis review)
+7. **13f**: Frontend entity review panel (entity group cards, relationship display, extraction guidance)
+8. **13g**: Schema extension (migration 0008 if needed)
+
+#### Updated Analyze Pipeline Stages
+
+```
+discovery → cataloging → structure_analysis → verified_onset → sample_extraction → entity_analysis → auto_approve → complete
+```
+
+| Stage | What happens | Tool used |
+|---|---|---|
+| `discovery` | Find files in source directory | FilesystemConnector |
+| `cataloging` | Classify file structure | CatalogerTask |
+| `structure_analysis` | Doc type, sections, entity roles | Heuristic + LLM (additive) |
+| `verified_onset` | **NEW** — Find true first PII page via two-pass: heuristic candidates → Presidio verification | ONSET_SIGNALS + PresidioEngine |
+| `sample_extraction` | Run Presidio on verified onset page, store sample Extraction records | PresidioEngine |
+| `entity_analysis` | **NEW** — LLM reads onset page + PII detections, proposes entity groups with rationale | OllamaClient |
+| `auto_approve` | Confidence-based + protocol-configurable approval decision | should_auto_approve() |
+
+#### Key Constraints
+
+- PII-verified onset is deterministic (Presidio, not LLM) — works without LLM
+- LLM entity analysis is **additive** — Presidio/spaCy remains the primary PII detector
+- LLM failure → graceful fallback (current behavior: heuristic grouping, Presidio-only detection)
+- `pii_masking_enabled` controls whether LLM sees raw or masked PII values
+- All LLM calls audit-logged via `llm_call_logs` table
+- Cross-role merge prevention still enforced (primary_subject + institutional = never merge)
+- Air-gap safe: local Ollama only
+- Memory-safe: `_forget_page()` after each page scan during onset verification

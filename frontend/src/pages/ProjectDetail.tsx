@@ -48,6 +48,11 @@ import {
   getJobPipelineStatus,
   getRecentJobs,
   linkJobToProject,
+  getAnalysisResults,
+  approveDocument,
+  rejectDocument,
+  approveAllDocuments,
+  startExtractStreaming,
 } from "@/api/client"
 import type {
   ProjectDetail as ProjectDetailType,
@@ -97,6 +102,8 @@ const JOB_STATUS_STYLES: Record<string, string> = {
   running: "bg-blue-100 text-blue-800 border-blue-300",
   completed: "bg-green-100 text-green-800 border-green-300",
   failed: "bg-red-100 text-red-800 border-red-300",
+  analyzed: "bg-amber-100 text-amber-800 border-amber-300",
+  extracting: "bg-indigo-100 text-indigo-800 border-indigo-300",
 }
 
 const STAGE_STATUS_ICON_MAP: Record<string, string> = {
@@ -1134,6 +1141,257 @@ function PipelineProgressView({ jobId }: { jobId: string }) {
 }
 
 // ---------------------------------------------------------------------------
+// Analysis Review Panel (two-phase pipeline)
+// ---------------------------------------------------------------------------
+
+function AnalysisReviewPanel({ jobId, onExtractionComplete }: { jobId: string; onExtractionComplete: () => void }) {
+  const queryClient = useQueryClient()
+  const { data: reviews, isLoading } = useQuery({
+    queryKey: ["analysis-reviews", jobId],
+    queryFn: () => getAnalysisResults(jobId),
+  })
+  const [isExtracting, setIsExtracting] = useState(false)
+  const [extractStages, setExtractStages] = useState<Record<string, { status: string; message: string }>>({})
+
+  if (isLoading) return <div className="text-sm text-muted-foreground">Loading analysis results...</div>
+  if (!reviews?.length) return <div className="text-sm text-muted-foreground">No documents analyzed.</div>
+
+  const pendingCount = reviews.filter(r => r.review_status === "pending_review").length
+  const approvedCount = reviews.filter(r => r.review_status === "approved" || r.review_status === "auto_approved").length
+  const allReviewed = pendingCount === 0
+
+  const [reviewError, setReviewError] = useState<string | null>(null)
+
+  const handleApprove = async (docId: string) => {
+    try {
+      setReviewError(null)
+      await approveDocument(jobId, docId, { reviewer_id: "reviewer" })
+      queryClient.invalidateQueries({ queryKey: ["analysis-reviews", jobId] })
+    } catch (err) {
+      setReviewError(err instanceof Error ? err.message : "Failed to approve document")
+    }
+  }
+
+  const handleReject = async (docId: string) => {
+    try {
+      setReviewError(null)
+      await rejectDocument(jobId, docId, { reviewer_id: "reviewer" })
+      queryClient.invalidateQueries({ queryKey: ["analysis-reviews", jobId] })
+    } catch (err) {
+      setReviewError(err instanceof Error ? err.message : "Failed to reject document")
+    }
+  }
+
+  const handleApproveAll = async () => {
+    try {
+      setReviewError(null)
+      await approveAllDocuments(jobId, { reviewer_id: "reviewer" })
+      queryClient.invalidateQueries({ queryKey: ["analysis-reviews", jobId] })
+    } catch (err) {
+      setReviewError(err instanceof Error ? err.message : "Failed to approve documents")
+    }
+  }
+
+  const handleStartExtraction = async () => {
+    setIsExtracting(true)
+    try {
+      await startExtractStreaming(jobId, (event) => {
+        if (event.stage && event.stage !== "complete") {
+          setExtractStages(prev => ({
+            ...prev,
+            [event.stage]: { status: event.status || "running", message: event.message },
+          }))
+        }
+      })
+      onExtractionComplete()
+    } catch (err) {
+      console.error("Extraction failed:", err)
+    } finally {
+      setIsExtracting(false)
+    }
+  }
+
+  if (isExtracting) {
+    return (
+      <div className="space-y-2">
+        <p className="text-sm font-medium">Extracting PII from approved documents...</p>
+        {Object.entries(extractStages).map(([stage, info]) => (
+          <div key={stage} className="flex items-center gap-2 text-xs">
+            {info.status === "complete" ? (
+              <CheckCircle className="h-3.5 w-3.5 text-green-500" />
+            ) : (
+              <Loader2 className="h-3.5 w-3.5 text-blue-500 animate-spin" />
+            )}
+            <span className="capitalize">{stage}</span>
+            <span className="text-muted-foreground">{info.message}</span>
+          </div>
+        ))}
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-3">
+      {reviewError && (
+        <div className="rounded-md bg-red-50 border border-red-200 px-4 py-2 text-sm text-red-800">
+          {reviewError}
+        </div>
+      )}
+      <div className="flex items-center justify-between">
+        <p className="text-sm font-medium">
+          Analysis Review — {approvedCount} approved, {pendingCount} pending
+        </p>
+        <div className="flex gap-2">
+          {pendingCount > 0 && (
+            <button
+              onClick={handleApproveAll}
+              className="px-3 py-1.5 text-xs font-medium bg-green-600 text-white rounded-md hover:bg-green-700"
+            >
+              Approve All ({pendingCount})
+            </button>
+          )}
+          {allReviewed && approvedCount > 0 && (
+            <button
+              onClick={handleStartExtraction}
+              className="px-3 py-1.5 text-xs font-medium bg-primary text-primary-foreground rounded-md hover:bg-primary/90"
+            >
+              Start Extraction
+            </button>
+          )}
+        </div>
+      </div>
+
+      {reviews.map((doc) => (
+        <div key={doc.document_id} className="border rounded-md p-3 space-y-2">
+          <div className="flex items-center justify-between">
+            <div>
+              <span className="text-sm font-medium">{doc.file_name}</span>
+              <span className="ml-2 text-xs text-muted-foreground">{doc.file_type}</span>
+              {doc.document_type && doc.document_type !== "unknown" && (
+                <span className="ml-2 text-xs bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded">{doc.document_type}</span>
+              )}
+              {doc.structure_class && (
+                <span className="ml-2 text-xs bg-gray-100 text-gray-700 px-1.5 py-0.5 rounded">{doc.structure_class}</span>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              {doc.review_status === "auto_approved" && (
+                <span className="text-xs bg-green-100 text-green-800 px-2 py-0.5 rounded-full">Auto-approved</span>
+              )}
+              {doc.review_status === "approved" && (
+                <span className="text-xs bg-green-100 text-green-800 px-2 py-0.5 rounded-full">Approved</span>
+              )}
+              {doc.review_status === "rejected" && (
+                <span className="text-xs bg-red-100 text-red-800 px-2 py-0.5 rounded-full">Rejected</span>
+              )}
+              {doc.review_status === "pending_review" && (
+                <>
+                  <button onClick={() => handleApprove(doc.document_id)} className="px-2 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700">Approve</button>
+                  <button onClick={() => handleReject(doc.document_id)} className="px-2 py-1 text-xs bg-red-600 text-white rounded hover:bg-red-700">Reject</button>
+                </>
+              )}
+            </div>
+          </div>
+
+          {doc.onset_page !== null && (
+            <p className="text-xs text-muted-foreground">Content starts at page {doc.onset_page + 1}</p>
+          )}
+
+          {/* LLM Document Summary */}
+          {doc.document_summary && (
+            <div className="bg-blue-50 border border-blue-200 rounded p-2">
+              <p className="text-xs font-medium text-blue-800 mb-0.5">Document Summary</p>
+              <p className="text-xs text-blue-700">{doc.document_summary}</p>
+              {doc.estimated_unique_individuals != null && doc.estimated_unique_individuals > 0 && (
+                <p className="text-xs text-blue-600 mt-1">Estimated unique individuals: {doc.estimated_unique_individuals}</p>
+              )}
+            </div>
+          )}
+
+          {/* Entity Groups from LLM */}
+          {doc.entity_groups && doc.entity_groups.length > 0 && (
+            <div className="space-y-2">
+              <p className="text-xs font-medium">Entity Groups ({doc.entity_groups.length}):</p>
+              {doc.entity_groups.map((group) => (
+                <div key={group.group_id} className="border rounded p-2 bg-muted/30">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-xs font-medium">{group.label}</span>
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
+                      group.role === 'primary_subject' ? 'bg-purple-100 text-purple-800' :
+                      group.role === 'institutional' ? 'bg-orange-100 text-orange-800' :
+                      group.role === 'provider' ? 'bg-teal-100 text-teal-800' :
+                      group.role === 'secondary_contact' ? 'bg-yellow-100 text-yellow-800' :
+                      'bg-gray-100 text-gray-700'
+                    }`}>{group.role}</span>
+                    <span className={`text-[10px] ${group.confidence >= 0.85 ? 'text-green-600' : group.confidence >= 0.6 ? 'text-yellow-600' : 'text-red-600'}`}>
+                      {(group.confidence * 100).toFixed(0)}%
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap gap-1 mb-1">
+                    {group.members.map((m, mi) => (
+                      <span key={mi} className="inline-flex items-center gap-1 text-[11px] border rounded px-1.5 py-0.5 bg-white">
+                        <span className="font-medium text-muted-foreground">{m.pii_type}</span>
+                        <span>{m.value_ref}</span>
+                        {m.page != null && <span className="text-muted-foreground">p.{m.page + 1}</span>}
+                      </span>
+                    ))}
+                  </div>
+                  {group.rationale && (
+                    <p className="text-[10px] text-muted-foreground italic">{group.rationale}</p>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Relationships between entity groups */}
+          {doc.relationships && doc.relationships.length > 0 && (
+            <div className="bg-muted/30 rounded p-2">
+              <p className="text-xs font-medium mb-1">Relationships:</p>
+              <div className="space-y-0.5">
+                {doc.relationships.map((rel, ri) => (
+                  <p key={ri} className="text-[11px] text-muted-foreground">
+                    {rel.from_group} → {rel.to_group}: <span className="font-medium">{rel.relationship_type.replace(/_/g, ' ')}</span>
+                    <span className="ml-1">({(rel.confidence * 100).toFixed(0)}%)</span>
+                  </p>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Extraction Guidance */}
+          {doc.extraction_guidance && (
+            <div className="bg-amber-50 border border-amber-200 rounded p-2">
+              <p className="text-xs font-medium text-amber-800 mb-0.5">Extraction Guidance</p>
+              <p className="text-xs text-amber-700">{doc.extraction_guidance}</p>
+            </div>
+          )}
+
+          {doc.sample_extractions.length > 0 && (
+            <div className="bg-muted/50 rounded p-2">
+              <p className="text-xs font-medium mb-1">Sample PII from first content page ({doc.sample_extraction_count} found):</p>
+              <div className="flex flex-wrap gap-1.5">
+                {doc.sample_extractions.map((ext, i) => (
+                  <span key={i} className="inline-flex items-center gap-1 text-xs border rounded px-2 py-0.5">
+                    <span className="font-medium">{ext.pii_type}</span>
+                    <span className="text-muted-foreground">{ext.masked_value}</span>
+                    {ext.confidence !== null && (
+                      <span className={`text-[10px] ${ext.confidence >= 0.85 ? 'text-green-600' : ext.confidence >= 0.6 ? 'text-yellow-600' : 'text-red-600'}`}>
+                        {(ext.confidence * 100).toFixed(0)}%
+                      </span>
+                    )}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Jobs tab
 // ---------------------------------------------------------------------------
 
@@ -1371,14 +1629,26 @@ function JobsTab({
                           </button>
                           {isExpanded && (
                             <div className="border-t bg-muted/20 px-4 py-3">
-                              <p className="text-xs font-medium text-muted-foreground mb-2">
-                                Pipeline Progress
-                              </p>
-                              <PipelineProgressView jobId={job.id} />
-                              {job.error_summary && (
-                                <div className="rounded-md bg-red-50 border border-red-200 px-3 py-2 text-xs text-red-800 mt-3">
-                                  <span className="font-medium">Error:</span> {job.error_summary}
-                                </div>
+                              {job.status === "analyzed" ? (
+                                <AnalysisReviewPanel
+                                  jobId={job.id}
+                                  onExtractionComplete={() => {
+                                    queryClient.invalidateQueries({ queryKey: ["project-jobs", projectId] })
+                                    onJobCompleted()
+                                  }}
+                                />
+                              ) : (
+                                <>
+                                  <p className="text-xs font-medium text-muted-foreground mb-2">
+                                    Pipeline Progress
+                                  </p>
+                                  <PipelineProgressView jobId={job.id} />
+                                  {job.error_summary && (
+                                    <div className="rounded-md bg-red-50 border border-red-200 px-3 py-2 text-xs text-red-800 mt-3">
+                                      <span className="font-medium">Error:</span> {job.error_summary}
+                                    </div>
+                                  )}
+                                </>
                               )}
                             </div>
                           )}
@@ -1477,6 +1747,8 @@ function CatalogTab({
   // Run job state
   // ---------------------------------------------------------------------------
   const [runProtocolId, setRunProtocolId] = useState("")
+  const [runProtocolConfigId, setRunProtocolConfigId] = useState<string | null>(null)
+  const [pipelineMode, setPipelineMode] = useState<"full" | "two_phase">("two_phase")
   const [isRunning, setIsRunning] = useState(false)
   const [runError, setRunError] = useState<string | null>(null)
   const [runResult, setRunResult] = useState<JobResult | null>(null)
@@ -1624,6 +1896,12 @@ function CatalogTab({
     try {
       const body: Record<string, string> = {
         protocol_id: runProtocolId,
+        pipeline_mode: pipelineMode,
+      }
+
+      // Include custom protocol config if selected
+      if (runProtocolConfigId) {
+        body.protocol_config_id = runProtocolConfigId
       }
 
       // Determine source: upload_id or server path
@@ -1641,14 +1919,15 @@ function CatalogTab({
       body.project_id = projectId
 
       const result = await submitJobStreaming(
-        body as unknown as { protocol_id: string; upload_id?: string; source_directory?: string },
+        body as unknown as { protocol_id: string; upload_id?: string; source_directory?: string; pipeline_mode?: string },
         (_event: PipelineProgress) => {
           // Pipeline progress events are consumed but we use a simple spinner
         },
       )
       setRunResult(result)
-      // Refresh catalog
+      // Refresh catalog + jobs
       queryClient.invalidateQueries({ queryKey: ["catalog-summary", projectId] })
+      queryClient.invalidateQueries({ queryKey: ["project-jobs", projectId] })
     } catch (err) {
       setRunError(err instanceof Error ? err.message : "Job failed")
     } finally {
@@ -1951,11 +2230,35 @@ function CatalogTab({
                   : "Upload files or link a server path above first, then select a protocol."}
               </p>
 
+              {/* Pipeline Mode Toggle */}
+              <div className="flex items-center gap-3">
+                <label className="text-sm font-medium">Pipeline Mode:</label>
+                <div className="flex rounded-md border">
+                  <button
+                    className={`px-3 py-1.5 text-xs font-medium rounded-l-md ${pipelineMode === "two_phase" ? "bg-primary text-primary-foreground" : "bg-background hover:bg-muted"}`}
+                    onClick={() => setPipelineMode("two_phase")}
+                  >
+                    Analyze First
+                  </button>
+                  <button
+                    className={`px-3 py-1.5 text-xs font-medium rounded-r-md ${pipelineMode === "full" ? "bg-primary text-primary-foreground" : "bg-background hover:bg-muted"}`}
+                    onClick={() => setPipelineMode("full")}
+                  >
+                    Full Pipeline
+                  </button>
+                </div>
+              </div>
+              {pipelineMode === "two_phase" && (
+                <p className="text-xs text-muted-foreground">
+                  Analyze First: runs discovery, cataloging, and structure analysis, then pauses for human review before full PII extraction.
+                </p>
+              )}
+
               <div className="space-y-1.5">
                 <label className="text-sm font-medium">Protocol</label>
                 <select
                   value={runProtocolId}
-                  onChange={(e) => setRunProtocolId(e.target.value)}
+                  onChange={(e) => { setRunProtocolId(e.target.value); setRunProtocolConfigId(null) }}
                   className="w-full rounded-md border bg-background px-3 py-2 text-sm"
                 >
                   <option value="">Select a protocol...</option>
@@ -1979,10 +2282,18 @@ function CatalogTab({
                         <button
                           key={pc.id}
                           onClick={() => {
-                            if (pc.base_protocol_id) setRunProtocolId(pc.base_protocol_id)
+                            if (pc.base_protocol_id) {
+                              // Find matching base protocol from the YAML registry
+                              const match = baseProtocols?.find(
+                                (bp) => bp.protocol_id === pc.base_protocol_id
+                                  || bp.protocol_id.startsWith(pc.base_protocol_id!)
+                              )
+                              setRunProtocolId(match?.protocol_id ?? pc.base_protocol_id)
+                              setRunProtocolConfigId(pc.id)
+                            }
                           }}
                           className={`rounded-md border px-2.5 py-1 text-xs font-medium hover:bg-accent ${
-                            runProtocolId === pc.base_protocol_id
+                            runProtocolConfigId === pc.id
                               ? "bg-primary/10 border-primary text-primary"
                               : ""
                           }`}
@@ -2002,12 +2313,12 @@ function CatalogTab({
                 {isRunning ? (
                   <>
                     <Loader2 className="h-4 w-4 animate-spin" />
-                    Running Pipeline...
+                    {pipelineMode === "two_phase" ? "Analyzing..." : "Running Pipeline..."}
                   </>
                 ) : (
                   <>
                     <Play className="h-4 w-4" />
-                    Run New Job
+                    {pipelineMode === "two_phase" ? "Analyze Documents" : "Run Full Pipeline"}
                   </>
                 )}
               </button>

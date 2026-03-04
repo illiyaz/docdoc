@@ -27,6 +27,8 @@ export interface SubmitJobBody {
   source_directory?: string
   upload_id?: string
   job_id?: string
+  pipeline_mode?: string
+  project_id?: string
 }
 
 export interface JobResult {
@@ -34,6 +36,10 @@ export interface JobResult {
   status: string
   subjects_found: number
   notification_required: number
+  // Analyze-phase fields (present when status === "analyzed")
+  documents_found?: number
+  auto_approved?: number
+  pending_review?: number
 }
 
 export interface JobStatus {
@@ -228,7 +234,10 @@ export async function submitJobStreaming(
   body: SubmitJobBody,
   onProgress: (event: PipelineProgress) => void,
 ): Promise<JobResult> {
-  const res = await fetch(`${BASE_URL}/jobs/run/stream`, {
+  const url = body.pipeline_mode === "two_phase"
+    ? `${BASE_URL}/jobs/analyze/stream`
+    : `${BASE_URL}/jobs/run/stream`
+  const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -662,4 +671,163 @@ export async function runDiagnostic(
     throw new Error(`API ${res.status}: ${text}`)
   }
   return res.json() as Promise<DiagnosticReport>
+}
+
+// ---------------------------------------------------------------------------
+// Two-Phase Pipeline Types & API
+// ---------------------------------------------------------------------------
+
+export interface SampleExtraction {
+  pii_type: string
+  masked_value: string
+  confidence: number | null
+  entity_role: string | null
+  evidence_page: number | null
+}
+
+export interface EntityGroupMember {
+  pii_type: string
+  value_ref: string
+  page: number | null
+  confidence: number
+}
+
+export interface EntityGroup {
+  group_id: string
+  label: string
+  role: string
+  confidence: number
+  members: EntityGroupMember[]
+  rationale: string
+  detected_by: string
+}
+
+export interface EntityRelationship {
+  from_group: string
+  to_group: string
+  relationship_type: string
+  confidence: number
+}
+
+export interface AnalysisReviewDetail {
+  document_id: string
+  file_name: string
+  file_type: string
+  structure_class: string | null
+  document_type: string | null
+  document_type_confidence: number | null
+  onset_page: number | null
+  sample_extraction_count: number
+  sample_extractions: SampleExtraction[]
+  analysis_phase_status: string | null
+  review_status: string | null
+  auto_approve_reason: string | null
+  reviewed_by: string | null
+  reviewed_at: string | null
+  // Entity analysis from LLM (Step 13)
+  document_summary: string | null
+  entity_groups: EntityGroup[]
+  relationships: EntityRelationship[]
+  estimated_unique_individuals: number | null
+  extraction_guidance: string | null
+}
+
+export async function getAnalysisResults(jobId: string): Promise<AnalysisReviewDetail[]> {
+  const res = await fetch(`${BASE_URL}/jobs/${jobId}/analysis`)
+  if (!res.ok) throw new Error(`Failed to load analysis: ${res.status}`)
+  return res.json()
+}
+
+export async function approveDocument(
+  jobId: string,
+  docId: string,
+  body: { reviewer_id: string; rationale?: string },
+): Promise<{ status: string; document_id: string }> {
+  const res = await fetch(`${BASE_URL}/jobs/${jobId}/documents/${docId}/approve`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) throw new Error(`Failed to approve: ${res.status}`)
+  return res.json()
+}
+
+export async function rejectDocument(
+  jobId: string,
+  docId: string,
+  body: { reviewer_id: string; rationale?: string },
+): Promise<{ status: string; document_id: string }> {
+  const res = await fetch(`${BASE_URL}/jobs/${jobId}/documents/${docId}/reject`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) throw new Error(`Failed to reject: ${res.status}`)
+  return res.json()
+}
+
+export async function approveAllDocuments(
+  jobId: string,
+  body: { reviewer_id: string; rationale?: string },
+): Promise<{ approved: number; total: number }> {
+  const res = await fetch(`${BASE_URL}/jobs/${jobId}/approve-all`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) throw new Error(`Failed to approve all: ${res.status}`)
+  return res.json()
+}
+
+export async function startExtractStreaming(
+  jobId: string,
+  onProgress: (event: PipelineProgress) => void,
+): Promise<JobResult> {
+  const res = await fetch(`${BASE_URL}/jobs/${jobId}/extract/stream`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+  })
+  if (!res.ok) throw new Error(`Extract failed: ${res.status}`)
+
+  const reader = res.body!.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ""
+  let finalResult: JobResult | null = null
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+
+    buffer += decoder.decode(value, { stream: true })
+
+    const parts = buffer.split("\n\n")
+    buffer = parts.pop()!
+
+    for (const part of parts) {
+      for (const line of part.split("\n")) {
+        if (line.startsWith("data: ")) {
+          try {
+            const data = JSON.parse(line.slice(6)) as PipelineProgress
+            onProgress(data)
+            if (data.stage === "complete" && data.result) {
+              finalResult = data.result
+            }
+            if (data.stage === "error") {
+              throw new Error(data.message)
+            }
+          } catch (e) {
+            if (e instanceof Error && e.message !== "Unexpected end of JSON input") {
+              throw e
+            }
+          }
+        }
+      }
+    }
+  }
+
+  if (!finalResult) {
+    throw new Error("No result received from extract stream")
+  }
+
+  return finalResult
 }

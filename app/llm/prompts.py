@@ -133,6 +133,46 @@ ANALYZE_DOCUMENT_STRUCTURE = (
 )
 
 # ---------------------------------------------------------------------------
+# ANALYZE_ENTITY_RELATIONSHIPS
+# ---------------------------------------------------------------------------
+
+ANALYZE_ENTITY_RELATIONSHIPS = (
+    "You are analyzing a breach dataset document to understand entity relationships. "
+    "Given the document excerpt and detected PII items below, identify:\n"
+    "1. Which PII items belong to the same person or entity\n"
+    "2. The role of each entity (primary_subject, institutional, provider, secondary_contact)\n"
+    "3. Relationships between entity groups (e.g. employed_by, patient_of)\n"
+    "\n"
+    "Document type: {document_type}\n"
+    "Document structure: {structure_summary}\n"
+    "\n"
+    "Document excerpt (from onset page {onset_page}):\n"
+    "```\n"
+    "{document_excerpt}\n"
+    "```\n"
+    "\n"
+    "Detected PII items on this page:\n"
+    "{pii_detections}\n"
+    "\n"
+    "Respond with a JSON object containing exactly these keys:\n"
+    "  - \"document_summary\": a brief summary of what this document contains (1-2 sentences)\n"
+    "  - \"entity_groups\": a list of objects, each with:\n"
+    "      - \"group_id\": a short ID like \"G1\", \"G2\"\n"
+    "      - \"label\": a human-readable label (e.g. \"John Smith (Employee)\")\n"
+    "      - \"role\": one of primary_subject, institutional, provider, secondary_contact, unknown\n"
+    "      - \"confidence\": your confidence in this grouping (0.0 to 1.0)\n"
+    "      - \"members\": list of objects with: pii_type, value_ref (the detected value), page\n"
+    "      - \"rationale\": why these PII items belong together\n"
+    "  - \"relationships\": a list of objects with: from_group (group_id), to_group (group_id), "
+    "relationship_type (e.g. employed_by, patient_of, parent_of, emergency_contact_for), confidence\n"
+    "  - \"estimated_unique_individuals\": integer count of unique people detected\n"
+    "  - \"extraction_guidance\": brief instructions on how PII is organized in this document "
+    "(e.g. \"Each page contains one employee record with name, SSN, and address\")\n"
+    "\n"
+    "Respond ONLY with valid JSON.  No additional text."
+)
+
+# ---------------------------------------------------------------------------
 # Template registry for programmatic access
 # ---------------------------------------------------------------------------
 
@@ -141,4 +181,5 @@ PROMPT_TEMPLATES: dict[str, str] = {
     "assess_extraction_confidence": ASSESS_EXTRACTION_CONFIDENCE,
     "suggest_entity_category": SUGGEST_ENTITY_CATEGORY,
     "analyze_document_structure": ANALYZE_DOCUMENT_STRUCTURE,
+    "analyze_entity_relationships": ANALYZE_ENTITY_RELATIONSHIPS,
 }

@@ -34,8 +34,17 @@ _MASKING_RULES: list[tuple[re.Pattern[str], str]] = [
 def mask_text_for_llm(text: str) -> str:
     """Replace PII patterns in *text* with bracketed placeholders.
 
-    Returns the masked text.  Does not modify the input string.
+    When ``pii_masking_enabled`` is ``False`` (testing / development),
+    returns the original text unchanged so the LLM can analyze and
+    classify actual PII values.
+
+    Returns the (possibly masked) text.  Does not modify the input string.
     """
+    from app.core.settings import get_settings
+
+    if not get_settings().pii_masking_enabled:
+        return text
+
     result = text
     for pattern, replacement in _MASKING_RULES:
         result = pattern.sub(replacement, result)

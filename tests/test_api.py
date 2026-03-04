@@ -29,6 +29,8 @@ from app.api.deps import get_db
 from app.db.base import Base
 from app.db.models import (
     AuditEvent,
+    Document,
+    DocumentAnalysisReview,
     IngestionRun,
     NotificationList,
     NotificationSubject,
@@ -1540,3 +1542,225 @@ class TestPIIFilterAllowlist:
         resp = client.get(f"/projects/{pid}/density")
         assert resp.status_code == 200
         get_settings.cache_clear()
+
+
+# ===========================================================================
+# Analysis Review — Two-phase pipeline (Step 4)
+# ===========================================================================
+
+
+class TestAnalysisReview:
+    """Tests for two-phase pipeline analysis review endpoints."""
+
+    def test_get_analysis_empty_job(self, client: TestClient, db_session: Session) -> None:
+        """GET /jobs/{id}/analysis returns empty list for job with no documents."""
+        run = IngestionRun(
+            id=uuid4(),
+            source_path="/tmp",
+            config_hash="",
+            code_version="0.1.0",
+            initiated_by="test",
+            pipeline_mode="two_phase",
+            status="analyzed",
+        )
+        db_session.add(run)
+        db_session.commit()
+        resp = client.get(f"/jobs/{run.id}/analysis")
+        assert resp.status_code == 200
+        assert resp.json() == []
+
+    def test_get_analysis_with_document(self, client: TestClient, db_session: Session) -> None:
+        """GET /jobs/{id}/analysis returns document analysis details."""
+        run = IngestionRun(
+            id=uuid4(),
+            source_path="/tmp",
+            config_hash="",
+            code_version="0.1.0",
+            initiated_by="test",
+            pipeline_mode="two_phase",
+            status="analyzed",
+        )
+        db_session.add(run)
+        db_session.flush()
+        doc = Document(
+            ingestion_run_id=run.id,
+            source_path="/tmp/test.csv",
+            file_name="test.csv",
+            file_type="csv",
+            sha256="abc123",
+            analysis_phase_status="sample_extracted",
+            sample_onset_page=0,
+            sample_extraction_count=5,
+        )
+        db_session.add(doc)
+        db_session.flush()
+        review = DocumentAnalysisReview(
+            document_id=doc.id,
+            ingestion_run_id=run.id,
+            status="pending_review",
+        )
+        db_session.add(review)
+        db_session.commit()
+        resp = client.get(f"/jobs/{run.id}/analysis")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data) == 1
+        assert data[0]["file_name"] == "test.csv"
+        assert data[0]["review_status"] == "pending_review"
+        assert data[0]["sample_extraction_count"] == 5
+
+    def test_approve_document(self, client: TestClient, db_session: Session) -> None:
+        """POST /jobs/{id}/documents/{doc_id}/approve transitions review to approved."""
+        run = IngestionRun(
+            id=uuid4(),
+            source_path="/tmp",
+            config_hash="",
+            code_version="0.1.0",
+            initiated_by="test",
+            pipeline_mode="two_phase",
+            status="analyzed",
+        )
+        db_session.add(run)
+        db_session.flush()
+        doc = Document(
+            ingestion_run_id=run.id,
+            source_path="/tmp/test.csv",
+            file_name="test.csv",
+            file_type="csv",
+            sha256="abc123",
+            analysis_phase_status="sample_extracted",
+        )
+        db_session.add(doc)
+        db_session.flush()
+        review = DocumentAnalysisReview(
+            document_id=doc.id,
+            ingestion_run_id=run.id,
+            status="pending_review",
+        )
+        db_session.add(review)
+        db_session.commit()
+        resp = client.post(
+            f"/jobs/{run.id}/documents/{doc.id}/approve",
+            json={"reviewer_id": "user1", "rationale": "Looks good"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "approved"
+        db_session.refresh(doc)
+        assert doc.analysis_phase_status == "approved"
+
+    def test_reject_document(self, client: TestClient, db_session: Session) -> None:
+        """POST /jobs/{id}/documents/{doc_id}/reject transitions review to rejected."""
+        run = IngestionRun(
+            id=uuid4(),
+            source_path="/tmp",
+            config_hash="",
+            code_version="0.1.0",
+            initiated_by="test",
+            pipeline_mode="two_phase",
+            status="analyzed",
+        )
+        db_session.add(run)
+        db_session.flush()
+        doc = Document(
+            ingestion_run_id=run.id,
+            source_path="/tmp/test.csv",
+            file_name="test.csv",
+            file_type="csv",
+            sha256="abc123",
+            analysis_phase_status="sample_extracted",
+        )
+        db_session.add(doc)
+        db_session.flush()
+        review = DocumentAnalysisReview(
+            document_id=doc.id,
+            ingestion_run_id=run.id,
+            status="pending_review",
+        )
+        db_session.add(review)
+        db_session.commit()
+        resp = client.post(
+            f"/jobs/{run.id}/documents/{doc.id}/reject",
+            json={"reviewer_id": "user1", "rationale": "Wrong doc type"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "rejected"
+
+    def test_approve_all(self, client: TestClient, db_session: Session) -> None:
+        """POST /jobs/{id}/approve-all batch approves all pending documents."""
+        run = IngestionRun(
+            id=uuid4(),
+            source_path="/tmp",
+            config_hash="",
+            code_version="0.1.0",
+            initiated_by="test",
+            pipeline_mode="two_phase",
+            status="analyzed",
+        )
+        db_session.add(run)
+        db_session.flush()
+        for i in range(3):
+            doc = Document(
+                ingestion_run_id=run.id,
+                source_path=f"/tmp/test{i}.csv",
+                file_name=f"test{i}.csv",
+                file_type="csv",
+                sha256=f"hash{i}",
+                analysis_phase_status="sample_extracted",
+            )
+            db_session.add(doc)
+            db_session.flush()
+            review = DocumentAnalysisReview(
+                document_id=doc.id,
+                ingestion_run_id=run.id,
+                status="pending_review",
+            )
+            db_session.add(review)
+        db_session.commit()
+        resp = client.post(
+            f"/jobs/{run.id}/approve-all",
+            json={"reviewer_id": "user1"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["approved"] == 3
+
+    def test_approve_already_approved_returns_409(self, client: TestClient, db_session: Session) -> None:
+        """Approving an already-approved document returns 409."""
+        run = IngestionRun(
+            id=uuid4(),
+            source_path="/tmp",
+            config_hash="",
+            code_version="0.1.0",
+            initiated_by="test",
+            pipeline_mode="two_phase",
+            status="analyzed",
+        )
+        db_session.add(run)
+        db_session.flush()
+        doc = Document(
+            ingestion_run_id=run.id,
+            source_path="/tmp/test.csv",
+            file_name="test.csv",
+            file_type="csv",
+            sha256="abc123",
+            analysis_phase_status="approved",
+        )
+        db_session.add(doc)
+        db_session.flush()
+        review = DocumentAnalysisReview(
+            document_id=doc.id,
+            ingestion_run_id=run.id,
+            status="approved",
+        )
+        db_session.add(review)
+        db_session.commit()
+        resp = client.post(
+            f"/jobs/{run.id}/documents/{doc.id}/approve",
+            json={"reviewer_id": "user1"},
+        )
+        assert resp.status_code == 409
+
+    def test_job_not_found_returns_404(self, client: TestClient) -> None:
+        """GET /jobs/{fake_id}/analysis returns 404 for non-existent job."""
+        fake_id = str(uuid4())
+        resp = client.get(f"/jobs/{fake_id}/analysis")
+        assert resp.status_code == 404

@@ -36,6 +36,8 @@ def test_schema_creation_in_sqlite_includes_all_canonical_tables():
         "density_summaries",
         "export_jobs",
         "llm_call_logs",
+        # Phase 5 — Two-Phase Pipeline
+        "document_analysis_reviews",
     }
     assert expected.issubset(table_names)
 
@@ -450,3 +452,92 @@ def test_llm_call_log_columns_exist():
     assert cols["token_count"]["nullable"] is True
     assert "created_at" in cols
     assert cols["created_at"]["nullable"] is False
+
+
+def test_document_analysis_review_columns_exist():
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(bind=engine)
+    inspector = inspect(engine)
+
+    cols = {c["name"]: c for c in inspector.get_columns("document_analysis_reviews")}
+
+    # Primary key
+    assert "id" in cols
+    assert cols["id"]["nullable"] is False
+
+    # Required FKs
+    assert "document_id" in cols
+    assert cols["document_id"]["nullable"] is False
+    assert "ingestion_run_id" in cols
+    assert cols["ingestion_run_id"]["nullable"] is False
+
+    # Status with server default
+    assert "status" in cols
+    assert cols["status"]["nullable"] is False
+
+    # Nullable review fields
+    assert "reviewer_id" in cols
+    assert cols["reviewer_id"]["nullable"] is True
+    assert "rationale" in cols
+    assert cols["rationale"]["nullable"] is True
+    assert "auto_approve_reason" in cols
+    assert cols["auto_approve_reason"]["nullable"] is True
+
+    # Confidence metrics — nullable
+    assert "sample_confidence_avg" in cols
+    assert cols["sample_confidence_avg"]["nullable"] is True
+    assert "sample_confidence_min" in cols
+    assert cols["sample_confidence_min"]["nullable"] is True
+
+    # Timestamps
+    assert "reviewed_at" in cols
+    assert cols["reviewed_at"]["nullable"] is True
+    assert "created_at" in cols
+    assert cols["created_at"]["nullable"] is False
+
+
+def test_two_phase_columns_on_existing_tables():
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(bind=engine)
+    inspector = inspect(engine)
+
+    # -- documents: 3 new columns ------------------------------------------
+    doc_cols = {c["name"]: c for c in inspector.get_columns("documents")}
+    assert "analysis_phase_status" in doc_cols
+    assert doc_cols["analysis_phase_status"]["nullable"] is True
+    assert "sample_onset_page" in doc_cols
+    assert doc_cols["sample_onset_page"]["nullable"] is True
+    assert "sample_extraction_count" in doc_cols
+    assert doc_cols["sample_extraction_count"]["nullable"] is True
+    assert "entity_analysis" in doc_cols
+    assert doc_cols["entity_analysis"]["nullable"] is True
+
+    # -- ingestion_runs: 2 new columns -------------------------------------
+    ir_cols = {c["name"]: c for c in inspector.get_columns("ingestion_runs")}
+    assert "pipeline_mode" in ir_cols
+    assert ir_cols["pipeline_mode"]["nullable"] is False
+    assert "analysis_completed_at" in ir_cols
+    assert ir_cols["analysis_completed_at"]["nullable"] is True
+
+    # -- extractions: 1 new column -----------------------------------------
+    ext_cols = {c["name"]: c for c in inspector.get_columns("extractions")}
+    assert "is_sample" in ext_cols
+    assert ext_cols["is_sample"]["nullable"] is False
+
+
+def test_two_phase_server_defaults():
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Base.metadata.create_all(bind=engine)
+    inspector = inspect(engine)
+
+    # ingestion_runs.pipeline_mode defaults to 'full'
+    ir_cols = {c["name"]: c for c in inspector.get_columns("ingestion_runs")}
+    _assert_default_contains(ir_cols["pipeline_mode"]["default"], "full")
+
+    # extractions.is_sample defaults to false
+    ext_cols = {c["name"]: c for c in inspector.get_columns("extractions")}
+    _assert_default_contains(ext_cols["is_sample"]["default"], "false")
+
+    # document_analysis_reviews.status defaults to 'pending_review'
+    dar_cols = {c["name"]: c for c in inspector.get_columns("document_analysis_reviews")}
+    _assert_default_contains(dar_cols["status"]["default"], "pending_review")

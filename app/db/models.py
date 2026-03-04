@@ -65,6 +65,8 @@ class IngestionRun(Base):
     error_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    pipeline_mode: Mapped[str] = mapped_column(String(32), nullable=False, default="full", server_default=sql_text("'full'"))
+    analysis_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
@@ -101,6 +103,10 @@ class Document(Base):
     manual_review_reason: Mapped[str | None] = mapped_column(String(256), nullable=True)
     metadata_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     structure_analysis: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    analysis_phase_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    sample_onset_page: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    sample_extraction_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    entity_analysis: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
@@ -191,6 +197,7 @@ class Extraction(Base):
     confidence_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     entity_role: Mapped[str | None] = mapped_column(String(32), nullable=True)
     entity_role_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    is_sample: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=sql_text("false"))
     evidence_page: Mapped[int | None] = mapped_column(Integer, nullable=True)
     evidence_text_start: Mapped[int | None] = mapped_column(Integer, nullable=True)
     evidence_text_end: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -452,4 +459,29 @@ class LLMCallLog(Base):
     accepted: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     token_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class DocumentAnalysisReview(Base):
+    """Two-phase pipeline: review gate between analysis and full extraction.
+
+    Created after the analysis phase completes for each document. Status
+    tracks whether the document was auto-approved, sent for human review,
+    or rejected before full extraction begins.
+    """
+
+    __tablename__ = "document_analysis_reviews"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    document_id: Mapped[UUID] = mapped_column(ForeignKey("documents.id", ondelete="CASCADE"), nullable=False)
+    ingestion_run_id: Mapped[UUID] = mapped_column(ForeignKey("ingestion_runs.id", ondelete="CASCADE"), nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="pending_review", server_default=sql_text("'pending_review'")
+    )
+    reviewer_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    rationale: Mapped[str | None] = mapped_column(Text, nullable=True)
+    auto_approve_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sample_confidence_avg: Mapped[float | None] = mapped_column(Float, nullable=True)
+    sample_confidence_min: Mapped[float | None] = mapped_column(Float, nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())

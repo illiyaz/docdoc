@@ -123,7 +123,10 @@ project-root/
 │   │   ├── qa.py
 │   │   └── error_handler.py
 │   ├── pipeline/
-│   │   └── dag.py                 # Prefect DAG wiring
+│   │   ├── dag.py                 # Prefect DAG wiring
+│   │   ├── two_phase.py           # Two-phase pipeline: analyze_generator + extract_generator
+│   │   ├── content_onset.py       # Generalized content onset detection (all file types)
+│   │   └── auto_approve.py        # Auto-approve logic for document analysis review
 │   ├── pdf/
 │   │   ├── reader.py              # PyMuPDF streaming wrapper
 │   │   ├── ocr.py                 # PaddleOCR integration
@@ -146,8 +149,10 @@ project-root/
 │   │   ├── models.py              # DSA dataclasses (DocumentStructureAnalysis, etc.)
 │   │   ├── heuristics.py          # Deterministic document type/section/role analyzer
 │   │   ├── protocol_relevance.py  # Protocol → entity role relevance mapping
-│   │   ├── masking.py             # PII masking for LLM prompts
-│   │   └── llm_analyzer.py        # LLM-assisted structure analysis (additive)
+│   │   ├── masking.py             # PII masking for LLM prompts (respects pii_masking_enabled)
+│   │   ├── llm_analyzer.py        # LLM-assisted structure analysis (additive)
+│   │   ├── entity_groups.py       # EntityGroup, EntityRelationship dataclasses (Step 13)
+│   │   └── llm_entity_analyzer.py # LLM entity relationship analysis (Step 13)
 │   ├── llm/
 │   │   ├── client.py              # OllamaClient — governance-gated LLM wrapper
 │   │   ├── prompts.py             # Prompt templates (classify, assess, suggest, DSA)
@@ -159,12 +164,12 @@ project-root/
 │   │   ├── logging.py             # PIISafeFilter
 │   │   └── settings.py            # pydantic-settings
 │   ├── db/
-│   │   ├── models.py              # SQLAlchemy ORM models (17 tables)
+│   │   ├── models.py              # SQLAlchemy ORM models (18 tables)
 │   │   └── repositories.py        # thin data access layer
 │   └── api/
 │       ├── main.py
 │       ├── middleware/
-│       └── routes/                # health, diagnostic, jobs, projects, protocols
+│       └── routes/                # health, diagnostic, jobs, projects, protocols, analysis_review
 ├── frontend/                      # React Forentis AI UI
 │   └── src/
 │       ├── api/client.ts          # API client (types + functions)
@@ -179,7 +184,7 @@ project-root/
 │       ├── components/            # Shared components (ShadCN + custom)
 │       └── App.tsx                # Routes + sidebar + Forentis AI branding
 ├── alembic/
-│   └── versions/                  # 0001–0006
+│   └── versions/                  # 0001–0007
 ├── tests/
 │   ├── test_schema.py
 │   ├── test_repositories.py
@@ -191,7 +196,8 @@ project-root/
 │   ├── test_constants.py            # entity category mapping coverage
 │   ├── test_density.py
 │   ├── test_llm.py
-│   └── test_structure_analysis.py   # DSA: doc type, sections, roles, masking, RRA prevention
+│   ├── test_structure_analysis.py   # DSA: doc type, sections, roles, masking, RRA prevention
+│   └── test_two_phase.py            # Two-phase pipeline: content onset, auto-approve, review
 ├── models/                        # pre-packaged spaCy and Presidio models
 └── scripts/
     └── retrain.py                 # supervised retraining from human labels
@@ -201,9 +207,9 @@ project-root/
 
 ## 4) Schema Contract
 
-The canonical DB schema (17 tables) is defined by:
+The canonical DB schema (18 tables) is defined by:
 - `app/db/models.py`
-- `alembic/versions/0001_initial.py` through `0005_projects_and_protocols.py`
+- `alembic/versions/0001_initial.py` through `0008_entity_analysis.py`
 - `tests/test_schema.py` and `tests/test_repositories.py`
 
 ### Rules
@@ -244,9 +250,10 @@ See [docs/SCHEMA.md](docs/SCHEMA.md) for full storage policy contract and securi
 
 These are detailed in [docs/SCHEMA.md](docs/SCHEMA.md). Summary:
 
-- **PDF processing:** PyMuPDF page-streaming + PaddleOCR for scanned pages. Dual-path (digital vs scanned). Content onset detection. Cross-page tail-buffer stitching. Checkpointing per page.
+- **PDF processing:** PyMuPDF page-streaming + PaddleOCR for scanned pages. Dual-path (digital vs scanned). **PII-verified onset detection** (two-pass: heuristic keyword scan → Presidio verification on candidate pages to find true first PII page). Cross-page tail-buffer stitching. Checkpointing per page.
 - **PII detection:** Three layers (pattern match → context window → positional header). Presidio + spaCy. 85+ patterns covering PII/PHI/FERPA/SPI/PPRA. 8 data categories (PII, SPII, PHI, PFI, PCI, NPI, FTI, CREDENTIALS) with multi-category mapping per entity type.
 - **Document Structure Analysis:** Heuristic-first document type classification, section detection, entity role attribution. LLM-assisted analysis additive only (`llm_assist_enabled`). Cross-role merge prevention in RRA (primary_subject + institutional = never merge).
+- **LLM Entity Relationship Analysis:** LLM reads document content + sample PII detections, understands which PII belongs to which person, proposes entity groups with confidence + rationale. Presented to human reviewer for confirmation before full extraction. Additive to Presidio/spaCy detection. Graceful fallback when LLM unavailable.
 - **RRA:** Entity resolution via Union-Find. Confidence-weighted merge signals. Cross-role merge prevention. Threshold: 0.80 auto-accept, 0.60–0.79 human review, <0.60 separate.
 - **Protocols:** 8 built-in (HIPAA, GDPR, CCPA, HITECH, FERPA, state_breach_generic, BIPA, DPDPA). YAML-configurable. Selected once per job.
 - **HITL:** 4 roles (REVIEWER, LEGAL_REVIEWER, APPROVER, QC_SAMPLER). 4 review queues. State machine: AI_PENDING → HUMAN_REVIEW → LEGAL_REVIEW → APPROVED → NOTIFIED.
@@ -311,8 +318,10 @@ These are detailed in [docs/SCHEMA.md](docs/SCHEMA.md). Summary:
 | 9. Guided Protocol Form | COMPLETE | Replaced raw JSON textarea with guided form: base protocol dropdown (6 presets), entity type checkboxes (Identity/Financial/Health), confidence slider, dedup anchor multi-select, sampling config, storage policy radios, reorderable export fields, raw JSON toggle for power users |
 | 10. Catalog Tab + Base Protocols | COMPLETE | Catalog tab with file upload (drag-and-drop), server path linking (air-gap), Run New Job, Link Existing Job; GET /protocols/base endpoint; base protocol dropdown populated from API (8 YAML protocols); placeholder YAML for bipa, dpdpa |
 | 11. Document Structure Analysis | COMPLETE | Heuristic doc type classification (9 types), section detection (13 section types), entity role attribution (5 roles), protocol relevance mapping (8 protocols), LLM-assisted analysis (additive, governance-gated), cross-role merge prevention in RRA, migration 0006, 64 new tests |
+| 12. Two-Phase Pipeline | COMPLETE | Analyze → Review → Extract workflow. Content onset detection (all file types), sample PII extraction from first content page, document-level analysis review (approve/reject/approve-all), auto-approve (confidence-based + protocol-configurable), Phase 2 full extraction on approved docs, migration 0007, `DocumentAnalysisReview` table (18 total), frontend pipeline mode toggle + analysis review panel, 28 new tests |
+| 13. LLM Entity Relationship Analysis | COMPLETE | PII-verified onset detection (two-pass: heuristic candidates → Presidio verification). LLM entity relationship analysis: reads onset page + PII detections, proposes entity groups with confidence + rationale. New analyze stages: `verified_onset` + `entity_analysis`. `EntityRelationshipAnalysis` dataclass, `LLMEntityAnalyzer`, `ANALYZE_ENTITY_RELATIONSHIPS` prompt. API returns entity groups/relationships/guidance. Frontend entity group cards with role badges, relationship display, extraction guidance. Migration 0008 (`documents.entity_analysis` JSON column). 20 new tests. |
 
-**1499 tests passing after Steps 1–11 + 8b backend.**
+**1550+ tests passing after Steps 1–13.**
 
 See [docs/PLAN.md](docs/PLAN.md) for full step-by-step implementation details.
 
