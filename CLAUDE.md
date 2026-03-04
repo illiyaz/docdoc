@@ -39,7 +39,8 @@ A **Prefect DAG pipeline** of well-defined processing stages. Each stage has typ
 |---|---|
 | Discovery Agent | `tasks/discovery.py` — filesystem/DB traversal, document cataloging |
 | Structure Analysis Agent | `tasks/structure_analysis.py` — document type, section detection, entity role attribution |
-| PII Detection Agent | `tasks/detection.py` — Presidio + spaCy NER, confidence scoring |
+| Document Understanding | `structure/llm_document_understanding.py` — LLM semantic schema (field map, people, dates, suppression hints). Fallback: heuristic + deny-lists |
+| PII Detection Agent | `tasks/detection.py` — Presidio + spaCy NER, confidence scoring, post-filtered through DocumentSchema when available |
 | PII Extraction Agent | `tasks/extraction.py` — pattern match + context window extraction |
 | Normalization Agent | `tasks/normalization.py` — phone/address/name/email normalization |
 | RRA Agent | `tasks/rra.py` — entity resolution, deduplication, NotificationSubject building |
@@ -138,7 +139,9 @@ project-root/
 │   │   ├── spacy_classifier.py    # context window classification
 │   │   ├── layer1_patterns.py     # regex pattern library (85+ patterns)
 │   │   ├── layer2_context.py      # Layer 2 context window logic
-│   │   └── layer3_positional.py   # Layer 3 header inference
+│   │   ├── layer3_positional.py   # Layer 3 header inference
+│   │   ├── context_deny_list.py   # Step 14a: common-word deny-list, reference labels, FP heuristic
+│   │   └── schema_filter.py       # Step 14b: DocumentSchema post-filter for Presidio detections
 │   ├── normalization/             # phone, email, name, address normalizers
 │   ├── rra/                       # entity resolver, deduplicator, fuzzy matching
 │   ├── protocols/                 # Protocol dataclass, loader, registry
@@ -152,10 +155,12 @@ project-root/
 │   │   ├── masking.py             # PII masking for LLM prompts (respects pii_masking_enabled)
 │   │   ├── llm_analyzer.py        # LLM-assisted structure analysis (additive)
 │   │   ├── entity_groups.py       # EntityGroup, EntityRelationship dataclasses (Step 13)
-│   │   └── llm_entity_analyzer.py # LLM entity relationship analysis (Step 13)
+│   │   ├── llm_entity_analyzer.py # LLM entity relationship analysis (Step 13)
+│   │   ├── document_schema.py     # Step 14a: DocumentSchema, FieldContext, PersonContext, DateContext
+│   │   └── llm_document_understanding.py  # Step 14b: LLM Document Understanding → DocumentSchema
 │   ├── llm/
 │   │   ├── client.py              # OllamaClient — governance-gated LLM wrapper
-│   │   ├── prompts.py             # Prompt templates (classify, assess, suggest, DSA)
+│   │   ├── prompts.py             # Prompt templates (classify, assess, suggest, DSA, entity relationships, document understanding)
 │   │   └── audit.py               # LLM call logging (log_llm_call, get_llm_calls)
 │   ├── core/
 │   │   ├── constants.py           # ENTITY_CATEGORY_MAP, DATA_CATEGORIES (8 categories)
@@ -184,7 +189,7 @@ project-root/
 │       ├── components/            # Shared components (ShadCN + custom)
 │       └── App.tsx                # Routes + sidebar + Forentis AI branding
 ├── alembic/
-│   └── versions/                  # 0001–0007
+│   └── versions/                  # 0001–0008
 ├── tests/
 │   ├── test_schema.py
 │   ├── test_repositories.py
@@ -251,9 +256,11 @@ See [docs/SCHEMA.md](docs/SCHEMA.md) for full storage policy contract and securi
 These are detailed in [docs/SCHEMA.md](docs/SCHEMA.md). Summary:
 
 - **PDF processing:** PyMuPDF page-streaming + PaddleOCR for scanned pages. Dual-path (digital vs scanned). **PII-verified onset detection** (two-pass: heuristic keyword scan → Presidio verification on candidate pages to find true first PII page). Cross-page tail-buffer stitching. Checkpointing per page.
-- **PII detection:** Three layers (pattern match → context window → positional header). Presidio + spaCy. 85+ patterns covering PII/PHI/FERPA/SPI/PPRA. 8 data categories (PII, SPII, PHI, PFI, PCI, NPI, FTI, CREDENTIALS) with multi-category mapping per entity type.
+- **PII detection:** Three layers (pattern match → context window → positional header). Presidio + spaCy. 85+ patterns covering PII/PHI/FERPA/SPI/PPRA. 8 data categories (PII, SPII, PHI, PFI, PCI, NPI, FTI, CREDENTIALS) with multi-category mapping per entity type. **Context deny-lists** suppress common-word false positives (STUDENT_ID "Statement", VAT_EU "Description"). **DocumentSchema filter** (LLM-powered) suppresses/reclassifies detections based on semantic document understanding.
+- **LLM Document Understanding:** LLM reads onset page, produces a DocumentSchema (field map, people, dates, table schemas, suppression hints). Schema is a post-filter on Presidio — never modifies Presidio's engine. Table-aware filtering: non-PII table columns suppress all detections from table region, PII columns confirm detections. Reduces false positives from ~85% to ~10-15%. Without LLM, deny-lists + tighter patterns reduce to ~40-50%. One LLM call per document (not per detection).
 - **Document Structure Analysis:** Heuristic-first document type classification, section detection, entity role attribution. LLM-assisted analysis additive only (`llm_assist_enabled`). Cross-role merge prevention in RRA (primary_subject + institutional = never merge).
 - **LLM Entity Relationship Analysis:** LLM reads document content + sample PII detections, understands which PII belongs to which person, proposes entity groups with confidence + rationale. Presented to human reviewer for confirmation before full extraction. Additive to Presidio/spaCy detection. Graceful fallback when LLM unavailable.
+- **Pipeline stage order (analyze phase):** `discovery → cataloging → verified_onset → document_understanding (LLM) → sample_extraction (with schema filter) → entity_analysis → auto_approve`. Without LLM: `discovery → cataloging → verified_onset → structure_analysis (heuristic) → sample_extraction (with deny-lists) → auto_approve`.
 - **RRA:** Entity resolution via Union-Find. Confidence-weighted merge signals. Cross-role merge prevention. Threshold: 0.80 auto-accept, 0.60–0.79 human review, <0.60 separate.
 - **Protocols:** 8 built-in (HIPAA, GDPR, CCPA, HITECH, FERPA, state_breach_generic, BIPA, DPDPA). YAML-configurable. Selected once per job.
 - **HITL:** 4 roles (REVIEWER, LEGAL_REVIEWER, APPROVER, QC_SAMPLER). 4 review queues. State machine: AI_PENDING → HUMAN_REVIEW → LEGAL_REVIEW → APPROVED → NOTIFIED.
@@ -320,6 +327,7 @@ These are detailed in [docs/SCHEMA.md](docs/SCHEMA.md). Summary:
 | 11. Document Structure Analysis | COMPLETE | Heuristic doc type classification (9 types), section detection (13 section types), entity role attribution (5 roles), protocol relevance mapping (8 protocols), LLM-assisted analysis (additive, governance-gated), cross-role merge prevention in RRA, migration 0006, 64 new tests |
 | 12. Two-Phase Pipeline | COMPLETE | Analyze → Review → Extract workflow. Content onset detection (all file types), sample PII extraction from first content page, document-level analysis review (approve/reject/approve-all), auto-approve (confidence-based + protocol-configurable), Phase 2 full extraction on approved docs, migration 0007, `DocumentAnalysisReview` table (18 total), frontend pipeline mode toggle + analysis review panel, 28 new tests |
 | 13. LLM Entity Relationship Analysis | COMPLETE | PII-verified onset detection (two-pass: heuristic candidates → Presidio verification). LLM entity relationship analysis: reads onset page + PII detections, proposes entity groups with confidence + rationale. New analyze stages: `verified_onset` + `entity_analysis`. `EntityRelationshipAnalysis` dataclass, `LLMEntityAnalyzer`, `ANALYZE_ENTITY_RELATIONSHIPS` prompt. API returns entity groups/relationships/guidance. Frontend entity group cards with role badges, relationship display, extraction guidance. Migration 0008 (`documents.entity_analysis` JSON column). 20 new tests. |
+| 14. LLM Document Understanding & Detection Quality | PENDING | Three-phase fix for false positive reduction. Phase 14a: deterministic improvements (context deny-lists, tighter Presidio patterns for STUDENT_ID/COMPANY_NUMBER_UK/DRIVER_LICENSE_US/VAT_EU/DATE_OF_BIRTH). Phase 14b: LLM Document Understanding — LLM reads onset page, produces DocumentSchema (field map, people, dates, suppression hints), SchemaFilter post-processes Presidio output. Phase 14c: integration with entity analysis + suppression audit trail + frontend. Target: ~85% FP rate → ~10-15% with LLM, ~40-50% without. |
 
 **1550+ tests passing after Steps 1–13.**
 

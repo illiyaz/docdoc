@@ -963,3 +963,520 @@ discovery → cataloging → structure_analysis → verified_onset → sample_ex
 - Cross-role merge prevention still enforced (primary_subject + institutional = never merge)
 - Air-gap safe: local Ollama only
 - Memory-safe: `_forget_page()` after each page scan during onset verification
+
+---
+
+### Step 14 — LLM Document Understanding & Detection Quality (PENDING)
+
+**Goal:** Dramatically reduce false positive rates by introducing an LLM Document Understanding stage that creates a semantic schema of the document BEFORE Presidio runs. The LLM tells Presidio what the document IS, so Presidio's raw pattern matches can be filtered through contextual understanding. Also tighten deterministic fallback patterns for LLM-off mode.
+
+**Observed Problem (real test case — Boosey & Hawkes financial statement):**
+
+A 1-page financial statement for client Adeline Chandler produced **38 PII detections** when the true PII count is ~5. Key failures:
+- `001968` (client account number) → matched as COMPANY_NUMBER_UK (70%), US_DRIVER_LICENSE (1%)
+- `1121799` (statement reference) → matched as DRIVER_LICENSE_US (65%)
+- `"Statement"`, `"Summary"`, `"STREET"` → matched as STUDENT_ID (65%)
+- `"Description"`, `"Transactions"` → matched as VAT_EU (75%)
+- `30/06/2020` (transaction date) → matched as DATE_OF_BIRTH_DMY (70%)
+- `CLIFFORD BARNES` (person in transfer) → matched as ORGANIZATION (85%)
+- Entity group for Adeline Chandler included false positive members (COMPANY_NUMBER_UK, US_DRIVER_LICENSE, STUDENT_ID)
+
+Root cause: Presidio runs blind pattern matching with zero document context. Every regex that can match, does match. The LLM entity analysis (Step 13) then works with polluted input and propagates errors.
+
+**Architectural Change: LLM Document Understanding as Semantic Pre-Filter**
+
+```
+OLD pipeline:
+  Presidio (blind) → 38 detections (85% FP) → LLM groups garbage → bad output
+
+NEW pipeline:
+  LLM Document Understanding → DocumentSchema → Presidio + schema filtering → ~5 clean detections → LLM groups clean data → good output
+
+WITHOUT LLM (fallback):
+  Improved patterns + context deny-lists → Presidio → ~15-18 detections (~50% FP) → heuristic grouping
+```
+
+The LLM does NOT extract PII and does NOT replace Presidio. The LLM creates a **DocumentSchema** — a structured understanding of what this document is, what fields mean, and what's real PII vs. reference numbers. Presidio still does actual extraction, but results are filtered/reclassified through the schema.
+
+#### 14a. DocumentSchema Data Model
+
+**File: `app/structure/document_schema.py`** (new):
+
+```python
+from dataclasses import dataclass, field
+
+@dataclass
+class FieldContext:
+    label: str              # "Tax No.", "Client:", "Statement Nr."
+    value_example: str      # "285-07-5085", "001968", "1121799"
+    semantic_type: str      # "tax_identification_number", "account_number", "reference_number"
+    is_pii: bool            # True for tax_id, False for account_number
+    presidio_override: str | None = None  # "US_SSN" — what Presidio SHOULD classify this as
+    suppress_types: list[str] = field(default_factory=list)  # ["COMPANY_NUMBER_UK", "US_DRIVER_LICENSE"] — types to suppress for this value
+
+@dataclass
+class PersonContext:
+    name: str               # "Clifford Barnes"
+    role: str               # "related_party", "primary_subject", "institutional"
+    context: str            # "Named in transfer transaction"
+    is_pii_subject: bool    # True if this person's PII should be extracted
+
+@dataclass
+class DateContext:
+    value: str              # "30/06/2020"
+    semantic_type: str      # "transaction_date", "statement_period_end", "date_of_birth"
+    is_pii: bool            # False for transaction_date, True for DOB
+
+@dataclass
+class TableColumn:
+    header: str             # "Date", "Ref.", "Description", "Amount"
+    semantic_type: str      # "transaction_date", "reference_number", "description_text", "currency_amount"
+    contains_pii: bool      # False for transactional columns, True for PII columns (e.g., "SSN", "Name")
+    pii_type: str | None    # If contains_pii=True, what Presidio type (e.g., "US_SSN"). None otherwise.
+
+@dataclass
+class TableSchema:
+    columns: list[TableColumn]
+    row_count_estimate: int         # helps reviewer understand data volume per table
+    table_context: str              # "Transaction history table", "Employee payroll records"
+    table_location: str | None      # "page_1_lower_half", "page_3" — rough location for matching
+    has_pii_columns: bool           # convenience flag: any column has contains_pii=True
+
+@dataclass
+class DocumentSchema:
+    document_type: str              # "financial_statement", "medical_record", "hr_file", "insurance_claim"
+    document_subtype: str | None    # "royalty_statement", "bank_statement", "invoice"
+    issuing_entity: str | None      # "Boosey & Hawkes, Inc."
+    
+    field_map: list[FieldContext]    # labeled fields and what they actually are
+    people: list[PersonContext]      # people identified with roles
+    organizations: list[str]        # orgs identified (issuer, employers, etc.)
+    date_contexts: list[DateContext] # dates with their actual meaning
+    tables: list[TableSchema]       # zero or more tables detected on the page
+    
+    suppression_hints: list[str]    # free-text hints: "001968 is client account number, not ID"
+    extraction_notes: str           # "This is a single-individual financial statement"
+    
+    # Confidence in the schema itself
+    schema_confidence: float        # 0.0-1.0, how confident the LLM is in this understanding
+    detected_by: str                # "llm" | "heuristic" | "llm+heuristic"
+```
+
+#### 14b. LLM Document Understanding Prompt
+
+**File: `app/llm/prompts.py`** — New template `UNDERSTAND_DOCUMENT`:
+
+The prompt sends the LLM:
+1. Full text of the onset page (masked if `pii_masking_enabled=true`)
+2. Document metadata (file name, file type, structure_class)
+3. Heuristic structure analysis (doc type guess, sections detected)
+
+The LLM produces a DocumentSchema JSON:
+
+```
+You are analyzing a document to understand its structure and identify what data fields mean.
+
+Document: {file_name} ({file_type}, {structure_class})
+Heuristic analysis suggests: {heuristic_doc_type}
+
+--- DOCUMENT TEXT (page {onset_page}) ---
+{page_text}
+--- END ---
+
+Analyze this document and respond ONLY with a JSON object:
+{
+  "document_type": "the type of document (financial_statement, medical_record, hr_file, insurance_claim, legal_filing, tax_form, correspondence, etc.)",
+  "document_subtype": "more specific type if identifiable",
+  "issuing_entity": "the organization that produced this document, or null",
+  "field_map": [
+    {
+      "label": "the field label as it appears in the document",
+      "value_example": "the value next to this label",
+      "semantic_type": "what this field actually represents (tax_id, account_number, reference_number, phone_number, address, etc.)",
+      "is_pii": true/false,
+      "presidio_override": "if is_pii, what Presidio entity type this should be classified as, else null",
+      "suppress_types": ["list of Presidio entity types that should NOT match this value"]
+    }
+  ],
+  "people": [
+    {
+      "name": "person's name",
+      "role": "primary_subject | related_party | institutional_contact | provider",
+      "context": "how this person relates to the document",
+      "is_pii_subject": true/false
+    }
+  ],
+  "organizations": ["list of organizations mentioned"],
+  "date_contexts": [
+    {
+      "value": "the date as it appears",
+      "semantic_type": "transaction_date | statement_period | date_of_birth | filing_date | etc.",
+      "is_pii": true/false
+    }
+  ],
+  "tables": [
+    {
+      "columns": [
+        {
+          "header": "the column header text",
+          "semantic_type": "what this column contains (transaction_date, reference_number, person_name, government_id, currency_amount, description_text, etc.)",
+          "contains_pii": true/false,
+          "pii_type": "if contains_pii, the Presidio entity type (US_SSN, PERSON, EMAIL_ADDRESS, etc.), else null"
+        }
+      ],
+      "row_count_estimate": 0,
+      "table_context": "what this table represents (e.g., 'Transaction history', 'Employee payroll records')",
+      "has_pii_columns": true/false
+    }
+  ],
+  "suppression_hints": ["free text hints about values that look like PII but aren't"],
+  "extraction_notes": "brief note about what PII to expect and how it's organized"
+}
+
+IMPORTANT:
+- Be precise about what IS and ISN'T PII. Reference numbers, account IDs, and statement numbers are NOT PII.
+- Phone/fax numbers belonging to organizations (not individuals) should be marked is_pii=false.
+- Dates that are transaction dates, statement periods, or filing dates are NOT dates of birth.
+- Short numeric codes (under 8 digits) next to labels like "Client:", "Ref:", "Statement Nr:" are reference numbers, NOT government IDs.
+- For tables: identify EVERY table on the page. Mark each column as contains_pii or not. Transaction tables (date, ref, description, amount) typically have ZERO PII columns. Payroll/HR tables (name, SSN, DOB, salary) have MULTIPLE PII columns. Mixed tables (name, department, office) may have partial PII.
+- A table column containing amounts, reference numbers, descriptions, or status values is NOT a PII column even if Presidio would match patterns in the data.
+```
+
+#### 14c. Document Schema Filter (Post-Presidio)
+
+**File: `app/pii/schema_filter.py`** (new):
+
+```python
+class SchemaFilter:
+    """Filters Presidio detections through a DocumentSchema to remove false positives."""
+    
+    def __init__(self, schema: DocumentSchema):
+        self.schema = schema
+        self._build_suppression_index()
+        self._build_table_index()
+    
+    def filter_detections(self, detections: list[Detection]) -> list[Detection]:
+        """
+        For each Presidio detection:
+        1. Check if the detected value matches a field_map entry
+           - If field says is_pii=False → SUPPRESS (log reason)
+           - If field says presidio_override → RECLASSIFY to override type
+           - If detection type is in field's suppress_types → SUPPRESS
+        2. Check table_schemas — if detection falls within a table region:
+           - If table has_pii_columns=False → SUPPRESS all detections from table text
+           - If table has PII columns, check if detection matches a PII column → KEEP
+           - If detection matches a non-PII column (ref, amount, description) → SUPPRESS
+        3. Check date_contexts — if date matches and is_pii=False → SUPPRESS
+        4. Check people — if ORGANIZATION matches a known person name → RECLASSIFY to PERSON
+        5. Check suppression_hints — keyword match → SUPPRESS
+        6. If no schema match → KEEP (Presidio detection passes through)
+        
+        Returns: filtered list + suppression log for audit trail
+        """
+    
+    def _build_table_index(self):
+        """
+        Builds a lookup from table column headers to their semantic types.
+        Used to match Presidio detections against known table structure.
+        
+        For tables with has_pii_columns=False, ALL values appearing between
+        table header keywords are suppressed. This handles the common case
+        where PyMuPDF flattens table text into a single stream:
+        
+        "Date Ref. Description Amount 30/06/2020 001967 Heirs Transfer 65.29 CR"
+        
+        The filter identifies that 30/06/2020, 001967, and 65.29 are all
+        table cell values (not PII) based on their proximity to known
+        non-PII column headers.
+        """
+    
+    def get_suppression_log(self) -> list[dict]:
+        """Returns audit log of every suppressed/reclassified detection with reason."""
+```
+
+**Table-aware filtering — how it works with flattened PDF text:**
+
+When PyMuPDF extracts a table, the column structure is lost. The filter uses two strategies:
+
+**Strategy 1: Header proximity (for flattened text)**
+If the schema says columns are `["Date", "Ref.", "Description", "Amount"]` and none contain PII, any Presidio detection occurring in text between/near these header keywords is suppressed.
+
+```
+Extracted text: "Date Ref. Description Amount 30/06/2020 001967 Heirs Transfer from CLIFFORD BARNES 65.29 CR"
+                 ^^^^  ^^^^  ^^^^^^^^^^^  ^^^^^^  ← headers detected, none are PII columns
+                                                   → everything after headers is table data → SUPPRESS all matches
+```
+
+**Strategy 2: Column-value mapping (for structured extraction)**
+For CSV/Excel or well-extracted PDF tables where column association is preserved, the filter maps each value to its column and checks `contains_pii`:
+
+```
+Column "Ref." → semantic_type="reference_number" → contains_pii=False
+  Value "001967" matched as DRIVER_LICENSE_US → SUPPRESS (non-PII column)
+
+Column "Name" → semantic_type="person_name" → contains_pii=True, pii_type=PERSON
+  Value "Alice Smith" matched as PERSON → KEEP (PII column confirms)
+```
+
+**Schema filter behavior for the Boosey & Hawkes example:**
+
+| Presidio Detection | Schema Match | Action | Result |
+|---|---|---|---|
+| `001968` → COMPANY_NUMBER_UK (70%) | field_map: "Client: 001968" → account_number, is_pii=False | SUPPRESS | Removed |
+| `001968` → US_DRIVER_LICENSE (1%) | Same field_map entry, suppress_types includes US_DRIVER_LICENSE | SUPPRESS | Removed |
+| `1121799` → DRIVER_LICENSE_US (65%) | field_map: "Statement Nr.: 1121799" → reference_number | SUPPRESS | Removed |
+| `001967` → DRIVER_LICENSE_US (65%) | table: "Ref." column → reference_number, contains_pii=False | SUPPRESS | Removed |
+| `30/06/2020` → DATE_OF_BIRTH_DMY (70%) | table: "Date" column → transaction_date, contains_pii=False | SUPPRESS | Removed |
+| `65.29` → (any numeric match) | table: "Amount" column → currency_amount, contains_pii=False | SUPPRESS | Removed |
+| `"Statement"` → STUDENT_ID (65%) | suppression_hints: common English words | SUPPRESS | Removed |
+| `"Description"` → VAT_EU (75%) | table: column header text, not data | SUPPRESS | Removed |
+| `CLIFFORD BARNES` → ORGANIZATION (85%) | people: "Clifford Barnes", role=related_party | RECLASSIFY | → PERSON |
+| `285-07-5085` → US_SSN (90%) | field_map: "Tax No.: 285-07-5085" → tax_id, presidio_override=US_SSN | KEEP (confirmed) | US_SSN ✓ |
+| `ADELINE CHANDLER` → PERSON (90%) | people: "Adeline Chandler", role=primary_subject | KEEP (confirmed) | PERSON ✓ |
+
+**Table filtering for different document types:**
+
+| Document Type | Table Content | has_pii_columns | Filter Behavior |
+|---|---|---|---|
+| Financial statement | Date, Ref, Description, Amount | `False` | Suppress ALL detections from table region |
+| Employee payroll | Name, SSN, DOB, Salary, Department | `True` (Name, SSN, DOB) | Keep PII column detections, suppress Department/Salary matches |
+| Insurance claim | Claim#, Date Filed, Provider, Diagnosis, Amount | `True` (Provider, Diagnosis=PHI) | Keep Provider/Diagnosis, suppress Claim#/Amount |
+| Transaction log | Timestamp, Transaction ID, IP Address, User Agent | `True` (IP Address) | Keep IP, suppress Transaction ID/User Agent |
+
+Expected result: **38 detections → 5-6 clean detections** (~85% false positive reduction).
+
+#### 14d. Deterministic Fallback Improvements (No-LLM Mode)
+
+When `llm_assist_enabled=False`, the DocumentSchema is not available. Improve the deterministic pipeline to reduce false positives independently:
+
+**File: `app/pii/layer1_patterns.py`** — Tighten existing patterns:
+
+| Fix | Pattern | Change |
+|---|---|---|
+| STUDENT_ID | Currently matches too broadly | Add deny-list: common English words (Statement, Summary, Street, Description, etc.). Require at least 1 digit in the match. |
+| COMPANY_NUMBER_UK | Matches short numeric strings | Require exactly 8 characters (UK company numbers are 8 digits). Add context: must appear near "company", "registration", "Ltd", "PLC". |
+| DRIVER_LICENSE_US | Matches 5-7 digit numbers | Add state-specific format validation. Require context: near "license", "DL", "driver". |
+| VAT_EU | Matches column headers | Require country prefix (GB, DE, FR, etc.) followed by digits. Current pattern is too permissive. |
+| DATE_OF_BIRTH_DMY | Matches any date | Add context requirement: must appear near "DOB", "born", "birth", "date of birth". Dates near "transaction", "period", "statement" → suppress. |
+
+**File: `app/pii/context_deny_list.py`** (new):
+
+```python
+# Common English words that trigger false positive entity matches
+COMMON_WORD_DENY_LIST = frozenset({
+    "statement", "summary", "description", "street", "transactions",
+    "balance", "payment", "opening", "amount", "total", "period",
+    "account", "reference", "number", "date", "page", "report",
+    "invoice", "receipt", "credit", "debit", "transfer", "other",
+})
+
+# Labels that indicate the adjacent value is a reference number, not PII
+REFERENCE_LABELS = frozenset({
+    "ref", "ref.", "reference", "ref no", "ref no.", "statement nr",
+    "statement no", "invoice no", "account no", "client no", "client",
+    "case no", "case id", "file no", "policy no", "claim no",
+    "order no", "receipt no", "confirmation no", "tracking no",
+})
+
+def is_likely_false_positive(detected_text: str, entity_type: str, 
+                              surrounding_text: str) -> bool:
+    """
+    Heuristic check: is this detection likely a false positive?
+    Uses deny lists and context patterns to catch obvious FPs.
+    Returns True if detection should be suppressed.
+    """
+```
+
+**Expected improvement without LLM:** ~85% FP rate → ~40-50% FP rate. Not as good as with LLM (→ ~10-15%), but significantly better than current state.
+
+#### 14e. Updated Pipeline Stages
+
+```
+WITH LLM (AI-Enhanced mode):
+  discovery → cataloging → verified_onset → 
+  ★ document_understanding (LLM → DocumentSchema) → 
+  sample_extraction (Presidio + schema filter) → 
+  entity_analysis (LLM groups clean data) → 
+  auto_approve → [review] → full_extraction → RRA → notification
+
+WITHOUT LLM (Deterministic fallback):
+  discovery → cataloging → verified_onset → 
+  structure_analysis (heuristic, existing) → 
+  sample_extraction (Presidio + improved patterns + deny-lists) → 
+  auto_approve → [review] → full_extraction → RRA → notification
+```
+
+Note: `structure_analysis` (Step 11 heuristic) is ABSORBED into `document_understanding` when LLM is available. The LLM does everything the heuristic did plus field mapping, semantic typing, and suppression hints — all in one call. When LLM is off, the heuristic runs as before with improved patterns.
+
+#### 14f. Schema Integration with Entity Analysis (Step 13)
+
+When DocumentSchema is available, the entity analysis (Step 13) benefits:
+- Entity groups built from schema's `people` list (not from noisy Presidio detections)
+- `PersonContext.role` feeds directly into entity role attribution
+- `PersonContext.is_pii_subject` determines notification relevance
+- Relationships inferred from document type + people roles
+- LLM entity analysis prompt can include the schema for additional context
+
+```python
+# In app/structure/llm_entity_analyzer.py
+def analyze(self, blocks, sample_detections, structure_analysis, 
+            document_id, document_schema: DocumentSchema | None = None):
+    """
+    If document_schema is provided, use it to:
+    1. Pre-seed entity groups from schema.people
+    2. Filter sample_detections through schema before analysis
+    3. Include schema context in the LLM prompt
+    """
+```
+
+#### 14g. Suppression Audit Trail
+
+Every suppressed or reclassified detection is logged for governance:
+
+**New table or extension to `llm_call_logs`:**
+
+```python
+# Option: extend extractions table or create new audit entries
+suppression_log_entry = {
+    "document_id": "uuid",
+    "original_type": "COMPANY_NUMBER_UK",
+    "original_value_masked": "001***",
+    "original_confidence": 0.70,
+    "action": "suppressed",           # suppressed | reclassified | confirmed
+    "reason": "field_map: account_number, is_pii=False",
+    "schema_field": "Client: 001968",
+    "new_type": None,                  # set for reclassified
+    "detected_by": "llm_schema_filter" # or "deny_list_filter" for no-LLM mode
+}
+```
+
+Stored in `AuditEvent` table (existing) with event_type `"detection_suppressed"` or `"detection_reclassified"`.
+
+#### 14h. Implementation Phases
+
+**Phase 14a (do first — deterministic improvements, no LLM required):**
+1. Create `app/pii/context_deny_list.py` with COMMON_WORD_DENY_LIST and REFERENCE_LABELS
+2. Tighten STUDENT_ID, COMPANY_NUMBER_UK, DRIVER_LICENSE_US, VAT_EU, DATE_OF_BIRTH patterns in `layer1_patterns.py`
+3. Add `is_likely_false_positive()` check in detection pipeline
+4. Add tests with the Boosey & Hawkes financial statement as a regression test case
+5. Measure: should reduce 38 → ~15-18 detections on this document
+
+**Phase 14b (LLM Document Understanding):**
+1. Create `app/structure/document_schema.py` with all dataclasses
+2. Add `UNDERSTAND_DOCUMENT` prompt template to `app/llm/prompts.py`
+3. Create `app/structure/llm_document_understanding.py` — sends onset page to LLM, parses DocumentSchema
+4. Create `app/pii/schema_filter.py` — SchemaFilter class
+5. Update `app/pipeline/two_phase.py` — insert `document_understanding` stage after `verified_onset`
+6. Wire schema filter into sample_extraction and full_extraction stages
+7. Add tests: schema creation, filtering, suppression log, fallback behavior
+8. Measure: should reduce 38 → 5-6 detections on this document
+
+**Phase 14c (integration):**
+1. Update entity analysis (Step 13) to accept DocumentSchema
+2. Wire suppression audit trail into AuditEvent table
+3. Update analysis review API to return DocumentSchema + suppression log
+4. Frontend: show document understanding results in review panel (document type, field map, suppression summary)
+5. End-to-end test: Boosey & Hawkes PDF → 5 clean detections → correct entity groups → clean notification list
+
+#### Execution Prompts
+
+**Phase 14a prompt (deterministic improvements):**
+
+```
+@agent-general-purpose Read CLAUDE.md and docs/PLAN.md Step 14 for context.
+
+Phase 14a: Deterministic false positive reduction (no LLM required).
+
+1. Create app/pii/context_deny_list.py:
+   - COMMON_WORD_DENY_LIST: frozenset of English words that trigger FPs
+     (statement, summary, description, street, transactions, balance,
+     payment, opening, amount, total, period, reference, etc.)
+   - REFERENCE_LABELS: frozenset of field labels that indicate adjacent
+     value is a reference number (ref, statement nr, invoice no, client,
+     account no, case no, policy no, etc.)
+   - is_likely_false_positive(detected_text, entity_type, surrounding_text)
+     function that checks deny lists + context patterns
+
+2. Tighten patterns in app/pii/layer1_patterns.py:
+   - STUDENT_ID: require at least 1 digit, reject COMMON_WORD_DENY_LIST matches
+   - COMPANY_NUMBER_UK: require exactly 8 chars, require company context
+   - DRIVER_LICENSE_US: add state format validation, require license context
+   - VAT_EU: require country prefix + digits, reject common words
+   - DATE_OF_BIRTH: require birth/DOB context, suppress near transaction/period/statement
+
+3. Integrate is_likely_false_positive() into the detection pipeline
+   (app/tasks/detection.py or app/pii/presidio_engine.py) as a post-filter.
+   Suppressed detections should be logged, not silently dropped.
+
+4. Create tests/test_deny_list.py:
+   - COMMON_WORD_DENY_LIST entries suppress STUDENT_ID/VAT_EU matches
+   - REFERENCE_LABELS suppress DRIVER_LICENSE/COMPANY_NUMBER matches
+   - Real PII (actual SSNs, real driver licenses) still passes through
+   - Regression test: simulate Boosey & Hawkes detections, verify FP reduction
+
+5. Run pytest on changed files. Fix failures. Update CLAUDE.md.
+```
+
+**Phase 14b prompt (LLM Document Understanding):**
+
+```
+@agent-general-purpose Read CLAUDE.md and docs/PLAN.md Step 14 for context.
+
+Phase 14b: LLM Document Understanding + Schema Filter.
+
+1. Create app/structure/document_schema.py with dataclasses:
+   DocumentSchema, FieldContext, PersonContext, DateContext,
+   TableColumn, TableSchema
+   (exact definitions in PLAN.md Step 14a)
+
+2. Add UNDERSTAND_DOCUMENT prompt template to app/llm/prompts.py
+   (exact prompt in PLAN.md Step 14b, includes tables section).
+   Update PROMPT_TEMPLATES dict.
+
+3. Create app/structure/llm_document_understanding.py:
+   - LLMDocumentUnderstanding class
+   - understand(blocks, heuristic_analysis, document_meta) → DocumentSchema
+   - Sends onset page text to Ollama with UNDERSTAND_DOCUMENT prompt
+   - Parses JSON response into DocumentSchema (including tables)
+   - Falls back gracefully: if LLM fails, returns None
+
+4. Create app/pii/schema_filter.py:
+   - SchemaFilter(schema: DocumentSchema) class
+   - filter_detections(detections) → filtered detections + suppression log
+   - Implements: field_map matching, TABLE-AWARE filtering (non-PII columns
+     suppress detections, PII columns confirm detections), date_context
+     filtering, people reclassification, suppression_hints matching
+   - _build_table_index() — maps table column headers to semantic types,
+     handles both structured (column-associated) and flattened (header
+     proximity) text extraction
+   - get_suppression_log() → audit trail
+
+5. Update app/pipeline/two_phase.py:
+   - Insert document_understanding stage after verified_onset
+   - Pass DocumentSchema to sample_extraction stage
+   - Wire SchemaFilter into extraction post-processing
+   - SSE event: {"stage": "document_understanding", "status": "complete"}
+
+6. Create tests/test_document_understanding.py:
+   - DocumentSchema creation and serialization (including TableSchema)
+   - SchemaFilter: suppression, reclassification, passthrough, audit log
+   - Table filtering: non-PII table suppresses all matches, mixed table
+     keeps PII columns only, payroll table keeps Name/SSN/DOB
+   - Flattened text: header proximity suppression works on single-stream text
+   - LLM fallback: None schema → no filtering (Presidio output unchanged)
+   - Integration: schema + Presidio → filtered output
+
+7. Run pytest on changed files. Fix failures. Update CLAUDE.md.
+```
+
+#### Key Constraints
+
+- DocumentSchema is a READ-ONLY overlay — it never modifies Presidio's engine or patterns
+- Schema filter is a POST-PROCESSING step — Presidio runs unmodified, then results are filtered
+- Without LLM, deterministic improvements (deny-lists, tighter patterns) provide partial benefit
+- Suppression is auditable — every filtered detection is logged with reason
+- Schema confidence < 0.50 → skip filtering, use raw Presidio output (safety valve)
+- Air-gap safe: local Ollama only, no external calls
+- Memory-safe: schema is lightweight (~1KB per document), no large objects retained
+- The LLM makes ONE call per document (not per detection) — efficient even for large datasets
+- PII masking still applies: LLM sees masked values when `pii_masking_enabled=true`
