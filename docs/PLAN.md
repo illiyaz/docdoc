@@ -1361,14 +1361,21 @@ Stored in `AuditEvent` table (existing) with event_type `"detection_suppressed"`
 4. Add tests with the Boosey & Hawkes financial statement as a regression test case
 5. Measure: should reduce 38 → ~15-18 detections on this document
 
+**Phase 14a-ii (protocol-driven recognizer filtering, no LLM required):**
+1. Add `PROTOCOL_DEFAULT_ENTITIES` to `app/core/constants.py` — default entity types per protocol
+2. Modify `presidio_engine.py` to accept `target_entity_types` param, pass to Presidio
+3. Wire `protocol_config` → `DetectionTask` → `PresidioEngine` so only relevant recognizers run
+4. Update frontend protocol form defaults to match backend
+5. Measure: GDPR on non-US doc should drop FPs by ~50% (US recognizers disabled), DPDPA similar
+
 **Phase 14b (LLM Document Understanding):**
-1. Create `app/structure/document_schema.py` with all dataclasses
+1. Create `app/structure/document_schema.py` with all dataclasses (including TableColumn, TableSchema)
 2. Add `UNDERSTAND_DOCUMENT` prompt template to `app/llm/prompts.py`
 3. Create `app/structure/llm_document_understanding.py` — sends onset page to LLM, parses DocumentSchema
-4. Create `app/pii/schema_filter.py` — SchemaFilter class
+4. Create `app/pii/schema_filter.py` — SchemaFilter class with table-aware filtering
 5. Update `app/pipeline/two_phase.py` — insert `document_understanding` stage after `verified_onset`
 6. Wire schema filter into sample_extraction and full_extraction stages
-7. Add tests: schema creation, filtering, suppression log, fallback behavior
+7. Add tests: schema creation, filtering, table filtering, suppression log, fallback behavior
 8. Measure: should reduce 38 → 5-6 detections on this document
 
 **Phase 14c (integration):**
@@ -1415,6 +1422,182 @@ Phase 14a: Deterministic false positive reduction (no LLM required).
    - Regression test: simulate Boosey & Hawkes detections, verify FP reduction
 
 5. Run pytest on changed files. Fix failures. Update CLAUDE.md.
+```
+
+**Phase 14a-ii: Protocol-Driven Recognizer Filtering (no LLM required)**
+
+The single highest-impact multi-geo improvement without LLM. Currently, every job runs ALL Presidio recognizers regardless of jurisdiction. A GDPR job triggers US_DRIVER_LICENSE, US_SSN, NHS_NUMBER. A DPDPA job triggers COMPANY_NUMBER_UK, VAT_EU. Most multi-geo false positives come from irrelevant recognizers running against documents from a different jurisdiction.
+
+**Fix:** Pass `target_entity_types` from `protocol_configs.config_json` into `presidio_engine.analyze()` so only jurisdiction-relevant recognizers run.
+
+**Impact by protocol:**
+
+| Protocol | Recognizers ENABLED | Recognizers DISABLED (would have been FPs) |
+|---|---|---|
+| HIPAA | PERSON, US_SSN, PHONE_US, EMAIL, MEDICAL_LICENSE, NPI_NUMBER, DATE_OF_BIRTH | COMPANY_NUMBER_UK, VAT_EU, IBAN_CODE, NHS_NUMBER, AADHAAR |
+| GDPR | PERSON, EMAIL, PHONE, IBAN_CODE, EU_TAX_ID, GDPR_SPECIAL | US_SSN, US_DRIVER_LICENSE, US_PASSPORT, US_BANK_NUMBER, CREDIT_CARD (if not PCI scope) |
+| DPDPA | PERSON, EMAIL, PHONE, AADHAAR, PAN_CARD, PASSPORT | US_SSN, US_DRIVER_LICENSE, COMPANY_NUMBER_UK, VAT_EU, NHS_NUMBER |
+| PCI DSS | CREDIT_CARD, PERSON, EMAIL, PHONE | US_SSN, MEDICAL_LICENSE, IBAN_CODE (unless in scope) |
+| State Breach (US) | PERSON, US_SSN, US_DRIVER_LICENSE, EMAIL, PHONE, CREDIT_CARD, US_BANK_NUMBER | COMPANY_NUMBER_UK, VAT_EU, NHS_NUMBER, AADHAAR |
+| BIPA | PERSON, BIOMETRIC types, US_SSN | Most financial/health recognizers |
+
+**Expected FP reduction per geo (without LLM):**
+
+| Scenario | Before 14a-ii | After 14a-ii |
+|---|---|---|
+| US state breach on US doc | ~23 detections (post-14a) | ~18 (removes NHS, UK company, VAT matches) |
+| GDPR on German bank statement | ~40+ detections | ~15-20 (removes all US recognizer matches) |
+| DPDPA on Indian Aadhaar doc | ~35+ detections | ~12-15 (removes UK, US, EU recognizer matches) |
+
+**Implementation:**
+
+**File: `app/pii/presidio_engine.py`** — Modify `analyze()`:
+
+```python
+class PresidioEngine:
+    def analyze(self, text: str, *, language: str = "en",
+                target_entity_types: list[str] | None = None) -> list[RecognizerResult]:
+        """
+        Run Presidio analysis on text.
+        
+        If target_entity_types is provided, only run recognizers that detect
+        those entity types. This dramatically reduces false positives for
+        multi-geo deployments by disabling irrelevant recognizers.
+        
+        If target_entity_types is None or empty, run all recognizers (backward compatible).
+        """
+        entities = target_entity_types if target_entity_types else None
+        return self.analyzer.analyze(
+            text=text, 
+            language=language, 
+            entities=entities
+        )
+```
+
+**File: `app/core/constants.py`** (or extend existing) — Default entity types per base protocol:
+
+```python
+PROTOCOL_DEFAULT_ENTITIES = {
+    "hipaa": [
+        "PERSON", "US_SSN", "PHONE_NUMBER", "EMAIL_ADDRESS", "DATE_OF_BIRTH",
+        "MEDICAL_LICENSE", "NPI_NUMBER", "US_DRIVER_LICENSE", "US_PASSPORT",
+        "IP_ADDRESS", "URL",
+    ],
+    "gdpr": [
+        "PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER", "IBAN_CODE", "IP_ADDRESS",
+        "DATE_OF_BIRTH", "LOCATION", "URL", "CRYPTO",
+    ],
+    "ccpa": [
+        "PERSON", "US_SSN", "US_DRIVER_LICENSE", "US_PASSPORT", "EMAIL_ADDRESS",
+        "PHONE_NUMBER", "CREDIT_CARD", "US_BANK_NUMBER", "IP_ADDRESS",
+        "DATE_OF_BIRTH", "LOCATION", "URL",
+    ],
+    "dpdpa": [
+        "PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER", "DATE_OF_BIRTH",
+        "LOCATION", "IP_ADDRESS", "URL",
+        # Custom: AADHAAR, PAN_CARD added via custom recognizers
+    ],
+    "pci_dss": [
+        "CREDIT_CARD", "PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER",
+        "US_BANK_NUMBER", "IBAN_CODE", "SWIFT_CODE",
+    ],
+    "state_breach": [
+        "PERSON", "US_SSN", "US_DRIVER_LICENSE", "US_PASSPORT", "EMAIL_ADDRESS",
+        "PHONE_NUMBER", "CREDIT_CARD", "US_BANK_NUMBER", "DATE_OF_BIRTH",
+        "MEDICAL_LICENSE", "IP_ADDRESS", "LOCATION",
+    ],
+    "bipa": [
+        "PERSON", "US_SSN", "EMAIL_ADDRESS", "PHONE_NUMBER",
+        # Custom: FINGERPRINT, FACE_GEOMETRY, IRIS_SCAN, VOICEPRINT
+    ],
+    "ferpa": [
+        "PERSON", "US_SSN", "EMAIL_ADDRESS", "PHONE_NUMBER", "DATE_OF_BIRTH",
+        "LOCATION", "IP_ADDRESS",
+    ],
+}
+```
+
+**File: `app/tasks/detection.py`** — Wire protocol config into detection:
+
+```python
+class DetectionTask:
+    def run(self, blocks, *, protocol_config=None, **kwargs):
+        # Extract target entities from protocol config
+        target_entities = None
+        if protocol_config:
+            config_json = protocol_config.get("config_json", {})
+            target_entities = config_json.get("target_entity_types")
+            
+            # If no explicit target_entity_types in config, use protocol defaults
+            if not target_entities:
+                base_protocol = config_json.get("base_protocol_id")
+                if base_protocol:
+                    target_entities = PROTOCOL_DEFAULT_ENTITIES.get(base_protocol)
+        
+        # Pass to Presidio — None means run all (backward compatible)
+        results = self.engine.analyze(text, target_entity_types=target_entities)
+```
+
+**Key design decisions:**
+- `target_entity_types` in `config_json` takes precedence (user explicitly configured)
+- If not set, falls back to `PROTOCOL_DEFAULT_ENTITIES` based on `base_protocol_id`
+- If neither is set, runs all recognizers (full backward compatibility)
+- This is a pure filtering mechanism — no new recognizers added, no patterns changed
+- Works independently of deny-lists (14a) and DocumentSchema (14b) — all three stack
+
+**File: `frontend/src/pages/ProjectDetail.tsx`** — Update guided protocol form:
+
+The Entity Types checkboxes (Step 9) should auto-populate from `PROTOCOL_DEFAULT_ENTITIES` when a base protocol is selected. Currently, the checkboxes pre-check based on `PROTOCOL_DEFAULTS` in the frontend constants. Ensure these match the backend `PROTOCOL_DEFAULT_ENTITIES`.
+
+**Tests:**
+
+```
+tests/test_recognizer_filtering.py:
+- HIPAA protocol → US_SSN detected, COMPANY_NUMBER_UK NOT detected
+- GDPR protocol → IBAN_CODE detected, US_SSN NOT detected
+- DPDPA protocol → PERSON detected, COMPANY_NUMBER_UK NOT detected
+- No protocol → all recognizers run (backward compatible)
+- Empty target_entity_types → all recognizers run
+- Custom entity list → only specified types detected
+- Protocol defaults resolve correctly for all 8 base protocols
+- Frontend PROTOCOL_DEFAULTS match backend PROTOCOL_DEFAULT_ENTITIES
+```
+
+**Phase 14a-ii prompt (protocol-driven recognizer filtering):**
+
+```
+@agent-general-purpose Read CLAUDE.md and docs/PLAN.md Step 14 for context.
+
+Phase 14a-ii: Protocol-driven recognizer filtering.
+
+1. Add PROTOCOL_DEFAULT_ENTITIES dict to app/core/constants.py with
+   default entity type lists for all 8 base protocols (hipaa, gdpr,
+   ccpa, dpdpa, pci_dss, state_breach, bipa, ferpa). See PLAN.md
+   Step 14 Phase 14a-ii for exact mapping.
+
+2. Modify app/pii/presidio_engine.py analyze() method to accept an
+   optional target_entity_types parameter. When provided, pass it as
+   the entities parameter to Presidio's analyzer.analyze(). When None
+   or empty, run all recognizers (backward compatible).
+
+3. Update app/tasks/detection.py DetectionTask.run() to accept
+   protocol_config. Extract target_entity_types from config_json.
+   Fall back to PROTOCOL_DEFAULT_ENTITIES[base_protocol_id] if not
+   explicitly set. Pass to presidio_engine.analyze().
+
+4. Update frontend protocol form defaults to match backend
+   PROTOCOL_DEFAULT_ENTITIES (ensure the entity type checkboxes
+   pre-check the correct types per protocol).
+
+5. Create tests/test_recognizer_filtering.py:
+   - HIPAA enables US types, disables UK/EU types
+   - GDPR enables EU types, disables US types
+   - DPDPA enables India types, disables UK/US/EU types
+   - No protocol runs all recognizers
+   - target_entity_types in config_json overrides protocol defaults
+   - All 8 protocols have valid default entity lists
+
+6. Run pytest on changed files. Fix failures. Update CLAUDE.md.
 ```
 
 **Phase 14b prompt (LLM Document Understanding):**
