@@ -1830,3 +1830,592 @@ Phase 14c: Detection tuning, integration, and Catalog UX fixes. Three areas.
 - Memory-safe: schema is lightweight (~1KB per document), no large objects retained
 - The LLM makes ONE call per document (not per detection) — efficient even for large datasets
 - PII masking still applies: LLM sees masked values when `pii_masking_enabled=true`
+
+---
+
+### Step 15 — Field-Level Review + Protocol Mapping (PENDING)
+
+**Goal:** Give reviewers granular control over which detections proceed to full extraction, and show how detected PII maps to protocol-required fields. Currently, review is binary (approve/reject entire document). Reviewers need to toggle individual detections on/off and see which protocol requirements are satisfied vs missing.
+
+**Current gap:**
+
+```
+Current flow:
+  6 detections shown → Approve → ALL 6 extracted from all pages
+  No way to say "skip the PHONE_NUMBER false positives"
+  No way to see "SSN is required by protocol but not detected"
+
+New flow:
+  6 detections shown → toggle each on/off → see protocol mapping → Approve → only selected types extracted
+```
+
+#### 15a. Detection Selection Model
+
+**Two-tier toggle system:** type-level bulk control + individual detection override.
+
+**File: `app/db/models.py`** — New table or extend `document_analysis_reviews`:
+
+```python
+# Option: new table for per-detection decisions
+class DetectionReviewDecision(Base):
+    __tablename__ = "detection_review_decisions"
+    
+    id = Column(UUID, primary_key=True, default=uuid4)
+    document_analysis_review_id = Column(UUID, ForeignKey("document_analysis_reviews.id"))
+    
+    # What was detected
+    entity_type = Column(VARCHAR(64), nullable=False)   # "PERSON", "PHONE_NUMBER", etc.
+    detected_value_masked = Column(VARCHAR(256))          # "Kristin B A***"
+    confidence = Column(Float)
+    page = Column(Integer)
+    
+    # Reviewer decision
+    include_in_extraction = Column(Boolean, default=True)  # toggle on/off
+    decision_reason = Column(VARCHAR(256), nullable=True)  # "false positive", "duplicate", etc.
+    decided_by = Column(VARCHAR(128), nullable=True)       # reviewer ID
+    decided_at = Column(DateTime, nullable=True)
+    
+    # Bulk vs individual
+    decision_source = Column(VARCHAR(16), default="default")  # "default" | "bulk_type" | "individual"
+```
+
+**Behavior:**
+
+| Action | Effect |
+|---|---|
+| Page loads | All detections default to `include=True` |
+| Toggle type OFF (e.g., PHONE_NUMBER) | All PHONE_NUMBER detections set to `include=False`, `decision_source="bulk_type"` |
+| Toggle type back ON | All PHONE_NUMBER detections set to `include=True` |
+| Toggle individual detection OFF | That specific detection set to `include=False`, `decision_source="individual"`, overrides bulk |
+| Toggle individual back ON | Same, `decision_source="individual"` |
+| Approve document | Only detections with `include=True` proceed to Phase 2 full extraction |
+
+#### 15b. Protocol Field Mapping
+
+**File: `app/core/constants.py`** — Add protocol field requirements:
+
+```python
+PROTOCOL_REQUIRED_FIELDS = {
+    "hipaa": {
+        "required": [
+            {"field": "Individual Name", "entity_types": ["PERSON"], "criticality": "required"},
+            {"field": "Address", "entity_types": ["LOCATION"], "criticality": "required"},
+            {"field": "Date of Birth", "entity_types": ["DATE_OF_BIRTH"], "criticality": "if_available"},
+            {"field": "SSN", "entity_types": ["US_SSN"], "criticality": "if_available"},
+            {"field": "Medical Record", "entity_types": ["MEDICAL_LICENSE", "NPI_NUMBER"], "criticality": "if_available"},
+            {"field": "Email", "entity_types": ["EMAIL_ADDRESS"], "criticality": "if_available"},
+            {"field": "Phone", "entity_types": ["PHONE_NUMBER", "PHONE_US"], "criticality": "if_available"},
+        ],
+    },
+    "state_breach": {
+        "required": [
+            {"field": "Individual Name", "entity_types": ["PERSON"], "criticality": "required"},
+            {"field": "Address", "entity_types": ["LOCATION"], "criticality": "required"},
+            {"field": "SSN", "entity_types": ["US_SSN"], "criticality": "required"},
+            {"field": "Driver's License", "entity_types": ["US_DRIVER_LICENSE"], "criticality": "if_available"},
+            {"field": "Financial Account", "entity_types": ["CREDIT_CARD", "US_BANK_NUMBER"], "criticality": "if_available"},
+            {"field": "Email", "entity_types": ["EMAIL_ADDRESS"], "criticality": "required"},
+            {"field": "Phone", "entity_types": ["PHONE_NUMBER", "PHONE_US"], "criticality": "if_available"},
+        ],
+    },
+    "gdpr": {
+        "required": [
+            {"field": "Data Subject Name", "entity_types": ["PERSON"], "criticality": "required"},
+            {"field": "Email", "entity_types": ["EMAIL_ADDRESS"], "criticality": "required"},
+            {"field": "Address", "entity_types": ["LOCATION"], "criticality": "if_available"},
+            {"field": "Phone", "entity_types": ["PHONE_NUMBER"], "criticality": "if_available"},
+            {"field": "National ID", "entity_types": ["IBAN_CODE", "EU_TAX_ID"], "criticality": "if_available"},
+            {"field": "IP Address", "entity_types": ["IP_ADDRESS"], "criticality": "if_available"},
+        ],
+    },
+    "dpdpa": {
+        "required": [
+            {"field": "Data Principal Name", "entity_types": ["PERSON"], "criticality": "required"},
+            {"field": "Email", "entity_types": ["EMAIL_ADDRESS"], "criticality": "required"},
+            {"field": "Phone", "entity_types": ["PHONE_NUMBER"], "criticality": "required"},
+            {"field": "Aadhaar", "entity_types": ["AADHAAR"], "criticality": "if_available"},
+            {"field": "PAN", "entity_types": ["PAN_CARD"], "criticality": "if_available"},
+            {"field": "Address", "entity_types": ["LOCATION"], "criticality": "if_available"},
+        ],
+    },
+    "pci_dss": {
+        "required": [
+            {"field": "Cardholder Name", "entity_types": ["PERSON"], "criticality": "required"},
+            {"field": "Card Number", "entity_types": ["CREDIT_CARD"], "criticality": "required"},
+            {"field": "Email", "entity_types": ["EMAIL_ADDRESS"], "criticality": "if_available"},
+            {"field": "Phone", "entity_types": ["PHONE_NUMBER"], "criticality": "if_available"},
+        ],
+    },
+    # bipa, ferpa, ccpa, hitech follow same pattern
+}
+```
+
+**File: `app/api/routes/analysis_review.py`** — New endpoint:
+
+```
+GET /jobs/{id}/documents/{doc_id}/protocol-mapping
+```
+
+Response:
+
+```json
+{
+  "protocol": "state_breach",
+  "field_mapping": [
+    {
+      "field": "Individual Name",
+      "criticality": "required",
+      "status": "detected",
+      "matched_detections": [
+        {"entity_type": "PERSON", "value_masked": "Kristin B A***", "confidence": 0.85, "included": true}
+      ]
+    },
+    {
+      "field": "SSN",
+      "criticality": "required",
+      "status": "missing",
+      "matched_detections": []
+    },
+    {
+      "field": "Phone",
+      "criticality": "if_available",
+      "status": "needs_review",
+      "matched_detections": [
+        {"entity_type": "PHONE_NUMBER", "value_masked": "153.84***", "confidence": 0.40, "included": true}
+      ]
+    }
+  ],
+  "coverage": {
+    "required_fields": 4,
+    "required_detected": 2,
+    "required_missing": 2,
+    "completeness_pct": 50
+  }
+}
+```
+
+#### 15c. Frontend: Detection Review Panel
+
+**File: `frontend/src/pages/ProjectDetail.tsx`** — Redesign AnalysisReviewPanel:
+
+**Layout (top to bottom):**
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ Document Summary                                                │
+│ "Employment record for Kristin B Aleshire..."                   │
+│ Entity Groups: [Kristin B Aleshire (Employee) 95%]              │
+├─────────────────────────────────────────────────────────────────┤
+│ Protocol Mapping: State Breach (US)           Completeness: 50% │
+│                                                                 │
+│ ✅ Individual Name    PERSON Kristin B A*** (85%)     [included] │
+│ ✅ Address            LOCATION Hagerstown, MD (85%)   [included] │
+│ ⚠️  SSN               Not detected                    MISSING   │
+│ ⚠️  Driver's License   Not detected                    MISSING   │
+│ ❓ Phone              PHONE_NUMBER 153.84... (40%)    [review]  │
+│ ─  Email              Not detected                    optional  │
+├─────────────────────────────────────────────────────────────────┤
+│ Detection Controls                                              │
+│                                                                 │
+│ By Type:                                                        │
+│ [✓] PERSON (2 detections)           [toggle all on/off]         │
+│ [✓] LOCATION (3 detections)         [toggle all on/off]         │
+│ [ ] PHONE_NUMBER (2 detections)     [toggle all on/off] ← OFF  │
+│                                                                 │
+│ Individual Detections:                                          │
+│ [✓] PERSON Kristin B Aleshire 85%     p.1                       │
+│ [ ] PERSON KRISTIN B ALESHIRE 85%     p.1   ← toggled off (dup)│
+│ [✓] LOCATION Hagerstown 85%           p.1                       │
+│ [✓] LOCATION MD 85%                   p.1                       │
+│ [ ] PHONE_NUMBER 153.84 160.00 40%    p.1   ← toggled off (FP) │
+│ [ ] PHONE_NUMBER 056.32 505.46 40%    p.1   ← toggled off (FP) │
+│ [✓] LOCATION WASCO 85%                p.1                       │
+├─────────────────────────────────────────────────────────────────┤
+│ [Approve with selections]  [Reject]                             │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Interaction details:**
+
+- Type-level toggle: checkbox next to type name, toggles all detections of that type
+- Individual toggle: checkbox next to each detection chip
+- Individual override: if user toggles PHONE_NUMBER type OFF, then turns one specific phone back ON, that individual override is preserved
+- Color coding: included = green chip, excluded = grey chip with strikethrough
+- Protocol mapping section: green checkmark = detected & included, orange warning = required but missing, grey dash = optional and missing, blue question = detected but needs review (low confidence)
+- Completeness percentage: `required_detected / required_fields * 100`
+- "Approve with selections" button: sends the inclusion decisions to backend, only included types proceed to Phase 2
+
+**File: `app/api/routes/analysis_review.py`** — Update approve endpoint:
+
+```
+POST /jobs/{id}/documents/{doc_id}/approve
+Body: {
+  "rationale": "Approved with field selections",
+  "detection_decisions": [
+    {"entity_type": "PERSON", "detected_value_masked": "Kristin B A***", "page": 1, "include": true},
+    {"entity_type": "PHONE_NUMBER", "detected_value_masked": "153.84***", "page": 1, "include": false, "reason": "false positive - dollar amount"}
+  ]
+}
+```
+
+Phase 2 extraction then only runs recognizers for **included entity types** on approved documents.
+
+#### 15d. Schema + Migration
+
+**Migration 0009:** `detection_review_decisions` table (9 columns). Extends `document_analysis_reviews` with `selected_entity_types` JSON column (stores the final approved type list).
+
+#### 15e. Execution Prompt
+
+```
+@agent-general-purpose Read CLAUDE.md and docs/PLAN.md Step 15 for context.
+
+Step 15: Field-level detection review + protocol mapping.
+
+=== BACKEND ===
+
+1. Add PROTOCOL_REQUIRED_FIELDS dict to app/core/constants.py with
+   field requirements for all 8 base protocols (hipaa, state_breach,
+   gdpr, dpdpa, pci_dss, ccpa, bipa, ferpa). Each field has: name,
+   entity_types list, criticality (required | if_available).
+   See PLAN.md Step 15b for exact structure.
+
+2. Create migration 0009: new table detection_review_decisions with
+   columns: id, document_analysis_review_id (FK), entity_type,
+   detected_value_masked, confidence, page, include_in_extraction
+   (bool default true), decision_reason, decided_by, decided_at,
+   decision_source (default/bulk_type/individual).
+   Add selected_entity_types JSON column to document_analysis_reviews.
+
+3. Add model DetectionReviewDecision to app/db/models.py.
+
+4. Add GET /jobs/{id}/documents/{doc_id}/protocol-mapping endpoint
+   in app/api/routes/analysis_review.py. Returns: protocol field
+   requirements, matched detections per field, coverage stats
+   (required detected vs missing, completeness percentage).
+
+5. Update POST /jobs/{id}/documents/{doc_id}/approve to accept
+   detection_decisions array in request body. Store decisions in
+   detection_review_decisions table. Store selected_entity_types
+   (the included types) on document_analysis_reviews.
+
+6. Update Phase 2 extraction (app/pipeline/two_phase.py extract_generator):
+   read selected_entity_types from document_analysis_reviews. Pass
+   as target_entity_types to Presidio so only approved types are
+   extracted during full document processing.
+
+=== FRONTEND ===
+
+7. Redesign AnalysisReviewPanel in frontend/src/pages/ProjectDetail.tsx:
+
+   a) Protocol Mapping section (top):
+      - Show protocol name and completeness percentage
+      - List each required field with status badge:
+        green check = detected & included
+        orange warning = required but missing
+        blue question = detected, low confidence, needs review
+        grey dash = optional and not detected
+      - Each field row shows matched detections if any
+
+   b) Detection Controls section (middle):
+      - Type-level toggles: checkbox per entity type with detection count
+        Toggling type off sets all detections of that type to excluded
+      - Individual detection list: checkbox per detection chip
+        Shows: entity_type, masked value, confidence, page
+        Excluded detections shown as grey with strikethrough
+      - Individual overrides preserved when type-level toggle changes
+
+   c) Updated approve button:
+      - Label: "Approve with selections" (not just "Approve")
+      - Sends detection_decisions array to updated approve endpoint
+      - Disabled if zero detections included
+      - Shows warning if required protocol fields are missing
+
+8. Add API functions to frontend/src/api/client.ts:
+   - getProtocolMapping(jobId, docId) → protocol mapping response
+   - Updated approveDocument to include detection_decisions
+
+=== TESTS ===
+
+9. Create tests/test_detection_review.py:
+   - Default: all detections included
+   - Bulk type toggle: all PHONE_NUMBER excluded
+   - Individual override: one PHONE re-included after bulk off
+   - Approve persists decisions to detection_review_decisions table
+   - Phase 2 extraction uses only included types
+   - Protocol mapping: required field detected → status "detected"
+   - Protocol mapping: required field missing → status "missing"
+   - Protocol mapping: completeness percentage correct
+   - Migration 0009 creates table with correct columns
+
+10. Run pytest on all changed files. Fix failures up to 3 attempts.
+    Update CLAUDE.md.
+```
+
+---
+
+### Step 16 — Dashboard Redesign (PENDING)
+
+**Goal:** Transform the dashboard from a dead-end page into the command center of the application. The dashboard should answer three questions in under 5 seconds: "What needs my attention?", "What's running?", and "What's the overall state?"
+
+**Current state:** Dashboard shows generic content with no actionable information.
+
+#### 16a. Dashboard Sections
+
+**Layout (top to bottom):**
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ Forentis AI                                        [+ New Project]│
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│ ┌──────────────┐ ┌──────────────┐ ┌──────────────┐ ┌──────────┐│
+│ │ 3            │ │ 2            │ │ 5            │ │ 1,247    ││
+│ │ Active       │ │ Pending      │ │ Jobs This    │ │ Documents││
+│ │ Projects     │ │ Reviews      │ │ Week         │ │ Processed││
+│ └──────────────┘ └──────────────┘ └──────────────┘ └──────────┘│
+│                                                                 │
+│ ⚠️  Needs Attention (2)                                         │
+│ ┌───────────────────────────────────────────────────────────────┐│
+│ │ 📋 Elmer breach test — 1 document pending review    [Review] ││
+│ │ 📋 Client XYZ breach — 3 documents pending review   [Review] ││
+│ └───────────────────────────────────────────────────────────────┘│
+│                                                                 │
+│ 🏃 Running Jobs (1)                                             │
+│ ┌───────────────────────────────────────────────────────────────┐│
+│ │ ⏳ Client XYZ breach — Extracting (45%) — 12 docs   [View]   ││
+│ └───────────────────────────────────────────────────────────────┘│
+│                                                                 │
+│ 📊 Active Projects                                              │
+│ ┌───────────────────────────────────────────────────────────────┐│
+│ │ Elmer breach test    active    12 docs   Last: 2 min ago     ││
+│ │ Client XYZ breach    active    45 docs   Last: 1 hour ago    ││
+│ │ Q4 Incident review   active    3 docs    Last: 3 days ago    ││
+│ └───────────────────────────────────────────────────────────────┘│
+│                                                                 │
+│ 📜 Recent Activity                                              │
+│ ┌───────────────────────────────────────────────────────────────┐│
+│ │ 2 min ago   Job completed — Elmer breach test (1 doc)        ││
+│ │ 15 min ago  Document approved — Client XYZ (payroll.pdf)     ││
+│ │ 1 hour ago  Export generated — Client XYZ (CSV, 45 subjects) ││
+│ │ 3 hours ago Project created — Q4 Incident review             ││
+│ └───────────────────────────────────────────────────────────────┘│
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+#### 16b. Backend: Dashboard API
+
+**File: `app/api/routes/dashboard.py`** (new):
+
+```
+GET /dashboard/summary
+```
+
+Response:
+
+```json
+{
+  "stats": {
+    "active_projects": 3,
+    "pending_reviews": 2,
+    "jobs_this_week": 5,
+    "documents_processed": 1247
+  },
+  "needs_attention": [
+    {
+      "type": "pending_review",
+      "project_id": "uuid",
+      "project_name": "Elmer breach test",
+      "pending_count": 1,
+      "oldest_pending_at": "2026-03-06T19:18:34Z"
+    }
+  ],
+  "running_jobs": [
+    {
+      "job_id": "uuid",
+      "project_id": "uuid",
+      "project_name": "Client XYZ breach",
+      "status": "extracting",
+      "progress_pct": 45,
+      "document_count": 12,
+      "started_at": "2026-03-06T18:30:00Z"
+    }
+  ],
+  "active_projects": [
+    {
+      "id": "uuid",
+      "name": "Elmer breach test",
+      "status": "active",
+      "document_count": 12,
+      "last_activity_at": "2026-03-06T19:18:34Z",
+      "pending_reviews": 1,
+      "completed_jobs": 3
+    }
+  ],
+  "recent_activity": [
+    {
+      "type": "job_completed",
+      "project_name": "Elmer breach test",
+      "detail": "1 document analyzed",
+      "timestamp": "2026-03-06T19:18:34Z"
+    },
+    {
+      "type": "document_approved",
+      "project_name": "Client XYZ breach",
+      "detail": "payroll.pdf approved",
+      "timestamp": "2026-03-06T19:03:00Z"
+    }
+  ]
+}
+```
+
+**Query strategy:**
+
+The dashboard endpoint aggregates from existing tables — no new tables needed:
+
+| Stat | Query |
+|---|---|
+| `active_projects` | `SELECT COUNT(*) FROM projects WHERE status='active'` |
+| `pending_reviews` | `SELECT COUNT(*) FROM document_analysis_reviews WHERE status='pending_review'` joined with project name |
+| `jobs_this_week` | `SELECT COUNT(*) FROM ingestion_runs WHERE created_at > now()-7days` |
+| `documents_processed` | `SELECT COUNT(*) FROM documents` |
+| `running_jobs` | `SELECT * FROM ingestion_runs WHERE status IN ('pending','running','analyzing','extracting')` joined with project |
+| `active_projects` list | `SELECT * FROM projects WHERE status='active' ORDER BY updated_at DESC LIMIT 10` with aggregated counts |
+| `recent_activity` | Union of: recent job completions, recent approvals, recent exports, recent project creations. Ordered by timestamp DESC, LIMIT 20. |
+
+#### 16c. Frontend: Dashboard Page
+
+**File: `frontend/src/pages/Dashboard.tsx`** — Complete redesign:
+
+**Components:**
+
+| Component | Data source | Interaction |
+|---|---|---|
+| `StatCards` | `stats` from API | Clickable: active projects → /projects, pending reviews → filtered review list |
+| `NeedsAttention` | `needs_attention` from API | Each item has [Review] button → navigates to project Jobs tab |
+| `RunningJobs` | `running_jobs` from API | Each item has [View] button → navigates to project Jobs tab. Auto-refreshes every 10s while jobs are running. |
+| `ActiveProjects` | `active_projects` from API | Compact table/cards. Clickable rows → project detail. Shows doc count, last activity, pending review count. |
+| `RecentActivity` | `recent_activity` from API | Timeline feed. Each entry shows icon (by type), project name, detail, relative timestamp. |
+
+**Auto-refresh:** Dashboard polls `GET /dashboard/summary` every 30 seconds. When running jobs exist, polls every 10 seconds. Stops polling when tab is not visible (page visibility API).
+
+**Empty states:**
+- No projects yet → "Create your first project to get started" + [New Project] button
+- No pending reviews → "All clear — no documents waiting for review"
+- No running jobs → section hidden entirely
+- No recent activity → "No activity yet"
+
+**"New Project" button:** Top-right corner, always visible. Opens inline form or navigates to /projects with create form focused.
+
+#### 16d. Sidebar Navigation Update
+
+**File: `frontend/src/App.tsx`** — Update sidebar:
+
+Current sidebar has: Dashboard, Projects, Low Confidence, Escalation, QC Sampling, RRA Review, Submit Job, Diagnostic.
+
+Some of these are legacy/disconnected. Update:
+
+```
+Sidebar (updated):
+├── Dashboard          ← redesigned (Step 16)
+├── Projects           ← existing (works well)
+├── Review Queue       ← consolidate Low Confidence + Escalation + QC Sampling + RRA Review
+│                        into a single page with tab/filter controls
+├── Submit Job         ← keep, but with project selection (Step 8b)
+└── Settings           ← new: app config, LLM settings, about
+```
+
+The 4 separate review queue pages (Low Confidence, Escalation, QC Sampling, RRA Review) should become tabs or filters on a single "Review Queue" page. This reduces sidebar clutter and makes navigation clearer. However, this is a larger refactor — for Step 16, just update Dashboard and add the pending reviews link. The sidebar consolidation can be a future step.
+
+#### 16e. Execution Prompt
+
+```
+@agent-general-purpose Read CLAUDE.md and docs/PLAN.md Step 16 for context.
+
+Step 16: Dashboard redesign.
+
+=== BACKEND ===
+
+1. Create app/api/routes/dashboard.py with a single endpoint:
+   GET /dashboard/summary
+
+   Returns JSON with 5 sections:
+   - stats: active_projects count, pending_reviews count,
+     jobs_this_week count, documents_processed count
+   - needs_attention: list of projects with pending document reviews
+     (project_id, project_name, pending_count, oldest_pending_at)
+   - running_jobs: list of in-progress jobs
+     (job_id, project_id, project_name, status, progress_pct,
+     document_count, started_at)
+   - active_projects: list of active projects with summary stats
+     (id, name, status, document_count, last_activity_at,
+     pending_reviews, completed_jobs). Order by last_activity DESC.
+   - recent_activity: last 20 events across all projects. Union of:
+     job completions, document approvals, export generations,
+     project creations. Each has: type, project_name, detail, timestamp.
+
+   All data comes from existing tables — no new tables needed.
+   Use efficient queries (avoid N+1). Consider a single query with
+   joins for active_projects stats.
+
+2. Register dashboard router in app/api/main.py.
+   Add /dashboard proxy rule in frontend/vite.config.ts.
+
+=== FRONTEND ===
+
+3. Redesign frontend/src/pages/Dashboard.tsx:
+
+   a) Stat cards row (4 cards):
+      Active Projects, Pending Reviews, Jobs This Week, Documents Processed
+      Each card is clickable (projects → /projects, reviews → first
+      pending project)
+
+   b) Needs Attention section:
+      List of projects with pending reviews. Each row shows project
+      name, pending count, and [Review] button that navigates to
+      that project's Jobs tab.
+      Empty state: "All clear — no documents waiting for review"
+
+   c) Running Jobs section:
+      List of in-progress jobs with project name, status, progress
+      bar, doc count. [View] button navigates to project Jobs tab.
+      Hidden when no running jobs.
+      Auto-refresh every 10s when running jobs exist.
+
+   d) Active Projects section:
+      Compact cards or table rows. Project name, doc count, last
+      activity (relative time), pending review count badge.
+      Clickable → navigates to project detail.
+      Empty state: "Create your first project" + [New Project] button.
+
+   e) Recent Activity feed:
+      Timeline with icon per event type (job complete, doc approved,
+      export generated, project created). Project name, detail,
+      relative timestamp.
+      Limit to 20 most recent.
+
+4. Add dashboard API function to frontend/src/api/client.ts:
+   - DashboardSummary interface matching API response
+   - getDashboardSummary() function
+   - Auto-polling with react-query refetchInterval (30s default,
+     10s when running jobs exist)
+
+5. Use existing ShadCN components (Card, Badge, Button) and
+   lucide-react icons. Follow existing Tailwind patterns.
+   No new dependencies.
+
+=== TESTS ===
+
+6. Create tests/test_dashboard.py:
+   - Empty state: no projects → all counts zero, empty lists
+   - With projects: counts correct
+   - Pending reviews: shows in needs_attention
+   - Running job: shows in running_jobs with progress
+   - Recent activity: job completion event appears
+   - Recent activity: ordered by timestamp DESC
+   - Activity limit: max 20 entries returned
+   - Active projects: ordered by last_activity DESC
+
+7. Run pytest on all changed files. Fix failures up to 3 attempts.
+   Update CLAUDE.md.
+```
