@@ -1,6 +1,6 @@
-# PORTS.md — Forentis AI Port Assignments
+# PORTS.md — Cyber NotifAI Port Assignments
 
-This file documents all ports reserved by Forentis AI.
+This file documents all ports reserved by Cyber NotifAI.
 **Do not use ports 3847–3854 for any other product or service on shared infrastructure.**
 
 Last updated: 2026-02-23
@@ -13,7 +13,7 @@ Last updated: 2026-02-23
 |------|---------|----------|-------------|
 | **3847** | Frontend (React) | HTTP | Human review UI — queue dashboard, subject detail, approval workflow |
 | **3848** | FastAPI Backend | HTTP | REST API + `/docs` (Swagger UI) |
-| **5499** | PostgreSQL | TCP | Primary database — NotificationSubjects, AuditEvents, ReviewTasks |
+| **3849** | PostgreSQL | TCP | Primary database — NotificationSubjects, AuditEvents, ReviewTasks |
 | **3850** | Redis | TCP | Cache and session store |
 | **3851** | MinIO API | HTTP | Object storage API (S3-compatible) |
 | **3852** | MinIO Console | HTTP | MinIO web admin UI |
@@ -40,7 +40,7 @@ In `.env` or `docker-compose.yml`, use these values:
 
 ```env
 API_URL=http://localhost:3848
-DATABASE_URL=postgresql://forentis:forentis@localhost:5499/forentis
+DATABASE_URL=postgresql://notifai:notifai@localhost:3849/notifai
 REDIS_URL=redis://localhost:3850
 MINIO_URL=http://localhost:3851
 SMTP_HOST=localhost
@@ -75,7 +75,7 @@ Protocol: TCP
 ```
 
 For production, only expose **3847** (frontend) and **3848** (API) externally.
-Ports 5499 and 3850–3854 should be internal-only.
+Ports 3849–3854 should be internal-only.
 
 ---
 
@@ -85,7 +85,7 @@ Ports 5499 and 3850–3854 should be internal-only.
 |------|-------------|---------|------------|
 | 3847 Frontend | ✅ Open | ✅ Open | ✅ Open (behind TLS proxy) |
 | 3848 API | ✅ Open | ✅ Open | ✅ Open (behind TLS proxy) |
-| 5499 PostgreSQL | ✅ Open | ❌ Internal only | ❌ Internal only |
+| 3849 PostgreSQL | ✅ Open | ❌ Internal only | ❌ Internal only |
 | 3850 Redis | ✅ Open | ❌ Internal only | ❌ Internal only |
 | 3851 MinIO API | ✅ Open | ❌ Internal only | ❌ Internal only |
 | 3852 MinIO Console | ✅ Open | ❌ Internal only | ❌ Internal only |
@@ -111,5 +111,5 @@ is assigned a nearby range.
 
 ## Contact
 
-Questions about port assignments: contact the Forentis AI team before
+Questions about port assignments: contact the Cyber NotifAI team before
 deploying any service on shared infrastructure that uses ports in or near this range.
