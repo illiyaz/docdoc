@@ -27,6 +27,7 @@ export default defineConfig({
       },
       "/review": "http://localhost:3848",
       "/audit": "http://localhost:3848",
+      "/dashboard": "http://localhost:3848",
       "/diagnostic": "http://localhost:3848",
     },
   },

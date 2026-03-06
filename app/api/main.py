@@ -18,6 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.middleware.pii_filter import PIIFilterMiddleware
 from app.api.routes.analysis_review import router as analysis_review_router
 from app.api.routes.audit import router as audit_router
+from app.api.routes.dashboard import router as dashboard_router
 from app.api.routes.diagnostic import router as diagnostic_router
 from app.api.routes.exports import router as exports_router
 from app.api.routes.health import router as health_router
@@ -94,4 +95,5 @@ app.include_router(analysis_review_router)
 app.include_router(jobs_router)
 app.include_router(review_router)
 app.include_router(audit_router)
+app.include_router(dashboard_router)
 app.include_router(diagnostic_router)

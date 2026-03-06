@@ -90,6 +90,55 @@ export interface UploadResult {
   files: UploadFileInfo[]
 }
 
+export interface DashboardStats {
+  active_projects: number
+  pending_reviews: number
+  jobs_this_week: number
+  documents_processed: number
+}
+
+export interface NeedsAttentionItem {
+  project_id: string
+  project_name: string
+  pending_count: number
+  oldest_pending_at: string | null
+}
+
+export interface RunningJobItem {
+  job_id: string
+  project_id: string | null
+  project_name: string | null
+  status: string
+  progress_pct: number
+  document_count: number
+  started_at: string | null
+}
+
+export interface ActiveProjectItem {
+  id: string
+  name: string
+  status: string
+  document_count: number
+  last_activity_at: string | null
+  pending_reviews: number
+  completed_jobs: number
+}
+
+export interface ActivityItem {
+  type: string
+  project_name: string | null
+  detail: string
+  timestamp: string | null
+}
+
+export interface DashboardSummary {
+  stats: DashboardStats
+  needs_attention: NeedsAttentionItem[]
+  running_jobs: RunningJobItem[]
+  active_projects: ActiveProjectItem[]
+  recent_activity: ActivityItem[]
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -871,4 +920,12 @@ export async function startExtractStreaming(
   }
 
   return finalResult
+}
+
+// ---------------------------------------------------------------------------
+// Dashboard
+// ---------------------------------------------------------------------------
+
+export function getDashboardSummary(): Promise<DashboardSummary> {
+  return api("/dashboard/summary")
 }

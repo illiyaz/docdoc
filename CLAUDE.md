@@ -204,7 +204,8 @@ project-root/
 │   ├── test_structure_analysis.py   # DSA: doc type, sections, roles, masking, RRA prevention
 │   ├── test_two_phase.py            # Two-phase pipeline: content onset, auto-approve, review
 │   ├── test_detection_tuning.py     # Phase 14c: min confidence, currency pattern, dedup, deny-list
-│   └── test_detection_review.py     # Step 15: field-level detection review, protocol mapping
+│   ├── test_detection_review.py     # Step 15: field-level detection review, protocol mapping
+│   └── test_dashboard.py            # Step 16: dashboard summary endpoint
 ├── models/                        # pre-packaged spaCy and Presidio models
 └── scripts/
     └── retrain.py                 # supervised retraining from human labels
@@ -331,9 +332,9 @@ These are detailed in [docs/SCHEMA.md](docs/SCHEMA.md). Summary:
 | 13. LLM Entity Relationship Analysis | COMPLETE | PII-verified onset detection (two-pass: heuristic candidates → Presidio verification). LLM entity relationship analysis: reads onset page + PII detections, proposes entity groups with confidence + rationale. New analyze stages: `verified_onset` + `entity_analysis`. `EntityRelationshipAnalysis` dataclass, `LLMEntityAnalyzer`, `ANALYZE_ENTITY_RELATIONSHIPS` prompt. API returns entity groups/relationships/guidance. Frontend entity group cards with role badges, relationship display, extraction guidance. Migration 0008 (`documents.entity_analysis` JSON column). 20 new tests. |
 | 14. LLM Document Understanding & Detection Quality | COMPLETE | **14a** — context deny-lists, tighter Presidio patterns. **14a-ii** — protocol-driven recognizer filtering. **14b** — LLM Document Understanding (DocumentSchema + SchemaFilter + TableSchema). **14c** — detection tuning (min confidence 10% floor, currency pattern filter, detection dedup), integration (schema→entity analysis, 2 new audit event types, API returns document_schema), Catalog tab UX (state-driven: empty→uploaded→running→complete). 50 new tests. |
 | 15. Field-Level Review + Protocol Mapping | COMPLETE | Two-tier detection toggle (type-level bulk + individual override) before extraction approval. Protocol field mapping (12 protocols) shows required vs detected vs missing fields with completeness percentage. `DetectionReviewDecision` model + `detection_review_decisions` table (19 total, migration 0009). `selected_entity_types` on review. Phase 2 extraction filters by included types per document. Frontend: detection controls with type/individual toggles, "Approve with selections" button, protocol mapping endpoint. 53 new tests. |
-| 16. Dashboard Redesign | PENDING | Transform dashboard into command center. GET /dashboard/summary endpoint aggregating from existing tables. Sections: stat cards (active projects, pending reviews, jobs this week, docs processed), needs attention (pending reviews by project), running jobs (with progress), active projects (compact list), recent activity feed (last 20 events). Auto-refresh polling (30s default, 10s when jobs running). |
+| 16. Dashboard Redesign | COMPLETE | `GET /dashboard/summary` endpoint with 5 sections (stats, needs_attention, running_jobs, active_projects, recent_activity). Efficient queries with JOINs and subqueries. Frontend: stat cards (clickable), needs attention list with review buttons, running jobs with progress bars (10s auto-refresh), active projects (ordered by last activity), recent activity feed (20 events, 4 types). `DashboardSummary` TypeScript types. Vite proxy added. 10 new tests. |
 
-**1810 tests passing after Steps 1–15.**
+**1820 tests passing after Steps 1–16.**
 
 See [docs/PLAN.md](docs/PLAN.md) for full step-by-step implementation details.
 
