@@ -195,6 +195,77 @@ ENTITY_CATEGORY_MAP: dict[str, list[str]] = {
 }
 
 
+# ---------------------------------------------------------------------------
+# Protocol-driven recognizer filtering (Phase 14a-ii)
+#
+# Default entity types per base protocol.  When a job is run under a
+# specific protocol, only these entity types are passed to Presidio so
+# irrelevant recognizers are never invoked — eliminating multi-geo FPs.
+#
+# ``target_entity_types`` in ``protocol_configs.config_json`` takes
+# precedence (user override).  If not set, this dict provides defaults.
+# If neither is set, all recognizers run (full backward compatibility).
+# ---------------------------------------------------------------------------
+
+PROTOCOL_DEFAULT_ENTITIES: dict[str, list[str]] = {
+    "hipaa": [
+        "PERSON", "US_SSN", "PHONE_NUMBER", "EMAIL_ADDRESS", "DATE_OF_BIRTH",
+        "MEDICAL_LICENSE", "NPI_NUMBER", "US_DRIVER_LICENSE", "US_PASSPORT",
+        "IP_ADDRESS", "URL",
+    ],
+    "hipaa_breach_rule": [
+        "PERSON", "US_SSN", "PHONE_NUMBER", "EMAIL_ADDRESS", "DATE_OF_BIRTH",
+        "MEDICAL_LICENSE", "NPI_NUMBER", "US_DRIVER_LICENSE", "US_PASSPORT",
+        "IP_ADDRESS", "URL",
+    ],
+    "gdpr": [
+        "PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER", "IBAN_CODE", "IP_ADDRESS",
+        "DATE_OF_BIRTH", "LOCATION", "URL", "CRYPTO",
+    ],
+    "gdpr_article_33": [
+        "PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER", "IBAN_CODE", "IP_ADDRESS",
+        "DATE_OF_BIRTH", "LOCATION", "URL", "CRYPTO",
+    ],
+    "ccpa": [
+        "PERSON", "US_SSN", "US_DRIVER_LICENSE", "US_PASSPORT", "EMAIL_ADDRESS",
+        "PHONE_NUMBER", "CREDIT_CARD", "US_BANK_NUMBER", "IP_ADDRESS",
+        "DATE_OF_BIRTH", "LOCATION", "URL",
+    ],
+    "hitech": [
+        "PERSON", "US_SSN", "PHONE_NUMBER", "EMAIL_ADDRESS", "DATE_OF_BIRTH",
+        "MEDICAL_LICENSE", "NPI_NUMBER", "US_DRIVER_LICENSE", "US_PASSPORT",
+        "IP_ADDRESS", "URL",
+    ],
+    "dpdpa": [
+        "PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER", "DATE_OF_BIRTH",
+        "LOCATION", "IP_ADDRESS", "URL",
+        # Custom recognizers: AADHAAR, PAN_CARD added via layer1_patterns
+    ],
+    "pci_dss": [
+        "CREDIT_CARD", "PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER",
+        "US_BANK_NUMBER", "IBAN_CODE",
+    ],
+    "state_breach": [
+        "PERSON", "US_SSN", "US_DRIVER_LICENSE", "US_PASSPORT", "EMAIL_ADDRESS",
+        "PHONE_NUMBER", "CREDIT_CARD", "US_BANK_NUMBER", "DATE_OF_BIRTH",
+        "MEDICAL_LICENSE", "IP_ADDRESS", "LOCATION",
+    ],
+    "state_breach_generic": [
+        "PERSON", "US_SSN", "US_DRIVER_LICENSE", "US_PASSPORT", "EMAIL_ADDRESS",
+        "PHONE_NUMBER", "CREDIT_CARD", "US_BANK_NUMBER", "DATE_OF_BIRTH",
+        "MEDICAL_LICENSE", "IP_ADDRESS", "LOCATION",
+    ],
+    "bipa": [
+        "PERSON", "US_SSN", "EMAIL_ADDRESS", "PHONE_NUMBER",
+        # Custom recognizers: FINGERPRINT, FACE_GEOMETRY, IRIS_SCAN, VOICEPRINT
+    ],
+    "ferpa": [
+        "PERSON", "US_SSN", "EMAIL_ADDRESS", "PHONE_NUMBER", "DATE_OF_BIRTH",
+        "LOCATION", "IP_ADDRESS",
+    ],
+}
+
+
 def get_entity_categories(entity_type: str) -> list[str]:
     """Return the list of data categories for the given entity type.
 

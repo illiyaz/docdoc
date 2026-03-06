@@ -25,6 +25,7 @@ from presidio_analyzer.pattern_recognizer import PatternRecognizer
 
 from app.readers.base import ExtractedBlock
 from app.pii.layer1_patterns import GEOGRAPHY_GLOBAL, PatternDefinition, get_all_patterns
+from app.pii.context_deny_list import is_likely_false_positive
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +42,7 @@ def _resolve_spacy_model() -> str:
 
 _SPACY_MODEL = _resolve_spacy_model()
 _LAYER2_SCORE_THRESHOLD = 0.75
+MIN_DETECTION_CONFIDENCE = 0.10  # Phase 14c: drop detections below 10%
 
 
 # ---------------------------------------------------------------------------
@@ -140,7 +142,12 @@ class PresidioEngine:
     # Public API
     # ------------------------------------------------------------------
 
-    def analyze(self, blocks: list[ExtractedBlock]) -> list[DetectionResult]:
+    def analyze(
+        self,
+        blocks: list[ExtractedBlock],
+        *,
+        target_entity_types: list[str] | None = None,
+    ) -> list[DetectionResult]:
         """Run Presidio analysis on every block; return DetectionResult list.
 
         Safety rule: raw text values are never logged.  Only entity_type and
@@ -150,6 +157,11 @@ class PresidioEngine:
         ----------
         blocks:
             ExtractedBlock objects produced by any reader.
+        target_entity_types:
+            If provided, only run recognizers for these entity types.
+            Dramatically reduces false positives for multi-geo deployments
+            by disabling irrelevant recognizers.  If None or empty, run all
+            recognizers (backward compatible).
 
         Returns
         -------
@@ -157,12 +169,14 @@ class PresidioEngine:
             One entry per Presidio hit across all blocks.
             Results with score < 0.75 have needs_layer2=True.
         """
+        entities = target_entity_types if target_entity_types else None
         results: list[DetectionResult] = []
 
         for block in blocks:
             presidio_hits = self._analyzer.analyze(
                 text=block.text,
                 language="en",
+                entities=entities,
             )
             for hit in presidio_hits:
                 pat_def = self._pattern_map.get(hit.entity_type)
@@ -189,4 +203,66 @@ class PresidioEngine:
                     regulatory_framework=regulatory_framework,
                 ))
 
-        return results
+        # Phase 14c: drop detections below minimum confidence threshold
+        pre_count = len(results)
+        results = [
+            det for det in results if det.score >= MIN_DETECTION_CONFIDENCE
+        ]
+        dropped = pre_count - len(results)
+        if dropped:
+            logger.debug("Min confidence filter dropped %d detection(s) below %.0f%%", dropped, MIN_DETECTION_CONFIDENCE * 100)
+
+        # Phase 14a: post-filter through context deny-list
+        filtered: list[DetectionResult] = []
+        for det in results:
+            detected_text = det.block.text[det.start:det.end]
+            # Build surrounding context (~120 chars before/after)
+            ctx_start = max(0, det.start - 120)
+            ctx_end = min(len(det.block.text), det.end + 120)
+            surrounding = det.block.text[ctx_start:ctx_end]
+
+            is_fp, reason = is_likely_false_positive(
+                detected_text, det.entity_type, surrounding,
+            )
+            if is_fp:
+                logger.debug(
+                    "FP suppressed: entity_type=%s reason=%s",
+                    det.entity_type, reason,
+                )
+                continue
+            filtered.append(det)
+
+        # Phase 14c: deduplicate — keep highest confidence per (value, entity_type, page)
+        filtered = deduplicate_detections(filtered)
+
+        return filtered
+
+
+def deduplicate_detections(detections: list[DetectionResult]) -> list[DetectionResult]:
+    """Remove duplicate detections, keeping the highest confidence per group.
+
+    Groups by (detected_text, entity_type, page_or_sheet).  For each group,
+    only the detection with the highest score is retained.
+
+    Returns
+    -------
+    list[DetectionResult]
+        Deduplicated list.
+    """
+    if not detections:
+        return detections
+
+    groups: dict[tuple, DetectionResult] = {}
+    for det in detections:
+        text = det.block.text[det.start:det.end]
+        page = det.block.page_or_sheet
+        key = (text, det.entity_type, page)
+        existing = groups.get(key)
+        if existing is None or det.score > existing.score:
+            groups[key] = det
+
+    deduped = list(groups.values())
+    removed = len(detections) - len(deduped)
+    if removed:
+        logger.debug("Dedup removed %d duplicate detection(s)", removed)
+    return deduped

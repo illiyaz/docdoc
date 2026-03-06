@@ -230,9 +230,12 @@ CUSTOM_PATTERNS: list[PatternDefinition] = [
     ),
     PatternDefinition(
         # Generic — state-specific formats vary widely; Layer 2 context needed.
+        # Tightened (Phase 14a): require at least 7 digits for bare numeric,
+        # or 1-2 letter prefix + 6-8 digits. context_deny_list.py also requires
+        # license-related keywords nearby.
         name="driver_license_us",
         entity_type="DRIVER_LICENSE_US",
-        regex=r"\b[A-Z]{0,2}\d{6,8}\b",
+        regex=r"\b(?:[A-Z]{1,2}\d{6,8}|\d{7,9})\b",
         score=0.65,
         geography=GEOGRAPHY_US,
         regulatory_framework="DPPA/CCPA",
@@ -365,9 +368,12 @@ CUSTOM_PATTERNS: list[PatternDefinition] = [
         regulatory_framework="UK-GDPR/PSD2",
     ),
     PatternDefinition(
+        # Tightened (Phase 14a): require either a known prefix + 6-8 digits,
+        # or exactly 8 bare digits. Short bare numerics (< 8 digits) rejected
+        # by context_deny_list.py unless company context keywords are present.
         name="company_number_uk",
         entity_type="COMPANY_NUMBER_UK",
-        regex=r"\b(?:OC|NI|SC|NL|LP|R|IP|SP|RS|FC|GE|GS|IC|CE|CS|AC|SA|NA|SL|[A-Z]{2})?\d{6,8}\b",
+        regex=r"\b(?:(?:OC|NI|SC|NL|LP|IP|SP|RS|FC|GE|GS|IC|CE|CS|AC|SA|NA|SL)\d{6,8}|\d{8})\b",
         score=0.70,
         geography=GEOGRAPHY_UK,
         regulatory_framework="UK-GDPR",
@@ -378,10 +384,14 @@ CUSTOM_PATTERNS: list[PatternDefinition] = [
     # =====================================================================
 
     PatternDefinition(
-        # "VAT" keyword must be nearby — Layer 2 required.
+        # Tightened (Phase 14a): require 2-letter country prefix followed by
+        # digits (with optional separators). Old pattern matched any
+        # [A-Z]{2}[A-Z0-9]{8,12} which caught common English words like
+        # "DESCRIPTION", "TRANSACTIONS", etc.
+        # context_deny_list.py also rejects all-alpha matches.
         name="vat_eu",
         entity_type="VAT_EU",
-        regex=r"\b[A-Z]{2}[\dA-Z]{8,12}\b",
+        regex=r"\b[A-Z]{2}\d[\dA-Z]{6,11}\b",
         score=0.75,
         geography=GEOGRAPHY_EU,
         regulatory_framework="GDPR/VAT-Directive",
@@ -553,10 +563,12 @@ CUSTOM_PATTERNS: list[PatternDefinition] = [
     # =====================================================================
 
     PatternDefinition(
-        # Student identifiers — low score; col_header "student" boosts via Layer 3.
+        # Tightened (Phase 14a): require at least one digit in the suffix.
+        # Old pattern matched pure-alpha words like "Statement", "STREET".
+        # context_deny_list.py also rejects COMMON_WORD_DENY_LIST matches.
         name="student_id",
         entity_type="STUDENT_ID",
-        regex=r"\b(?:STU|SID|S)[A-Z0-9\-]{4,12}\b",
+        regex=r"\b(?:STU|SID|S)(?=[A-Z0-9\-]{4,12}\b)(?=[A-Z0-9\-]*\d)[A-Z0-9\-]{4,12}\b",
         score=0.65,
         geography=GEOGRAPHY_US,
         regulatory_framework="FERPA",

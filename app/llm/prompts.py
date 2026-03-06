@@ -173,6 +173,95 @@ ANALYZE_ENTITY_RELATIONSHIPS = (
 )
 
 # ---------------------------------------------------------------------------
+# UNDERSTAND_DOCUMENT (Phase 14b — LLM Document Understanding)
+# ---------------------------------------------------------------------------
+
+UNDERSTAND_DOCUMENT = (
+    "You are analyzing a document to understand its structure and identify what "
+    "data fields mean.\n"
+    "\n"
+    "Document: {file_name} ({file_type}, {structure_class})\n"
+    "Heuristic analysis suggests: {heuristic_doc_type}\n"
+    "\n"
+    "--- DOCUMENT TEXT (page {onset_page}) ---\n"
+    "{page_text}\n"
+    "--- END ---\n"
+    "\n"
+    "Analyze this document and respond ONLY with a JSON object:\n"
+    '{{\n'
+    '  "document_type": "the type of document (financial_statement, medical_record, '
+    'hr_file, insurance_claim, legal_filing, tax_form, correspondence, etc.)",\n'
+    '  "document_subtype": "more specific type if identifiable",\n'
+    '  "issuing_entity": "the organization that produced this document, or null",\n'
+    '  "field_map": [\n'
+    '    {{\n'
+    '      "label": "the field label as it appears in the document",\n'
+    '      "value_example": "the value next to this label",\n'
+    '      "semantic_type": "what this field actually represents (tax_id, account_number, '
+    'reference_number, phone_number, address, etc.)",\n'
+    '      "is_pii": true,\n'
+    '      "presidio_override": "if is_pii, what Presidio entity type this should be '
+    'classified as, else null",\n'
+    '      "suppress_types": ["list of Presidio entity types that should NOT match this value"]\n'
+    '    }}\n'
+    '  ],\n'
+    '  "people": [\n'
+    '    {{\n'
+    '      "name": "person name",\n'
+    '      "role": "primary_subject | related_party | institutional_contact | provider",\n'
+    '      "context": "how this person relates to the document",\n'
+    '      "is_pii_subject": true\n'
+    '    }}\n'
+    '  ],\n'
+    '  "organizations": ["list of organizations mentioned"],\n'
+    '  "date_contexts": [\n'
+    '    {{\n'
+    '      "value": "the date as it appears",\n'
+    '      "semantic_type": "transaction_date | statement_period | date_of_birth | '
+    'filing_date | etc.",\n'
+    '      "is_pii": false\n'
+    '    }}\n'
+    '  ],\n'
+    '  "tables": [\n'
+    '    {{\n'
+    '      "columns": [\n'
+    '        {{\n'
+    '          "header": "the column header text",\n'
+    '          "semantic_type": "what this column contains (transaction_date, reference_number, '
+    'person_name, government_id, currency_amount, description_text, etc.)",\n'
+    '          "contains_pii": false,\n'
+    '          "pii_type": null\n'
+    '        }}\n'
+    '      ],\n'
+    '      "row_count_estimate": 0,\n'
+    '      "table_context": "what this table represents",\n'
+    '      "has_pii_columns": false\n'
+    '    }}\n'
+    '  ],\n'
+    '  "suppression_hints": ["free text hints about values that look like PII but are not"],\n'
+    '  "extraction_notes": "brief note about what PII to expect and how it is organized",\n'
+    '  "schema_confidence": 0.85\n'
+    '}}\n'
+    "\n"
+    "IMPORTANT:\n"
+    "- Be precise about what IS and ISN'T PII. Reference numbers, account IDs, and "
+    "statement numbers are NOT PII.\n"
+    "- Phone/fax numbers belonging to organizations (not individuals) should be marked "
+    "is_pii=false.\n"
+    "- Dates that are transaction dates, statement periods, or filing dates are NOT "
+    "dates of birth.\n"
+    "- Short numeric codes (under 8 digits) next to labels like \"Client:\", \"Ref:\", "
+    "\"Statement Nr:\" are reference numbers, NOT government IDs.\n"
+    "- For tables: identify EVERY table on the page. Mark each column as contains_pii or "
+    "not. Transaction tables (date, ref, description, amount) typically have ZERO PII "
+    "columns. Payroll/HR tables (name, SSN, DOB, salary) have MULTIPLE PII columns.\n"
+    "- A table column containing amounts, reference numbers, descriptions, or status "
+    "values is NOT a PII column even if Presidio would match patterns in the data.\n"
+    "\n"
+    "Respond ONLY with valid JSON.  No additional text."
+)
+
+# ---------------------------------------------------------------------------
 # Template registry for programmatic access
 # ---------------------------------------------------------------------------
 
@@ -182,4 +271,5 @@ PROMPT_TEMPLATES: dict[str, str] = {
     "suggest_entity_category": SUGGEST_ENTITY_CATEGORY,
     "analyze_document_structure": ANALYZE_DOCUMENT_STRUCTURE,
     "analyze_entity_relationships": ANALYZE_ENTITY_RELATIONSHIPS,
+    "understand_document": UNDERSTAND_DOCUMENT,
 }

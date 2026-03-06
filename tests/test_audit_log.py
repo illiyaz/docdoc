@@ -205,8 +205,8 @@ class TestGetEventsByType:
 # ===========================================================================
 
 class TestEventConstants:
-    def test_all_eight_types_in_frozenset(self):
-        assert len(VALID_EVENT_TYPES) == 8
+    def test_all_event_types_in_frozenset(self):
+        assert len(VALID_EVENT_TYPES) == 10
         for t in [
             EVENT_AI_EXTRACTION, EVENT_HUMAN_REVIEW, EVENT_ESCALATION,
             EVENT_LEGAL_REVIEW, EVENT_APPROVAL, EVENT_NOTIFICATION_SENT,

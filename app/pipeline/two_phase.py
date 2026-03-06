@@ -35,10 +35,37 @@ from app.pipeline.content_onset import (
     find_verified_onset,
     find_verified_onset_pdf,
 )
+from app.core.constants import PROTOCOL_DEFAULT_ENTITIES
 from app.protocols.registry import ProtocolRegistry
 from app.tasks.discovery import DiscoveryTask, FilesystemConnector
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_target_entities(
+    protocol_config: dict | None,
+    protocol_id: str | None,
+) -> list[str] | None:
+    """Resolve target entity types from protocol config or protocol defaults.
+
+    Precedence:
+    1. ``target_entity_types`` explicitly set in ``protocol_config`` → use it
+    2. ``base_protocol_id`` in config → look up ``PROTOCOL_DEFAULT_ENTITIES``
+    3. ``protocol_id`` (job-level) → look up ``PROTOCOL_DEFAULT_ENTITIES``
+    4. None → run all recognizers (backward compatible)
+    """
+    if protocol_config:
+        explicit = protocol_config.get("target_entity_types")
+        if explicit:
+            return list(explicit)
+        base = protocol_config.get("base_protocol_id")
+        if base and base in PROTOCOL_DEFAULT_ENTITIES:
+            return list(PROTOCOL_DEFAULT_ENTITIES[base])
+
+    if protocol_id and protocol_id in PROTOCOL_DEFAULT_ENTITIES:
+        return list(PROTOCOL_DEFAULT_ENTITIES[protocol_id])
+
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -230,6 +257,7 @@ def analyze_generator(
         from app.pii.presidio_engine import PresidioEngine
 
         engine = PresidioEngine()
+        target_entities = _resolve_target_entities(protocol_config, body.protocol_id)
         doc_confidences: dict[UUID, list[float]] = {}
         doc_detections: dict[UUID, list] = {}  # cache for entity_analysis stage
 
@@ -273,8 +301,10 @@ def analyze_generator(
                 # Filter to sample blocks on verified onset page
                 sample_blocks = filter_sample_blocks(blocks, onset_page, doc.file_type or "unknown")
 
-                # Run Presidio on sample blocks
-                detections = engine.analyze(sample_blocks) if sample_blocks else []
+                # Run Presidio on sample blocks (filtered by protocol entity types)
+                detections = engine.analyze(
+                    sample_blocks, target_entity_types=target_entities,
+                ) if sample_blocks else []
                 confidences = [det.score for det in detections]
                 doc_confidences[doc.id] = confidences
                 doc_detections[doc.id] = detections
@@ -335,6 +365,83 @@ def analyze_generator(
             "message": f"Sampled {len(doc_records)} document(s)",
             "detail": {
                 "total_detections": sum(len(c) for c in doc_confidences.values()),
+            },
+        })
+
+        # --- Stage 4.5: Document Understanding (LLM) + Schema Filter ---
+        yield _sse({
+            "stage": "document_understanding", "status": "running",
+            "message": "Analyzing document semantics...",
+            "detail": {"total": len(doc_records), "current": 0},
+        })
+
+        doc_schemas: dict[UUID, object] = {}  # UUID → DocumentSchema | None
+        understanding_count = 0
+        schema_filter_suppressed = 0
+
+        if settings.llm_assist_enabled:
+            try:
+                from app.structure.llm_document_understanding import LLMDocumentUnderstanding
+                from app.pii.schema_filter import SchemaFilter
+
+                doc_understanding = LLMDocumentUnderstanding(db_session=db)
+
+                for i, doc in enumerate(doc_records, 1):
+                    yield _sse({
+                        "stage": "document_understanding", "status": "running",
+                        "message": f"Understanding document {i}/{len(doc_records)}...",
+                        "detail": {"total": len(doc_records), "current": i},
+                    })
+
+                    blocks = doc_blocks_cache.get(doc.id, [])
+                    onset_page = doc.sample_onset_page or 0
+                    sample_blocks = filter_sample_blocks(blocks, onset_page, doc.file_type or "unknown")
+
+                    # Get heuristic doc type from structure analysis
+                    heuristic_doc_type = "unknown"
+                    if doc.structure_analysis and isinstance(doc.structure_analysis, dict):
+                        heuristic_doc_type = doc.structure_analysis.get("document_type", "unknown")
+
+                    schema = doc_understanding.understand(
+                        sample_blocks,
+                        heuristic_doc_type=heuristic_doc_type,
+                        file_name=doc.file_name or "",
+                        file_type=doc.file_type or "",
+                        structure_class=doc.structure_class or "",
+                        onset_page=onset_page,
+                        document_id=str(doc.id),
+                    )
+
+                    doc_schemas[doc.id] = schema
+
+                    if schema is not None:
+                        understanding_count += 1
+                        # Apply SchemaFilter to this doc's detections
+                        detections = doc_detections.get(doc.id, [])
+                        if detections:
+                            sf = SchemaFilter(schema)
+                            result = sf.filter_detections(detections)
+                            # Replace detections with filtered set
+                            doc_detections[doc.id] = result.kept
+                            # Update confidences to match filtered detections
+                            doc_confidences[doc.id] = [d.score for d in result.kept]
+                            schema_filter_suppressed += len(result.suppressed)
+                            # Update extraction count
+                            doc.sample_extraction_count = len(result.kept)
+
+                db.flush()
+            except Exception as e:
+                logger.warning("Document understanding stage failed: %s", type(e).__name__)
+        else:
+            logger.info("LLM assist disabled; skipping document understanding")
+
+        yield _sse({
+            "stage": "document_understanding", "status": "complete",
+            "message": f"Understood {understanding_count} document(s), "
+                       f"suppressed {schema_filter_suppressed} false positive(s)",
+            "detail": {
+                "understood": understanding_count,
+                "suppressed": schema_filter_suppressed,
             },
         })
 
@@ -557,6 +664,20 @@ def extract_generator(
         yield _sse({"stage": "error", "message": f"Protocol not found: {protocol_id!r}"})
         return
 
+    # --- Load protocol config for entity filtering ---
+    protocol_config: dict | None = None
+    protocol_config_id = config_snapshot.get("protocol_config_id")
+    if protocol_config_id:
+        try:
+            from app.db.models import ProtocolConfig
+            pc = db.get(ProtocolConfig, UUID(protocol_config_id))
+            if pc is not None:
+                protocol_config = pc.config_json
+        except Exception:
+            pass  # best-effort
+
+    target_entities = _resolve_target_entities(protocol_config, protocol_id)
+
     # --- Load approved documents ---
     approved_docs = (
         db.execute(
@@ -592,6 +713,18 @@ def extract_generator(
         engine = PresidioEngine()
         all_records: list[PIIRecord] = []
 
+        # Optionally set up SchemaFilter for extract phase
+        schema_filter_cls = None
+        doc_understanding_cls = None
+        if settings.llm_assist_enabled:
+            try:
+                from app.pii.schema_filter import SchemaFilter as _SF
+                from app.structure.llm_document_understanding import LLMDocumentUnderstanding as _LDU
+                schema_filter_cls = _SF
+                doc_understanding_cls = _LDU
+            except Exception:
+                pass
+
         for i, doc in enumerate(approved_docs, 1):
             yield _sse({
                 "stage": "detection", "status": "running",
@@ -602,7 +735,34 @@ def extract_generator(
             try:
                 reader = get_reader(doc.source_path)
                 blocks = reader.read()
-                detections = engine.analyze(blocks)
+                detections = engine.analyze(blocks, target_entity_types=target_entities)
+
+                # Apply SchemaFilter if LLM is available
+                if doc_understanding_cls is not None and schema_filter_cls is not None:
+                    try:
+                        # Get onset page sample for document understanding
+                        onset_page = doc.sample_onset_page or 0
+                        sample_blocks = filter_sample_blocks(blocks, onset_page, doc.file_type or "unknown")
+                        heuristic_doc_type = "unknown"
+                        if doc.structure_analysis and isinstance(doc.structure_analysis, dict):
+                            heuristic_doc_type = doc.structure_analysis.get("document_type", "unknown")
+
+                        du = doc_understanding_cls(db_session=db)
+                        schema = du.understand(
+                            sample_blocks,
+                            heuristic_doc_type=heuristic_doc_type,
+                            file_name=doc.file_name or "",
+                            file_type=doc.file_type or "",
+                            structure_class=doc.structure_class or "",
+                            onset_page=onset_page,
+                            document_id=str(doc.id),
+                        )
+                        if schema is not None:
+                            sf = schema_filter_cls(schema)
+                            result = sf.filter_detections(detections)
+                            detections = result.kept
+                    except Exception:
+                        pass  # best-effort; use unfiltered detections
 
                 for det in detections:
                     rec = PIIRecord(

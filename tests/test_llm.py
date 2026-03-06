@@ -456,7 +456,8 @@ class TestPromptTemplates:
         assert "suggest_entity_category" in PROMPT_TEMPLATES
         assert "analyze_document_structure" in PROMPT_TEMPLATES
         assert "analyze_entity_relationships" in PROMPT_TEMPLATES
-        assert len(PROMPT_TEMPLATES) == 5
+        assert "understand_document" in PROMPT_TEMPLATES
+        assert len(PROMPT_TEMPLATES) == 6
 
     def test_classify_template_has_entity_type_key(self) -> None:
         """The template response schema should mention entity_type."""
@@ -500,6 +501,14 @@ class TestPromptTemplates:
                 "onset_page": 3,
                 "document_excerpt": "[Page 3]: Name: John Doe SSN: ***-**-6789",
                 "pii_detections": "  1. Type: PERSON, Value: \"John Doe\", Page: 3, Confidence: 0.95",
+            },
+            "understand_document": {
+                "file_name": "statement.pdf",
+                "file_type": "pdf",
+                "structure_class": "unstructured",
+                "heuristic_doc_type": "financial_statement",
+                "onset_page": 1,
+                "page_text": "Client: 001968  Statement Nr.: 1121799\nAdeline Chandler\nTax No.: ***-**-5085",
             },
         }
         for name, template in PROMPT_TEMPLATES.items():

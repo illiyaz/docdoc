@@ -12,6 +12,8 @@ EVENT_APPROVAL = "approval"
 EVENT_NOTIFICATION_SENT = "notification_sent"
 EVENT_PROTOCOL_APPLIED = "protocol_applied"
 EVENT_RRA_MERGE = "rra_merge"
+EVENT_DETECTION_SUPPRESSED = "detection_suppressed"
+EVENT_DETECTION_RECLASSIFIED = "detection_reclassified"
 
 VALID_EVENT_TYPES: frozenset[str] = frozenset({
     EVENT_AI_EXTRACTION,
@@ -22,4 +24,6 @@ VALID_EVENT_TYPES: frozenset[str] = frozenset({
     EVENT_NOTIFICATION_SENT,
     EVENT_PROTOCOL_APPLIED,
     EVENT_RRA_MERGE,
+    EVENT_DETECTION_SUPPRESSED,
+    EVENT_DETECTION_RECLASSIFIED,
 })

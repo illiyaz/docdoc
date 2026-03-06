@@ -78,6 +78,11 @@ def get_analysis_results(job_id: str, db: Session = Depends(get_db)):
         # Parse entity analysis (from LLM entity relationship analysis)
         ea = doc.entity_analysis or {}
 
+        # Document schema from LLM Document Understanding (Phase 14b)
+        doc_schema = getattr(doc, "document_schema", None)
+        if doc_schema is None and hasattr(doc, "structure_analysis") and isinstance(dsa, dict):
+            doc_schema = dsa.get("document_schema")
+
         results.append({
             "document_id": str(doc.id),
             "file_name": doc.file_name,
@@ -99,6 +104,8 @@ def get_analysis_results(job_id: str, db: Session = Depends(get_db)):
             "relationships": ea.get("relationships", []),
             "estimated_unique_individuals": ea.get("estimated_unique_individuals"),
             "extraction_guidance": ea.get("extraction_guidance"),
+            # Document schema from LLM Document Understanding (Phase 14b/14c)
+            "document_schema": doc_schema,
         })
 
     return results

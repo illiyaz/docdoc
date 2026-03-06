@@ -361,9 +361,17 @@ interface ProtocolDefaults {
   exportFields: string[]
 }
 
+/**
+ * Protocol defaults — entity types match backend PROTOCOL_DEFAULT_ENTITIES
+ * in app/core/constants.py (Phase 14a-ii).
+ */
 const PROTOCOL_DEFAULTS: Record<string, ProtocolDefaults> = {
   hipaa_breach_rule: {
-    entityTypes: ["US_SSN", "MRN", "NPI", "HICN", "MEDICAL_LICENSE"],
+    entityTypes: [
+      "PERSON", "US_SSN", "PHONE_NUMBER", "EMAIL_ADDRESS", "DATE_OF_BIRTH",
+      "MEDICAL_LICENSE", "NPI_NUMBER", "US_DRIVER_LICENSE", "US_PASSPORT",
+      "IP_ADDRESS", "URL",
+    ],
     confidence: 0.75,
     dedupAnchors: ["ssn", "name"],
     samplingRate: 10,
@@ -373,7 +381,10 @@ const PROTOCOL_DEFAULTS: Record<string, ProtocolDefaults> = {
     exportFields: [...DEFAULT_EXPORT_FIELDS],
   },
   gdpr_article_33: {
-    entityTypes: ["EMAIL_ADDRESS", "PHONE_NUMBER", "PERSON", "IBAN"],
+    entityTypes: [
+      "PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER", "IBAN_CODE", "IP_ADDRESS",
+      "DATE_OF_BIRTH", "LOCATION", "URL", "CRYPTO",
+    ],
     confidence: 0.70,
     dedupAnchors: ["email", "name", "phone"],
     samplingRate: 15,
@@ -383,7 +394,11 @@ const PROTOCOL_DEFAULTS: Record<string, ProtocolDefaults> = {
     exportFields: [...DEFAULT_EXPORT_FIELDS],
   },
   ccpa: {
-    entityTypes: ["US_SSN", "CREDIT_CARD", "US_BANK_NUMBER", "MRN"],
+    entityTypes: [
+      "PERSON", "US_SSN", "US_DRIVER_LICENSE", "US_PASSPORT", "EMAIL_ADDRESS",
+      "PHONE_NUMBER", "CREDIT_CARD", "US_BANK_NUMBER", "IP_ADDRESS",
+      "DATE_OF_BIRTH", "LOCATION", "URL",
+    ],
     confidence: 0.75,
     dedupAnchors: ["ssn", "email", "name"],
     samplingRate: 10,
@@ -393,7 +408,11 @@ const PROTOCOL_DEFAULTS: Record<string, ProtocolDefaults> = {
     exportFields: [...DEFAULT_EXPORT_FIELDS],
   },
   hitech: {
-    entityTypes: ["US_SSN", "MRN", "NPI", "HICN", "MEDICAL_LICENSE"],
+    entityTypes: [
+      "PERSON", "US_SSN", "PHONE_NUMBER", "EMAIL_ADDRESS", "DATE_OF_BIRTH",
+      "MEDICAL_LICENSE", "NPI_NUMBER", "US_DRIVER_LICENSE", "US_PASSPORT",
+      "IP_ADDRESS", "URL",
+    ],
     confidence: 0.75,
     dedupAnchors: ["ssn", "name"],
     samplingRate: 10,
@@ -403,7 +422,10 @@ const PROTOCOL_DEFAULTS: Record<string, ProtocolDefaults> = {
     exportFields: [...DEFAULT_EXPORT_FIELDS],
   },
   ferpa: {
-    entityTypes: ["PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER"],
+    entityTypes: [
+      "PERSON", "US_SSN", "EMAIL_ADDRESS", "PHONE_NUMBER", "DATE_OF_BIRTH",
+      "LOCATION", "IP_ADDRESS",
+    ],
     confidence: 0.70,
     dedupAnchors: ["name", "email"],
     samplingRate: 10,
@@ -413,7 +435,11 @@ const PROTOCOL_DEFAULTS: Record<string, ProtocolDefaults> = {
     exportFields: [...DEFAULT_EXPORT_FIELDS],
   },
   state_breach_generic: {
-    entityTypes: ["US_SSN", "CREDIT_CARD", "US_BANK_NUMBER", "US_DRIVER_LICENSE"],
+    entityTypes: [
+      "PERSON", "US_SSN", "US_DRIVER_LICENSE", "US_PASSPORT", "EMAIL_ADDRESS",
+      "PHONE_NUMBER", "CREDIT_CARD", "US_BANK_NUMBER", "DATE_OF_BIRTH",
+      "MEDICAL_LICENSE", "IP_ADDRESS", "LOCATION",
+    ],
     confidence: 0.75,
     dedupAnchors: ["ssn", "name", "address"],
     samplingRate: 10,
@@ -423,7 +449,9 @@ const PROTOCOL_DEFAULTS: Record<string, ProtocolDefaults> = {
     exportFields: [...DEFAULT_EXPORT_FIELDS],
   },
   bipa: {
-    entityTypes: ["US_SSN", "PERSON"],
+    entityTypes: [
+      "PERSON", "US_SSN", "EMAIL_ADDRESS", "PHONE_NUMBER",
+    ],
     confidence: 0.80,
     dedupAnchors: ["ssn", "name"],
     samplingRate: 15,
@@ -433,7 +461,10 @@ const PROTOCOL_DEFAULTS: Record<string, ProtocolDefaults> = {
     exportFields: [...DEFAULT_EXPORT_FIELDS],
   },
   dpdpa: {
-    entityTypes: ["PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER", "US_PASSPORT"],
+    entityTypes: [
+      "PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER", "DATE_OF_BIRTH",
+      "LOCATION", "IP_ADDRESS", "URL",
+    ],
     confidence: 0.70,
     dedupAnchors: ["email", "name", "phone"],
     samplingRate: 10,
@@ -1152,6 +1183,7 @@ function AnalysisReviewPanel({ jobId, onExtractionComplete }: { jobId: string; o
   })
   const [isExtracting, setIsExtracting] = useState(false)
   const [extractStages, setExtractStages] = useState<Record<string, { status: string; message: string }>>({})
+  const [reviewError, setReviewError] = useState<string | null>(null)
 
   if (isLoading) return <div className="text-sm text-muted-foreground">Loading analysis results...</div>
   if (!reviews?.length) return <div className="text-sm text-muted-foreground">No documents analyzed.</div>
@@ -1159,8 +1191,6 @@ function AnalysisReviewPanel({ jobId, onExtractionComplete }: { jobId: string; o
   const pendingCount = reviews.filter(r => r.review_status === "pending_review").length
   const approvedCount = reviews.filter(r => r.review_status === "approved" || r.review_status === "auto_approved").length
   const allReviewed = pendingCount === 0
-
-  const [reviewError, setReviewError] = useState<string | null>(null)
 
   const handleApprove = async (docId: string) => {
     try {
@@ -1295,6 +1325,50 @@ function AnalysisReviewPanel({ jobId, onExtractionComplete }: { jobId: string; o
 
           {doc.onset_page !== null && (
             <p className="text-xs text-muted-foreground">Content starts at page {doc.onset_page + 1}</p>
+          )}
+
+          {/* Document Understanding (Phase 14b) */}
+          {doc.document_schema && (
+            <div className="bg-indigo-50 border border-indigo-200 rounded p-2 space-y-1.5">
+              <div className="flex items-center gap-2">
+                <p className="text-xs font-medium text-indigo-800">Document Understanding</p>
+                {doc.document_schema.document_type && (
+                  <span className="text-[10px] bg-indigo-200 text-indigo-900 px-1.5 py-0.5 rounded">{doc.document_schema.document_type}</span>
+                )}
+                {doc.document_schema.document_subtype && (
+                  <span className="text-[10px] bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded">{doc.document_schema.document_subtype}</span>
+                )}
+              </div>
+              {doc.document_schema.issuing_entity && (
+                <p className="text-[11px] text-indigo-700">Issuer: {doc.document_schema.issuing_entity}</p>
+              )}
+              {doc.document_schema.field_map?.length > 0 && (
+                <div>
+                  <p className="text-[10px] font-medium text-indigo-700 mb-0.5">Fields ({doc.document_schema.field_map.length}):</p>
+                  <div className="flex flex-wrap gap-1">
+                    {doc.document_schema.field_map.slice(0, 8).map((f: { label: string; semantic_type: string; is_pii: boolean }, fi: number) => (
+                      <span key={fi} className={`text-[10px] px-1.5 py-0.5 rounded border ${f.is_pii ? 'bg-red-50 border-red-200 text-red-700' : 'bg-gray-50 border-gray-200 text-gray-600'}`}>
+                        {f.label} → {f.semantic_type}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {doc.document_schema.tables?.length > 0 && (
+                <div>
+                  <p className="text-[10px] font-medium text-indigo-700 mb-0.5">Tables ({doc.document_schema.tables.length}):</p>
+                  {doc.document_schema.tables.map((t: { table_context: string; has_pii_columns: boolean; columns: { header: string }[] }, ti: number) => (
+                    <div key={ti} className="text-[10px] text-indigo-600">
+                      {t.table_context} — {t.columns.map((c: { header: string }) => c.header).join(", ")}
+                      {t.has_pii_columns ? " (contains PII)" : " (no PII)"}
+                    </div>
+                  ))}
+                </div>
+              )}
+              {doc.document_schema.extraction_notes && (
+                <p className="text-[10px] text-indigo-600 italic">{doc.document_schema.extraction_notes}</p>
+              )}
+            </div>
           )}
 
           {/* LLM Document Summary */}
@@ -1925,6 +1999,7 @@ function CatalogTab({
         },
       )
       setRunResult(result)
+      setForceExpandUpload(false)
       // Refresh catalog + jobs
       queryClient.invalidateQueries({ queryKey: ["catalog-summary", projectId] })
       queryClient.invalidateQueries({ queryKey: ["project-jobs", projectId] })
@@ -1941,6 +2016,29 @@ function CatalogTab({
   const supportedCount = selectedFiles.filter((f) => isCatalogSupported(f.name)).length
   const totalSize = selectedFiles.reduce((sum, f) => sum + f.size, 0)
   const hasSource = !!uploadResult || serverPath.trim() !== ""
+
+  // Allow user to re-expand the upload zone from "complete" state
+  const [forceExpandUpload, setForceExpandUpload] = useState(false)
+
+  // State-driven layout: empty → uploaded → running → complete
+  type CatalogState = "empty" | "uploaded" | "running" | "complete"
+  const catalogState: CatalogState = isRunning
+    ? "running"
+    : forceExpandUpload
+      ? (hasSource ? "uploaded" : "empty")
+      : catalog && catalog.total_documents > 0
+        ? "complete"
+        : hasSource
+          ? "uploaded"
+          : "empty"
+
+  // Auto-scroll ref for the run-job section
+  const runJobRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (catalogState === "uploaded" && runJobRef.current) {
+      runJobRef.current.scrollIntoView({ behavior: "smooth", block: "nearest" })
+    }
+  }, [catalogState])
 
   // ---------------------------------------------------------------------------
   // Render
@@ -1965,485 +2063,548 @@ function CatalogTab({
 
   return (
     <div className="space-y-4">
-      {/* ----------------------------------------------------------------- */}
-      {/* Upload Zone */}
-      {/* ----------------------------------------------------------------- */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base flex items-center gap-2">
-            <Upload className="h-4 w-4" />
-            Upload Documents
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {uploadError && (
-            <div className="rounded-md bg-red-50 border border-red-200 px-4 py-2 text-sm text-red-800">
-              {uploadError}
-            </div>
-          )}
-
-          {/* Drop zone */}
-          {!uploadResult && (
-            <div
-              onDragOver={handleDragOver}
-              onDrop={handleDrop}
-              className="border-2 border-dashed rounded-lg p-6 text-center hover:border-primary/50 transition-colors"
-            >
-              <FolderOpen className="h-8 w-8 mx-auto text-muted-foreground mb-2" />
-              <p className="text-sm text-muted-foreground mb-1">
-                Drag & drop files or a folder here
-              </p>
-              <p className="text-xs text-muted-foreground mb-3">
-                Supported: PDF, XLSX, XLS, DOCX, CSV, HTML, XML, EML, MSG, Parquet, Avro
-              </p>
-              <div className="flex gap-3 justify-center">
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={isUploading}
-                  className="rounded-md border px-3 py-1.5 text-sm font-medium hover:bg-accent"
-                >
-                  Select Files
-                </button>
-                <button
-                  type="button"
-                  onClick={() => folderInputRef.current?.click()}
-                  disabled={isUploading}
-                  className="rounded-md border px-3 py-1.5 text-sm font-medium hover:bg-accent"
-                >
-                  Select Folder
-                </button>
+      {/* ================================================================= */}
+      {/* Upload Zone — full in empty/uploaded, collapsed in running/complete */}
+      {/* ================================================================= */}
+      {(catalogState === "empty" || catalogState === "uploaded") ? (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2">
+              <Upload className="h-4 w-4" />
+              Upload Documents
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {uploadError && (
+              <div className="rounded-md bg-red-50 border border-red-200 px-4 py-2 text-sm text-red-800">
+                {uploadError}
               </div>
-              <input
-                ref={fileInputRef}
-                type="file"
-                multiple
-                className="hidden"
-                onChange={(e) => e.target.files && addFiles(e.target.files)}
-              />
-              <input
-                ref={folderInputRef}
-                type="file"
-                // @ts-expect-error webkitdirectory is not in React types
-                webkitdirectory=""
-                className="hidden"
-                onChange={(e) => e.target.files && addFiles(e.target.files)}
-              />
-            </div>
-          )}
+            )}
 
-          {/* File list */}
-          {selectedFiles.length > 0 && !uploadResult && (
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <p className="text-sm font-medium">
-                  {selectedFiles.length} file{selectedFiles.length !== 1 ? "s" : ""} selected
-                  ({supportedCount} supported) -- {formatFileSize(totalSize)}
+            {/* Drop zone — only when no upload result yet */}
+            {!uploadResult && (
+              <div
+                onDragOver={handleDragOver}
+                onDrop={handleDrop}
+                className="border-2 border-dashed rounded-lg p-6 text-center hover:border-primary/50 transition-colors"
+              >
+                <FolderOpen className="h-8 w-8 mx-auto text-muted-foreground mb-2" />
+                <p className="text-sm text-muted-foreground mb-1">
+                  Drag & drop files or a folder here
                 </p>
-                <button
-                  onClick={clearFiles}
-                  disabled={isUploading}
-                  className="text-xs text-muted-foreground hover:text-foreground"
-                >
-                  Clear all
-                </button>
-              </div>
-              <div className="max-h-36 overflow-y-auto rounded-md border divide-y">
-                {selectedFiles.map((f, i) => {
-                  const supported = isCatalogSupported(f.name)
-                  return (
-                    <div
-                      key={`${f.name}-${i}`}
-                      className={`flex items-center justify-between px-3 py-1.5 text-sm ${
-                        supported ? "" : "opacity-40"
-                      }`}
-                    >
-                      <div className="flex items-center gap-2 min-w-0">
-                        <FileText className="h-3.5 w-3.5 shrink-0" />
-                        <span className="truncate">{f.name}</span>
-                        <span className="text-xs text-muted-foreground shrink-0">
-                          {formatFileSize(f.size)}
-                        </span>
-                        {!supported && (
-                          <span className="text-xs text-muted-foreground shrink-0">(skipped)</span>
-                        )}
-                      </div>
-                      <button
-                        onClick={() => removeFile(i)}
-                        disabled={isUploading}
-                        className="text-muted-foreground hover:text-foreground shrink-0 ml-2"
-                      >
-                        <X className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
-          )}
-
-          {/* Upload progress */}
-          {isUploading && (
-            <div className="space-y-2">
-              <div className="flex justify-between text-sm">
-                <span>Uploading...</span>
-                <span>{uploadProgress}%</span>
-              </div>
-              <div className="w-full bg-secondary rounded-full h-2">
-                <div
-                  className="bg-primary h-2 rounded-full transition-all"
-                  style={{ width: `${uploadProgress}%` }}
+                <p className="text-xs text-muted-foreground mb-3">
+                  Supported: PDF, XLSX, XLS, DOCX, CSV, HTML, XML, EML, MSG, Parquet, Avro
+                </p>
+                <div className="flex gap-3 justify-center">
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={isUploading}
+                    className="rounded-md border px-3 py-1.5 text-sm font-medium hover:bg-accent"
+                  >
+                    Select Files
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => folderInputRef.current?.click()}
+                    disabled={isUploading}
+                    className="rounded-md border px-3 py-1.5 text-sm font-medium hover:bg-accent"
+                  >
+                    Select Folder
+                  </button>
+                </div>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  className="hidden"
+                  onChange={(e) => e.target.files && addFiles(e.target.files)}
+                />
+                <input
+                  ref={folderInputRef}
+                  type="file"
+                  // @ts-expect-error webkitdirectory is not in React types
+                  webkitdirectory=""
+                  className="hidden"
+                  onChange={(e) => e.target.files && addFiles(e.target.files)}
                 />
               </div>
-            </div>
-          )}
+            )}
 
-          {/* Upload complete summary */}
-          {uploadResult && (
-            <div className="rounded-md bg-green-50 border border-green-200 px-4 py-3 text-sm text-green-800">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 font-medium">
-                  <CheckCircle className="h-4 w-4" />
-                  Upload complete
-                </div>
-                <button
-                  onClick={clearFiles}
-                  className="text-xs text-green-600 hover:text-green-800 underline"
-                >
-                  Clear & upload new
-                </button>
-              </div>
-              <p className="mt-1">
-                {uploadResult.file_count} file{uploadResult.file_count !== 1 ? "s" : ""} ready
-                ({formatFileSize(uploadResult.total_size_bytes)})
-              </p>
-            </div>
-          )}
-
-          {/* Upload button */}
-          {selectedFiles.length > 0 && !uploadResult && !isUploading && (
-            <button
-              type="button"
-              onClick={handleUpload}
-              disabled={supportedCount === 0}
-              className="w-full rounded-md bg-primary text-primary-foreground px-4 py-2 text-sm font-medium disabled:opacity-50 flex items-center justify-center gap-2"
-            >
-              <Upload className="h-4 w-4" />
-              Upload {supportedCount} File{supportedCount !== 1 ? "s" : ""}
-            </button>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* ----------------------------------------------------------------- */}
-      {/* Link Server Path (Air-gap deployments) */}
-      {/* ----------------------------------------------------------------- */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base flex items-center gap-2">
-            <Server className="h-4 w-4" />
-            Link Server Path
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <p className="text-xs text-muted-foreground">
-            For air-gapped deployments where files are already on the server.
-          </p>
-          {scanError && (
-            <div className="rounded-md bg-red-50 border border-red-200 px-4 py-2 text-sm text-red-800">
-              {scanError}
-            </div>
-          )}
-          <div className="flex gap-2">
-            <input
-              type="text"
-              placeholder="/data/breach_documents"
-              value={serverPath}
-              onChange={(e) => {
-                setServerPath(e.target.value)
-                setScanResult(null)
-              }}
-              className="flex-1 rounded-md border bg-background px-3 py-2 text-sm"
-            />
-            <button
-              onClick={handleScan}
-              disabled={!serverPath.trim() || isScanning}
-              className="rounded-md border px-3 py-2 text-sm font-medium hover:bg-accent disabled:opacity-50 flex items-center gap-1.5"
-            >
-              {isScanning ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <Search className="h-3.5 w-3.5" />
-              )}
-              Scan
-            </button>
-          </div>
-          {scanResult && (
-            <div className="rounded-md bg-green-50 border border-green-200 px-3 py-2 text-sm text-green-800 flex items-center gap-2">
-              <CheckCircle className="h-3.5 w-3.5" />
-              {scanResult}
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* ----------------------------------------------------------------- */}
-      {/* Run New Job */}
-      {/* ----------------------------------------------------------------- */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base flex items-center gap-2">
-            <Play className="h-4 w-4" />
-            Run New Job
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {runError && (
-            <div className="rounded-md bg-red-50 border border-red-200 px-4 py-2 text-sm text-red-800">
-              {runError}
-            </div>
-          )}
-          {runResult && (
-            <div className="rounded-md bg-green-50 border border-green-200 px-4 py-3 text-sm text-green-800">
-              <div className="flex items-center gap-2 font-medium mb-1">
-                <CheckCircle className="h-4 w-4" />
-                Job Complete
-              </div>
-              <div className="grid grid-cols-2 gap-2 mt-2">
-                <div>
-                  <span className="text-xs text-green-600">Subjects found:</span>{" "}
-                  <span className="font-medium">{runResult.subjects_found}</span>
-                </div>
-                <div>
-                  <span className="text-xs text-green-600">Notification required:</span>{" "}
-                  <span className="font-medium">{runResult.notification_required}</span>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {!runResult && (
-            <>
-              <p className="text-xs text-muted-foreground">
-                {hasSource
-                  ? "Select a protocol and run the pipeline on the uploaded/linked data."
-                  : "Upload files or link a server path above first, then select a protocol."}
-              </p>
-
-              {/* Pipeline Mode Toggle */}
-              <div className="flex items-center gap-3">
-                <label className="text-sm font-medium">Pipeline Mode:</label>
-                <div className="flex rounded-md border">
+            {/* File list (pre-upload) */}
+            {selectedFiles.length > 0 && !uploadResult && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-medium">
+                    {selectedFiles.length} file{selectedFiles.length !== 1 ? "s" : ""} selected
+                    ({supportedCount} supported) -- {formatFileSize(totalSize)}
+                  </p>
                   <button
-                    className={`px-3 py-1.5 text-xs font-medium rounded-l-md ${pipelineMode === "two_phase" ? "bg-primary text-primary-foreground" : "bg-background hover:bg-muted"}`}
-                    onClick={() => setPipelineMode("two_phase")}
+                    onClick={clearFiles}
+                    disabled={isUploading}
+                    className="text-xs text-muted-foreground hover:text-foreground"
                   >
-                    Analyze First
-                  </button>
-                  <button
-                    className={`px-3 py-1.5 text-xs font-medium rounded-r-md ${pipelineMode === "full" ? "bg-primary text-primary-foreground" : "bg-background hover:bg-muted"}`}
-                    onClick={() => setPipelineMode("full")}
-                  >
-                    Full Pipeline
+                    Clear all
                   </button>
                 </div>
-              </div>
-              {pipelineMode === "two_phase" && (
-                <p className="text-xs text-muted-foreground">
-                  Analyze First: runs discovery, cataloging, and structure analysis, then pauses for human review before full PII extraction.
-                </p>
-              )}
-
-              <div className="space-y-1.5">
-                <label className="text-sm font-medium">Protocol</label>
-                <select
-                  value={runProtocolId}
-                  onChange={(e) => { setRunProtocolId(e.target.value); setRunProtocolConfigId(null) }}
-                  className="w-full rounded-md border bg-background px-3 py-2 text-sm"
-                >
-                  <option value="">Select a protocol...</option>
-                  {(baseProtocols ?? []).map((p) => (
-                    <option key={p.protocol_id} value={p.protocol_id}>
-                      {p.name} -- {p.jurisdiction} ({p.notification_deadline_days}d deadline)
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {protocols.length > 0 && (
-                <div className="space-y-1.5">
-                  <label className="text-xs font-medium text-muted-foreground">
-                    Or use a project protocol config:
-                  </label>
-                  <div className="flex flex-wrap gap-1.5">
-                    {protocols
-                      .filter((pc) => pc.base_protocol_id)
-                      .map((pc) => (
+                <div className="max-h-36 overflow-y-auto rounded-md border divide-y">
+                  {selectedFiles.map((f, i) => {
+                    const supported = isCatalogSupported(f.name)
+                    return (
+                      <div
+                        key={`${f.name}-${i}`}
+                        className={`flex items-center justify-between px-3 py-1.5 text-sm ${
+                          supported ? "" : "opacity-40"
+                        }`}
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <FileText className="h-3.5 w-3.5 shrink-0" />
+                          <span className="truncate">{f.name}</span>
+                          <span className="text-xs text-muted-foreground shrink-0">
+                            {formatFileSize(f.size)}
+                          </span>
+                          {!supported && (
+                            <span className="text-xs text-muted-foreground shrink-0">(skipped)</span>
+                          )}
+                        </div>
                         <button
-                          key={pc.id}
-                          onClick={() => {
-                            if (pc.base_protocol_id) {
-                              // Find matching base protocol from the YAML registry
-                              const match = baseProtocols?.find(
-                                (bp) => bp.protocol_id === pc.base_protocol_id
-                                  || bp.protocol_id.startsWith(pc.base_protocol_id!)
-                              )
-                              setRunProtocolId(match?.protocol_id ?? pc.base_protocol_id)
-                              setRunProtocolConfigId(pc.id)
-                            }
-                          }}
-                          className={`rounded-md border px-2.5 py-1 text-xs font-medium hover:bg-accent ${
-                            runProtocolConfigId === pc.id
-                              ? "bg-primary/10 border-primary text-primary"
-                              : ""
-                          }`}
+                          onClick={() => removeFile(i)}
+                          disabled={isUploading}
+                          className="text-muted-foreground hover:text-foreground shrink-0 ml-2"
                         >
-                          {pc.name}
+                          <X className="h-3.5 w-3.5" />
                         </button>
-                      ))}
-                  </div>
+                      </div>
+                    )
+                  })}
                 </div>
-              )}
+              </div>
+            )}
 
+            {/* Upload progress */}
+            {isUploading && (
+              <div className="space-y-2">
+                <div className="flex justify-between text-sm">
+                  <span>Uploading...</span>
+                  <span>{uploadProgress}%</span>
+                </div>
+                <div className="w-full bg-secondary rounded-full h-2">
+                  <div
+                    className="bg-primary h-2 rounded-full transition-all"
+                    style={{ width: `${uploadProgress}%` }}
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Upload complete summary */}
+            {uploadResult && (
+              <div className="rounded-md bg-green-50 border border-green-200 px-4 py-3 text-sm text-green-800">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 font-medium">
+                    <CheckCircle className="h-4 w-4" />
+                    {uploadResult.file_count} file{uploadResult.file_count !== 1 ? "s" : ""} uploaded, ready for analysis
+                  </div>
+                  <button
+                    onClick={clearFiles}
+                    className="text-xs text-green-600 hover:text-green-800 underline"
+                  >
+                    Clear & upload new
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Upload button */}
+            {selectedFiles.length > 0 && !uploadResult && !isUploading && (
               <button
-                onClick={handleRunJob}
-                disabled={!runProtocolId || !hasSource || isRunning}
+                type="button"
+                onClick={handleUpload}
+                disabled={supportedCount === 0}
                 className="w-full rounded-md bg-primary text-primary-foreground px-4 py-2 text-sm font-medium disabled:opacity-50 flex items-center justify-center gap-2"
               >
-                {isRunning ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    {pipelineMode === "two_phase" ? "Analyzing..." : "Running Pipeline..."}
-                  </>
-                ) : (
-                  <>
-                    <Play className="h-4 w-4" />
-                    {pipelineMode === "two_phase" ? "Analyze Documents" : "Run Full Pipeline"}
-                  </>
-                )}
+                <Upload className="h-4 w-4" />
+                Upload {supportedCount} File{supportedCount !== 1 ? "s" : ""}
               </button>
-            </>
-          )}
-        </CardContent>
-      </Card>
+            )}
+          </CardContent>
+        </Card>
+      ) : (
+        /* Collapsed upload zone for running/complete states */
+        <div className="rounded-md border bg-muted/30 px-4 py-3 flex items-center justify-between">
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Upload className="h-4 w-4" />
+            {uploadResult
+              ? `${uploadResult.file_count} file${uploadResult.file_count !== 1 ? "s" : ""} uploaded`
+              : serverPath.trim()
+                ? `Server path: ${serverPath.trim()}`
+                : `${catalog.total_documents} document${catalog.total_documents !== 1 ? "s" : ""} cataloged`}
+          </div>
+          <button
+            onClick={() => { clearFiles(); setForceExpandUpload(true) }}
+            className="text-xs text-primary hover:underline"
+          >
+            Clear & upload new
+          </button>
+        </div>
+      )}
 
-      {/* ----------------------------------------------------------------- */}
-      {/* Link Existing Job */}
-      {/* ----------------------------------------------------------------- */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base flex items-center justify-between">
-            <span className="flex items-center gap-2">
-              <LinkIcon className="h-4 w-4" />
-              Link Existing Job
-            </span>
-            <button
-              onClick={() => setShowLinkJob(!showLinkJob)}
-              className="text-xs font-medium text-primary hover:underline"
-            >
-              {showLinkJob ? "Hide" : "Show"}
-            </button>
-          </CardTitle>
-        </CardHeader>
-        {showLinkJob && (
+      {/* ================================================================= */}
+      {/* Link Server Path — only in empty/uploaded states */}
+      {/* ================================================================= */}
+      {(catalogState === "empty" || catalogState === "uploaded") && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2">
+              <Server className="h-4 w-4" />
+              Link Server Path
+            </CardTitle>
+          </CardHeader>
           <CardContent className="space-y-3">
             <p className="text-xs text-muted-foreground">
-              Associate an existing job (by Job ID) with this project for tracking.
+              For air-gapped deployments where files are already on the server.
             </p>
-            {linkError && (
+            {scanError && (
               <div className="rounded-md bg-red-50 border border-red-200 px-4 py-2 text-sm text-red-800">
-                {linkError}
+                {scanError}
               </div>
             )}
             <div className="flex gap-2">
               <input
                 type="text"
-                placeholder="Enter Job ID..."
-                value={linkJobId}
-                onChange={(e) => setLinkJobId(e.target.value)}
-                className="flex-1 rounded-md border bg-background px-3 py-2 text-sm font-mono"
+                placeholder="/data/breach_documents"
+                value={serverPath}
+                onChange={(e) => {
+                  setServerPath(e.target.value)
+                  setScanResult(null)
+                }}
+                className="flex-1 rounded-md border bg-background px-3 py-2 text-sm"
               />
               <button
-                onClick={() => {
-                  if (!linkJobId.trim()) return
-                  setLinkError(null)
-                  // Job linking would update the ingestion_run's project_id in a real implementation.
-                  // For now, show the intent.
-                  setLinkError(null)
-                  setLinkJobId("")
-                  queryClient.invalidateQueries({ queryKey: ["catalog-summary", projectId] })
-                }}
-                disabled={!linkJobId.trim()}
-                className="rounded-md bg-primary text-primary-foreground px-3 py-2 text-sm font-medium disabled:opacity-50 flex items-center gap-1.5"
+                onClick={handleScan}
+                disabled={!serverPath.trim() || isScanning}
+                className="rounded-md border px-3 py-2 text-sm font-medium hover:bg-accent disabled:opacity-50 flex items-center gap-1.5"
               >
-                <LinkIcon className="h-3.5 w-3.5" />
-                Link
+                {isScanning ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Search className="h-3.5 w-3.5" />
+                )}
+                Scan
               </button>
             </div>
+            {scanResult && (
+              <div className="rounded-md bg-green-50 border border-green-200 px-3 py-2 text-sm text-green-800 flex items-center gap-2">
+                <CheckCircle className="h-3.5 w-3.5" />
+                {scanResult}
+              </div>
+            )}
           </CardContent>
-        )}
-      </Card>
+        </Card>
+      )}
 
-      {/* ----------------------------------------------------------------- */}
-      {/* Catalog Summary Stats */}
-      {/* ----------------------------------------------------------------- */}
+      {/* ================================================================= */}
+      {/* Run Analysis — shown in uploaded state prominently, or complete */}
+      {/* ================================================================= */}
+      {catalogState === "running" && (
+        <Card>
+          <CardContent className="py-6">
+            <div className="flex items-center justify-center gap-3 text-sm">
+              <Loader2 className="h-5 w-5 animate-spin text-primary" />
+              <span>Analysis in progress... Check the <span className="font-medium text-primary">Jobs</span> tab for details.</span>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {(catalogState === "uploaded" || catalogState === "complete") && (
+        <Card ref={runJobRef}>
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2">
+              <Play className="h-4 w-4" />
+              {catalogState === "uploaded" ? "Run Analysis" : "Run New Job"}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {runError && (
+              <div className="rounded-md bg-red-50 border border-red-200 px-4 py-2 text-sm text-red-800">
+                {runError}
+              </div>
+            )}
+
+            {/* Previous run result — collapsed in complete state */}
+            {runResult && catalogState === "complete" && (
+              <details className="rounded-md border">
+                <summary className="px-4 py-2 text-sm font-medium cursor-pointer hover:bg-muted/50 flex items-center gap-2">
+                  <CheckCircle className="h-3.5 w-3.5 text-green-600" />
+                  Previous Result: {runResult.subjects_found} subjects, {runResult.notification_required} require notification
+                </summary>
+                <div className="px-4 py-2 border-t text-sm text-muted-foreground">
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>Subjects found: <span className="font-medium text-foreground">{runResult.subjects_found}</span></div>
+                    <div>Notification required: <span className="font-medium text-foreground">{runResult.notification_required}</span></div>
+                  </div>
+                </div>
+              </details>
+            )}
+
+            {/* Run result shown prominently only in uploaded state */}
+            {runResult && catalogState === "uploaded" && (
+              <div className="rounded-md bg-green-50 border border-green-200 px-4 py-3 text-sm text-green-800">
+                <div className="flex items-center gap-2 font-medium mb-1">
+                  <CheckCircle className="h-4 w-4" />
+                  Job Complete
+                </div>
+                <div className="grid grid-cols-2 gap-2 mt-2">
+                  <div>
+                    <span className="text-xs text-green-600">Subjects found:</span>{" "}
+                    <span className="font-medium">{runResult.subjects_found}</span>
+                  </div>
+                  <div>
+                    <span className="text-xs text-green-600">Notification required:</span>{" "}
+                    <span className="font-medium">{runResult.notification_required}</span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {!runResult && (
+              <>
+                <p className="text-xs text-muted-foreground">
+                  {catalogState === "uploaded"
+                    ? "Select a protocol and run analysis on the uploaded data."
+                    : "Select a protocol and run the pipeline on new or existing data."}
+                </p>
+
+                {/* Pipeline Mode Toggle */}
+                <div className="flex items-center gap-3">
+                  <label className="text-sm font-medium">Pipeline Mode:</label>
+                  <div className="flex rounded-md border">
+                    <button
+                      className={`px-3 py-1.5 text-xs font-medium rounded-l-md ${pipelineMode === "two_phase" ? "bg-primary text-primary-foreground" : "bg-background hover:bg-muted"}`}
+                      onClick={() => setPipelineMode("two_phase")}
+                    >
+                      Analyze First
+                    </button>
+                    <button
+                      className={`px-3 py-1.5 text-xs font-medium rounded-r-md ${pipelineMode === "full" ? "bg-primary text-primary-foreground" : "bg-background hover:bg-muted"}`}
+                      onClick={() => setPipelineMode("full")}
+                    >
+                      Full Pipeline
+                    </button>
+                  </div>
+                </div>
+                {pipelineMode === "two_phase" && (
+                  <p className="text-xs text-muted-foreground">
+                    Analyze First: runs discovery, cataloging, and structure analysis, then pauses for human review before full PII extraction.
+                  </p>
+                )}
+
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium">Protocol</label>
+                  <select
+                    value={runProtocolId}
+                    onChange={(e) => { setRunProtocolId(e.target.value); setRunProtocolConfigId(null) }}
+                    className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+                  >
+                    <option value="">Select a protocol...</option>
+                    {(baseProtocols ?? []).map((p) => (
+                      <option key={p.protocol_id} value={p.protocol_id}>
+                        {p.name} -- {p.jurisdiction} ({p.notification_deadline_days}d deadline)
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {protocols.length > 0 && (
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-medium text-muted-foreground">
+                      Or use a project protocol config:
+                    </label>
+                    <div className="flex flex-wrap gap-1.5">
+                      {protocols
+                        .filter((pc) => pc.base_protocol_id)
+                        .map((pc) => (
+                          <button
+                            key={pc.id}
+                            onClick={() => {
+                              if (pc.base_protocol_id) {
+                                const match = baseProtocols?.find(
+                                  (bp) => bp.protocol_id === pc.base_protocol_id
+                                    || bp.protocol_id.startsWith(pc.base_protocol_id!)
+                                )
+                                setRunProtocolId(match?.protocol_id ?? pc.base_protocol_id)
+                                setRunProtocolConfigId(pc.id)
+                              }
+                            }}
+                            className={`rounded-md border px-2.5 py-1 text-xs font-medium hover:bg-accent ${
+                              runProtocolConfigId === pc.id
+                                ? "bg-primary/10 border-primary text-primary"
+                                : ""
+                            }`}
+                          >
+                            {pc.name}
+                          </button>
+                        ))}
+                    </div>
+                  </div>
+                )}
+
+                <button
+                  onClick={handleRunJob}
+                  disabled={!runProtocolId || !hasSource || isRunning}
+                  className="w-full rounded-md bg-primary text-primary-foreground px-4 py-2 text-sm font-medium disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {isRunning ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      {pipelineMode === "two_phase" ? "Analyzing..." : "Running Pipeline..."}
+                    </>
+                  ) : (
+                    <>
+                      <Play className="h-4 w-4" />
+                      {pipelineMode === "two_phase" ? "Analyze Documents" : "Run Full Pipeline"}
+                    </>
+                  )}
+                </button>
+              </>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* ================================================================= */}
+      {/* Link Existing Job — collapsed, only in uploaded/complete */}
+      {/* ================================================================= */}
+      {(catalogState === "uploaded" || catalogState === "complete") && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base flex items-center justify-between">
+              <span className="flex items-center gap-2">
+                <LinkIcon className="h-4 w-4" />
+                Link Existing Job
+              </span>
+              <button
+                onClick={() => setShowLinkJob(!showLinkJob)}
+                className="text-xs font-medium text-primary hover:underline"
+              >
+                {showLinkJob ? "Hide" : "Show"}
+              </button>
+            </CardTitle>
+          </CardHeader>
+          {showLinkJob && (
+            <CardContent className="space-y-3">
+              <p className="text-xs text-muted-foreground">
+                Associate an existing job (by Job ID) with this project for tracking.
+              </p>
+              {linkError && (
+                <div className="rounded-md bg-red-50 border border-red-200 px-4 py-2 text-sm text-red-800">
+                  {linkError}
+                </div>
+              )}
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  placeholder="Enter Job ID..."
+                  value={linkJobId}
+                  onChange={(e) => setLinkJobId(e.target.value)}
+                  className="flex-1 rounded-md border bg-background px-3 py-2 text-sm font-mono"
+                />
+                <button
+                  onClick={() => {
+                    if (!linkJobId.trim()) return
+                    setLinkError(null)
+                    setLinkJobId("")
+                    queryClient.invalidateQueries({ queryKey: ["catalog-summary", projectId] })
+                  }}
+                  disabled={!linkJobId.trim()}
+                  className="rounded-md bg-primary text-primary-foreground px-3 py-2 text-sm font-medium disabled:opacity-50 flex items-center gap-1.5"
+                >
+                  <LinkIcon className="h-3.5 w-3.5" />
+                  Link
+                </button>
+              </div>
+            </CardContent>
+          )}
+        </Card>
+      )}
+
+      {/* ================================================================= */}
+      {/* Document Catalog — content varies by state */}
+      {/* ================================================================= */}
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Document Catalog</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid grid-cols-3 gap-4 text-center">
-            <div>
-              <p className="text-2xl font-bold">{catalog.total_documents}</p>
-              <p className="text-xs text-muted-foreground">Total Documents</p>
-            </div>
-            <div>
-              <p className="text-2xl font-bold text-green-600">{catalog.auto_processable}</p>
-              <p className="text-xs text-muted-foreground">Auto-processable</p>
-            </div>
-            <div>
-              <p className="text-2xl font-bold text-amber-600">{catalog.manual_review}</p>
-              <p className="text-xs text-muted-foreground">Manual Review</p>
-            </div>
-          </div>
-
-          {Object.keys(catalog.by_file_type).length > 0 && (
-            <div>
-              <p className="text-xs font-medium text-muted-foreground mb-2">By File Type</p>
-              <div className="flex flex-wrap gap-1.5">
-                {Object.entries(catalog.by_file_type).map(([type, count]) => (
-                  <Badge key={type} variant="secondary" className="text-xs">
-                    {type}: {count}
-                  </Badge>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Structure class breakdown */}
-          {Object.keys(catalog.by_structure_class).length > 0 && (
-            <div>
-              <p className="text-xs font-medium text-muted-foreground mb-2">By Structure Class</p>
-              <div className="grid grid-cols-2 gap-2">
-                {Object.entries(catalog.by_structure_class).map(([cls, count]) => (
-                  <div
-                    key={cls}
-                    className={`rounded-md border px-3 py-2 flex items-center justify-between ${
-                      STRUCTURE_CLASS_STYLES[cls] ?? "bg-gray-50 border-gray-200"
-                    }`}
-                  >
-                    <span className="text-xs font-medium capitalize">{cls}</span>
-                    <span className="text-sm font-bold">{count}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {catalog.total_documents === 0 && (
+          {catalogState === "empty" && (
             <p className="text-sm text-muted-foreground text-center py-4">
-              No documents cataloged yet. Upload files or run a job above to populate the catalog.
+              No documents yet. Upload files above to get started.
             </p>
+          )}
+
+          {catalogState === "uploaded" && catalog.total_documents === 0 && (
+            <p className="text-sm text-muted-foreground text-center py-4">
+              Upload complete. Run analysis to catalog documents.
+            </p>
+          )}
+
+          {catalogState === "running" && (
+            <div className="flex items-center justify-center gap-2 py-4 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Cataloging in progress...
+            </div>
+          )}
+
+          {(catalogState === "complete" || (catalog.total_documents > 0 && catalogState !== "running")) && (
+            <>
+              <div className="grid grid-cols-3 gap-4 text-center">
+                <div>
+                  <p className="text-2xl font-bold">{catalog.total_documents}</p>
+                  <p className="text-xs text-muted-foreground">Total Documents</p>
+                </div>
+                <div>
+                  <p className="text-2xl font-bold text-green-600">{catalog.auto_processable}</p>
+                  <p className="text-xs text-muted-foreground">Auto-processable</p>
+                </div>
+                <div>
+                  <p className="text-2xl font-bold text-amber-600">{catalog.manual_review}</p>
+                  <p className="text-xs text-muted-foreground">Manual Review</p>
+                </div>
+              </div>
+
+              {Object.keys(catalog.by_file_type).length > 0 && (
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground mb-2">By File Type</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {Object.entries(catalog.by_file_type).map(([type, count]) => (
+                      <Badge key={type} variant="secondary" className="text-xs">
+                        {type}: {count}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {Object.keys(catalog.by_structure_class).length > 0 && (
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground mb-2">By Structure Class</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    {Object.entries(catalog.by_structure_class).map(([cls, count]) => (
+                      <div
+                        key={cls}
+                        className={`rounded-md border px-3 py-2 flex items-center justify-between ${
+                          STRUCTURE_CLASS_STYLES[cls] ?? "bg-gray-50 border-gray-200"
+                        }`}
+                      >
+                        <span className="text-xs font-medium capitalize">{cls}</span>
+                        <span className="text-sm font-bold">{count}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
           )}
         </CardContent>
       </Card>

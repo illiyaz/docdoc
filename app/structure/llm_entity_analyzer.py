@@ -54,14 +54,22 @@ class LLMEntityAnalyzer:
         structure_analysis: dict | None,
         document_id: str,
         onset_page: int | str = 0,
+        document_schema: dict | None = None,
     ) -> EntityRelationshipAnalysis | None:
         """Run LLM entity relationship analysis.
+
+        Parameters
+        ----------
+        document_schema:
+            Optional DocumentSchema dict (from Phase 14b LLM Document
+            Understanding).  When provided, pre-seeds the analysis with
+            schema context for better entity grouping.
 
         Returns ``None`` if LLM is disabled or the call fails.
         Never raises — failures are logged and swallowed.
         """
         try:
-            return self._do_analyze(blocks, sample_detections, structure_analysis, document_id, onset_page)
+            return self._do_analyze(blocks, sample_detections, structure_analysis, document_id, onset_page, document_schema)
         except LLMDisabledError:
             logger.debug("LLM assist is disabled; skipping entity analysis")
             return None
@@ -76,6 +84,7 @@ class LLMEntityAnalyzer:
         structure_analysis: dict | None,
         document_id: str,
         onset_page: int | str,
+        document_schema: dict | None = None,
     ) -> EntityRelationshipAnalysis:
         """Internal analysis logic — may raise."""
         settings = get_settings()
@@ -98,6 +107,22 @@ class LLMEntityAnalyzer:
                 structure_summary = f"Document type: {doc_type}. Sections: {', '.join(section_types)}"
             else:
                 structure_summary = f"Document type: {doc_type}"
+
+        # Enrich with DocumentSchema context (Phase 14c)
+        if document_schema:
+            schema_type = document_schema.get("document_type", "")
+            if schema_type and schema_type != "unknown":
+                doc_type = schema_type
+            issuer = document_schema.get("issuing_entity", "")
+            people = document_schema.get("people", [])
+            if people:
+                people_info = ", ".join(
+                    f"{p.get('name', '?')} ({p.get('role', '?')})"
+                    for p in people[:5]
+                )
+                structure_summary += f". People: {people_info}"
+            if issuer:
+                structure_summary += f". Issuing entity: {issuer}"
 
         # Build prompt
         prompt = ANALYZE_ENTITY_RELATIONSHIPS.format(
