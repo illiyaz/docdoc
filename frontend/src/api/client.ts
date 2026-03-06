@@ -738,10 +738,51 @@ export async function getAnalysisResults(jobId: string): Promise<AnalysisReviewD
   return res.json()
 }
 
+export interface DetectionDecision {
+  entity_type: string
+  detected_value_masked: string | null
+  page: number | null
+  include: boolean
+  reason?: string
+}
+
+export interface ProtocolFieldMapping {
+  field: string
+  criticality: string
+  status: string
+  matched_detections: Array<{
+    entity_type: string
+    value_masked: string
+    confidence: number | null
+    page: number | null
+    included: boolean
+  }>
+}
+
+export interface ProtocolMappingResponse {
+  protocol: string
+  field_mapping: ProtocolFieldMapping[]
+  coverage: {
+    required_fields: number
+    required_detected: number
+    required_missing: number
+    completeness_pct: number
+  }
+}
+
+export async function getProtocolMapping(
+  jobId: string,
+  docId: string,
+): Promise<ProtocolMappingResponse> {
+  const res = await fetch(`${BASE_URL}/jobs/${jobId}/documents/${docId}/protocol-mapping`)
+  if (!res.ok) throw new Error(`Failed to load protocol mapping: ${res.status}`)
+  return res.json()
+}
+
 export async function approveDocument(
   jobId: string,
   docId: string,
-  body: { reviewer_id: string; rationale?: string },
+  body: { reviewer_id: string; rationale?: string; detection_decisions?: DetectionDecision[] },
 ): Promise<{ status: string; document_id: string }> {
   const res = await fetch(`${BASE_URL}/jobs/${jobId}/documents/${docId}/approve`, {
     method: "POST",

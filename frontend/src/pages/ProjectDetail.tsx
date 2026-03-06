@@ -64,6 +64,8 @@ import type {
   PipelineProgress,
   JobResult,
   JobSummary,
+  DetectionDecision,
+  AnalysisReviewDetail,
 } from "@/api/client"
 
 // ---------------------------------------------------------------------------
@@ -1185,6 +1187,29 @@ function AnalysisReviewPanel({ jobId, onExtractionComplete }: { jobId: string; o
   const [extractStages, setExtractStages] = useState<Record<string, { status: string; message: string }>>({})
   const [reviewError, setReviewError] = useState<string | null>(null)
 
+  // Detection decisions state: docId → { entityType → included }
+  const [typeToggles, setTypeToggles] = useState<Record<string, Record<string, boolean>>>({})
+  // Individual overrides: docId → index → included
+  const [individualOverrides, setIndividualOverrides] = useState<Record<string, Record<number, boolean>>>({})
+
+  // Initialize toggles when reviews load
+  useEffect(() => {
+    if (!reviews) return
+    const newToggles: Record<string, Record<string, boolean>> = {}
+    for (const doc of reviews) {
+      if (!typeToggles[doc.document_id]) {
+        const types: Record<string, boolean> = {}
+        for (const ext of doc.sample_extractions) {
+          types[ext.pii_type] = true
+        }
+        newToggles[doc.document_id] = types
+      }
+    }
+    if (Object.keys(newToggles).length > 0) {
+      setTypeToggles(prev => ({ ...prev, ...newToggles }))
+    }
+  }, [reviews])  // eslint-disable-line react-hooks/exhaustive-deps
+
   if (isLoading) return <div className="text-sm text-muted-foreground">Loading analysis results...</div>
   if (!reviews?.length) return <div className="text-sm text-muted-foreground">No documents analyzed.</div>
 
@@ -1192,10 +1217,62 @@ function AnalysisReviewPanel({ jobId, onExtractionComplete }: { jobId: string; o
   const approvedCount = reviews.filter(r => r.review_status === "approved" || r.review_status === "auto_approved").length
   const allReviewed = pendingCount === 0
 
+  // Check if a detection is included
+  function isDetectionIncluded(docId: string, extIdx: number, piiType: string): boolean {
+    const override = individualOverrides[docId]?.[extIdx]
+    if (override !== undefined) return override
+    return typeToggles[docId]?.[piiType] !== false
+  }
+
+  // Toggle all detections of a type for a document
+  function toggleType(docId: string, piiType: string) {
+    const current = typeToggles[docId]?.[piiType] !== false
+    setTypeToggles(prev => ({
+      ...prev,
+      [docId]: { ...prev[docId], [piiType]: !current },
+    }))
+    // Clear individual overrides for this type
+    const doc = reviews?.find(r => r.document_id === docId)
+    if (doc) {
+      setIndividualOverrides(prev => {
+        const docOverrides = { ...prev[docId] }
+        doc.sample_extractions.forEach((ext, i) => {
+          if (ext.pii_type === piiType) delete docOverrides[i]
+        })
+        return { ...prev, [docId]: docOverrides }
+      })
+    }
+  }
+
+  // Toggle an individual detection
+  function toggleIndividual(docId: string, extIdx: number, piiType: string) {
+    const current = isDetectionIncluded(docId, extIdx, piiType)
+    setIndividualOverrides(prev => ({
+      ...prev,
+      [docId]: { ...prev[docId], [extIdx]: !current },
+    }))
+  }
+
+  // Build detection decisions for a document
+  function buildDecisions(doc: AnalysisReviewDetail): DetectionDecision[] {
+    return doc.sample_extractions.map((ext, i) => ({
+      entity_type: ext.pii_type,
+      detected_value_masked: ext.masked_value,
+      page: ext.evidence_page,
+      include: isDetectionIncluded(doc.document_id, i, ext.pii_type),
+    }))
+  }
+
   const handleApprove = async (docId: string) => {
     try {
       setReviewError(null)
-      await approveDocument(jobId, docId, { reviewer_id: "reviewer" })
+      const doc = reviews?.find(r => r.document_id === docId)
+      const decisions = doc ? buildDecisions(doc) : undefined
+      await approveDocument(jobId, docId, {
+        reviewer_id: "reviewer",
+        rationale: "Approved with field selections",
+        detection_decisions: decisions,
+      })
       queryClient.invalidateQueries({ queryKey: ["analysis-reviews", jobId] })
     } catch (err) {
       setReviewError(err instanceof Error ? err.message : "Failed to approve document")
@@ -1315,10 +1392,7 @@ function AnalysisReviewPanel({ jobId, onExtractionComplete }: { jobId: string; o
                 <span className="text-xs bg-red-100 text-red-800 px-2 py-0.5 rounded-full">Rejected</span>
               )}
               {doc.review_status === "pending_review" && (
-                <>
-                  <button onClick={() => handleApprove(doc.document_id)} className="px-2 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700">Approve</button>
-                  <button onClick={() => handleReject(doc.document_id)} className="px-2 py-1 text-xs bg-red-600 text-white rounded hover:bg-red-700">Reject</button>
-                </>
+                <span className="text-xs bg-yellow-100 text-yellow-800 px-2 py-0.5 rounded-full">Pending Review</span>
               )}
             </div>
           </div>
@@ -1441,9 +1515,93 @@ function AnalysisReviewPanel({ jobId, onExtractionComplete }: { jobId: string; o
             </div>
           )}
 
-          {doc.sample_extractions.length > 0 && (
+          {/* Detection Controls — type toggles + individual detections */}
+          {doc.sample_extractions.length > 0 && doc.review_status === "pending_review" && (
+            <div className="bg-muted/50 rounded p-2 space-y-2">
+              <p className="text-xs font-medium">Detection Controls ({doc.sample_extraction_count} found):</p>
+
+              {/* Type-level toggles */}
+              <div className="space-y-1">
+                <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">By Type:</p>
+                {Object.entries(
+                  doc.sample_extractions.reduce((acc, ext) => {
+                    acc[ext.pii_type] = (acc[ext.pii_type] || 0) + 1
+                    return acc
+                  }, {} as Record<string, number>)
+                ).map(([piiType, count]) => {
+                  const typeIncluded = typeToggles[doc.document_id]?.[piiType] !== false
+                  return (
+                    <label key={piiType} className="flex items-center gap-2 text-xs cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={typeIncluded}
+                        onChange={() => toggleType(doc.document_id, piiType)}
+                        className="rounded border-gray-300"
+                      />
+                      <span className={typeIncluded ? "font-medium" : "text-muted-foreground line-through"}>
+                        {piiType}
+                      </span>
+                      <span className="text-muted-foreground">({count})</span>
+                    </label>
+                  )
+                })}
+              </div>
+
+              {/* Individual detections */}
+              <div className="space-y-0.5">
+                <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Individual Detections:</p>
+                {doc.sample_extractions.map((ext, i) => {
+                  const included = isDetectionIncluded(doc.document_id, i, ext.pii_type)
+                  return (
+                    <label key={i} className="flex items-center gap-2 text-xs cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={included}
+                        onChange={() => toggleIndividual(doc.document_id, i, ext.pii_type)}
+                        className="rounded border-gray-300"
+                      />
+                      <span className={`inline-flex items-center gap-1 border rounded px-1.5 py-0.5 ${
+                        included ? "" : "opacity-40 line-through"
+                      }`}>
+                        <span className="font-medium">{ext.pii_type}</span>
+                        <span className="text-muted-foreground">{ext.masked_value}</span>
+                        {ext.confidence !== null && (
+                          <span className={`text-[10px] ${ext.confidence >= 0.85 ? 'text-green-600' : ext.confidence >= 0.6 ? 'text-yellow-600' : 'text-red-600'}`}>
+                            {(ext.confidence * 100).toFixed(0)}%
+                          </span>
+                        )}
+                        {ext.evidence_page != null && (
+                          <span className="text-[10px] text-muted-foreground">p.{ext.evidence_page + 1}</span>
+                        )}
+                      </span>
+                    </label>
+                  )
+                })}
+              </div>
+
+              {/* Updated approve button with selections */}
+              <div className="flex gap-2 pt-1">
+                <button
+                  onClick={() => handleApprove(doc.document_id)}
+                  disabled={doc.sample_extractions.every((ext, i) => !isDetectionIncluded(doc.document_id, i, ext.pii_type))}
+                  className="px-3 py-1.5 text-xs font-medium bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50"
+                >
+                  Approve with selections
+                </button>
+                <button
+                  onClick={() => handleReject(doc.document_id)}
+                  className="px-3 py-1.5 text-xs bg-red-600 text-white rounded hover:bg-red-700"
+                >
+                  Reject
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Read-only sample PII display for non-pending states */}
+          {doc.sample_extractions.length > 0 && doc.review_status !== "pending_review" && (
             <div className="bg-muted/50 rounded p-2">
-              <p className="text-xs font-medium mb-1">Sample PII from first content page ({doc.sample_extraction_count} found):</p>
+              <p className="text-xs font-medium mb-1">Sample PII ({doc.sample_extraction_count} found):</p>
               <div className="flex flex-wrap gap-1.5">
                 {doc.sample_extractions.map((ext, i) => (
                   <span key={i} className="inline-flex items-center gap-1 text-xs border rounded px-2 py-0.5">

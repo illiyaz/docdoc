@@ -725,6 +725,18 @@ def extract_generator(
             except Exception:
                 pass
 
+        # Build per-document selected entity types from review decisions
+        doc_selected_types: dict[UUID, list[str] | None] = {}
+        for doc in approved_docs:
+            review = db.query(DocumentAnalysisReview).filter(
+                DocumentAnalysisReview.document_id == doc.id,
+                DocumentAnalysisReview.ingestion_run_id == run.id,
+            ).first()
+            if review and review.selected_entity_types:
+                doc_selected_types[doc.id] = review.selected_entity_types
+            else:
+                doc_selected_types[doc.id] = None
+
         for i, doc in enumerate(approved_docs, 1):
             yield _sse({
                 "stage": "detection", "status": "running",
@@ -733,9 +745,13 @@ def extract_generator(
             })
 
             try:
+                # Use per-document selected types if reviewer specified them;
+                # otherwise fall back to protocol-level target entities
+                doc_targets = doc_selected_types.get(doc.id) or target_entities
+
                 reader = get_reader(doc.source_path)
                 blocks = reader.read()
-                detections = engine.analyze(blocks, target_entity_types=target_entities)
+                detections = engine.analyze(blocks, target_entity_types=doc_targets)
 
                 # Apply SchemaFilter if LLM is available
                 if doc_understanding_cls is not None and schema_filter_cls is not None:

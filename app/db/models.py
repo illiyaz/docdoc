@@ -485,3 +485,36 @@ class DocumentAnalysisReview(Base):
     sample_confidence_min: Mapped[float | None] = mapped_column(Float, nullable=True)
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    selected_entity_types: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+    detection_decisions: Mapped[list[DetectionReviewDecision]] = relationship(back_populates="analysis_review")
+
+
+class DetectionReviewDecision(Base):
+    """Per-detection inclusion/exclusion decision during analysis review.
+
+    Stores the reviewer's decision on each individual sample detection:
+    include or exclude from Phase 2 full extraction.
+    """
+
+    __tablename__ = "detection_review_decisions"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    document_analysis_review_id: Mapped[UUID] = mapped_column(
+        ForeignKey("document_analysis_reviews.id", ondelete="CASCADE"), nullable=False
+    )
+    entity_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    detected_value_masked: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    page: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    include_in_extraction: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=sql_text("1")
+    )
+    decision_reason: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    decided_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    decision_source: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="default", server_default=sql_text("'default'")
+    )
+
+    analysis_review: Mapped[DocumentAnalysisReview] = relationship(back_populates="detection_decisions")

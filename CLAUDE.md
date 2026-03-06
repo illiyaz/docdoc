@@ -169,7 +169,7 @@ project-root/
 │   │   ├── logging.py             # PIISafeFilter
 │   │   └── settings.py            # pydantic-settings
 │   ├── db/
-│   │   ├── models.py              # SQLAlchemy ORM models (18 tables)
+│   │   ├── models.py              # SQLAlchemy ORM models (19 tables)
 │   │   └── repositories.py        # thin data access layer
 │   └── api/
 │       ├── main.py
@@ -189,7 +189,7 @@ project-root/
 │       ├── components/            # Shared components (ShadCN + custom)
 │       └── App.tsx                # Routes + sidebar + Forentis AI branding
 ├── alembic/
-│   └── versions/                  # 0001–0008
+│   └── versions/                  # 0001–0009
 ├── tests/
 │   ├── test_schema.py
 │   ├── test_repositories.py
@@ -203,7 +203,8 @@ project-root/
 │   ├── test_llm.py
 │   ├── test_structure_analysis.py   # DSA: doc type, sections, roles, masking, RRA prevention
 │   ├── test_two_phase.py            # Two-phase pipeline: content onset, auto-approve, review
-│   └── test_detection_tuning.py     # Phase 14c: min confidence, currency pattern, dedup, deny-list
+│   ├── test_detection_tuning.py     # Phase 14c: min confidence, currency pattern, dedup, deny-list
+│   └── test_detection_review.py     # Step 15: field-level detection review, protocol mapping
 ├── models/                        # pre-packaged spaCy and Presidio models
 └── scripts/
     └── retrain.py                 # supervised retraining from human labels
@@ -213,9 +214,9 @@ project-root/
 
 ## 4) Schema Contract
 
-The canonical DB schema (18 tables) is defined by:
+The canonical DB schema (19 tables) is defined by:
 - `app/db/models.py`
-- `alembic/versions/0001_initial.py` through `0008_entity_analysis.py`
+- `alembic/versions/0001_initial.py` through `0009_detection_review_decisions.py`
 - `tests/test_schema.py` and `tests/test_repositories.py`
 
 ### Rules
@@ -329,10 +330,10 @@ These are detailed in [docs/SCHEMA.md](docs/SCHEMA.md). Summary:
 | 12. Two-Phase Pipeline | COMPLETE | Analyze → Review → Extract workflow. Content onset detection (all file types), sample PII extraction from first content page, document-level analysis review (approve/reject/approve-all), auto-approve (confidence-based + protocol-configurable), Phase 2 full extraction on approved docs, migration 0007, `DocumentAnalysisReview` table (18 total), frontend pipeline mode toggle + analysis review panel, 28 new tests |
 | 13. LLM Entity Relationship Analysis | COMPLETE | PII-verified onset detection (two-pass: heuristic candidates → Presidio verification). LLM entity relationship analysis: reads onset page + PII detections, proposes entity groups with confidence + rationale. New analyze stages: `verified_onset` + `entity_analysis`. `EntityRelationshipAnalysis` dataclass, `LLMEntityAnalyzer`, `ANALYZE_ENTITY_RELATIONSHIPS` prompt. API returns entity groups/relationships/guidance. Frontend entity group cards with role badges, relationship display, extraction guidance. Migration 0008 (`documents.entity_analysis` JSON column). 20 new tests. |
 | 14. LLM Document Understanding & Detection Quality | COMPLETE | **14a** — context deny-lists, tighter Presidio patterns. **14a-ii** — protocol-driven recognizer filtering. **14b** — LLM Document Understanding (DocumentSchema + SchemaFilter + TableSchema). **14c** — detection tuning (min confidence 10% floor, currency pattern filter, detection dedup), integration (schema→entity analysis, 2 new audit event types, API returns document_schema), Catalog tab UX (state-driven: empty→uploaded→running→complete). 50 new tests. |
-| 15. Field-Level Review + Protocol Mapping | PENDING | Two-tier detection toggle (type-level bulk + individual override) before extraction approval. Protocol field mapping shows required vs detected vs missing fields with completeness percentage. Detection decisions stored in `detection_review_decisions` table (migration 0009). Phase 2 extraction only runs on included types. Frontend: protocol mapping section + detection controls with toggles + "Approve with selections" button. |
+| 15. Field-Level Review + Protocol Mapping | COMPLETE | Two-tier detection toggle (type-level bulk + individual override) before extraction approval. Protocol field mapping (12 protocols) shows required vs detected vs missing fields with completeness percentage. `DetectionReviewDecision` model + `detection_review_decisions` table (19 total, migration 0009). `selected_entity_types` on review. Phase 2 extraction filters by included types per document. Frontend: detection controls with type/individual toggles, "Approve with selections" button, protocol mapping endpoint. 53 new tests. |
 | 16. Dashboard Redesign | PENDING | Transform dashboard into command center. GET /dashboard/summary endpoint aggregating from existing tables. Sections: stat cards (active projects, pending reviews, jobs this week, docs processed), needs attention (pending reviews by project), running jobs (with progress), active projects (compact list), recent activity feed (last 20 events). Auto-refresh polling (30s default, 10s when jobs running). |
 
-**1757 tests passing after Steps 1–14.**
+**1810 tests passing after Steps 1–15.**
 
 See [docs/PLAN.md](docs/PLAN.md) for full step-by-step implementation details.
 

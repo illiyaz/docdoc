@@ -293,3 +293,133 @@ def get_entity_categories(entity_type: str) -> list[str]:
             return list(value)
 
     return ["PII"]
+
+
+# ---------------------------------------------------------------------------
+# Protocol required fields — Step 15
+# ---------------------------------------------------------------------------
+# Maps each protocol to its required/optional fields and the entity types
+# that satisfy each field.
+
+PROTOCOL_REQUIRED_FIELDS: dict[str, dict[str, list[dict[str, str | list[str]]]]] = {
+    "hipaa": {
+        "required": [
+            {"field": "Individual Name", "entity_types": ["PERSON"], "criticality": "required"},
+            {"field": "Address", "entity_types": ["LOCATION"], "criticality": "required"},
+            {"field": "Date of Birth", "entity_types": ["DATE_OF_BIRTH_DMY", "DATE_OF_BIRTH_MDY", "DATE_OF_BIRTH_ISO"], "criticality": "if_available"},
+            {"field": "SSN", "entity_types": ["US_SSN"], "criticality": "if_available"},
+            {"field": "Medical Record", "entity_types": ["MEDICAL_LICENSE", "NPI_NUMBER", "MRN"], "criticality": "if_available"},
+            {"field": "Email", "entity_types": ["EMAIL_ADDRESS"], "criticality": "if_available"},
+            {"field": "Phone", "entity_types": ["PHONE_NUMBER", "PHONE_US"], "criticality": "if_available"},
+        ],
+    },
+    "hipaa_breach_rule": {
+        "required": [
+            {"field": "Individual Name", "entity_types": ["PERSON"], "criticality": "required"},
+            {"field": "Address", "entity_types": ["LOCATION"], "criticality": "required"},
+            {"field": "Date of Birth", "entity_types": ["DATE_OF_BIRTH_DMY", "DATE_OF_BIRTH_MDY", "DATE_OF_BIRTH_ISO"], "criticality": "if_available"},
+            {"field": "SSN", "entity_types": ["US_SSN"], "criticality": "if_available"},
+            {"field": "Medical Record", "entity_types": ["MEDICAL_LICENSE", "NPI_NUMBER", "MRN"], "criticality": "if_available"},
+            {"field": "Email", "entity_types": ["EMAIL_ADDRESS"], "criticality": "if_available"},
+            {"field": "Phone", "entity_types": ["PHONE_NUMBER", "PHONE_US"], "criticality": "if_available"},
+        ],
+    },
+    "state_breach": {
+        "required": [
+            {"field": "Individual Name", "entity_types": ["PERSON"], "criticality": "required"},
+            {"field": "Address", "entity_types": ["LOCATION"], "criticality": "required"},
+            {"field": "SSN", "entity_types": ["US_SSN"], "criticality": "required"},
+            {"field": "Driver's License", "entity_types": ["US_DRIVER_LICENSE", "DRIVER_LICENSE_US"], "criticality": "if_available"},
+            {"field": "Financial Account", "entity_types": ["CREDIT_CARD", "US_BANK_NUMBER", "IBAN_CODE"], "criticality": "if_available"},
+            {"field": "Email", "entity_types": ["EMAIL_ADDRESS"], "criticality": "required"},
+            {"field": "Phone", "entity_types": ["PHONE_NUMBER", "PHONE_US"], "criticality": "if_available"},
+        ],
+    },
+    "state_breach_generic": {
+        "required": [
+            {"field": "Individual Name", "entity_types": ["PERSON"], "criticality": "required"},
+            {"field": "Address", "entity_types": ["LOCATION"], "criticality": "required"},
+            {"field": "SSN", "entity_types": ["US_SSN"], "criticality": "required"},
+            {"field": "Driver's License", "entity_types": ["US_DRIVER_LICENSE", "DRIVER_LICENSE_US"], "criticality": "if_available"},
+            {"field": "Financial Account", "entity_types": ["CREDIT_CARD", "US_BANK_NUMBER", "IBAN_CODE"], "criticality": "if_available"},
+            {"field": "Email", "entity_types": ["EMAIL_ADDRESS"], "criticality": "required"},
+            {"field": "Phone", "entity_types": ["PHONE_NUMBER", "PHONE_US"], "criticality": "if_available"},
+        ],
+    },
+    "gdpr": {
+        "required": [
+            {"field": "Data Subject Name", "entity_types": ["PERSON"], "criticality": "required"},
+            {"field": "Email", "entity_types": ["EMAIL_ADDRESS"], "criticality": "required"},
+            {"field": "Address", "entity_types": ["LOCATION"], "criticality": "if_available"},
+            {"field": "Phone", "entity_types": ["PHONE_NUMBER"], "criticality": "if_available"},
+            {"field": "National ID", "entity_types": ["IBAN_CODE", "UK_NHS", "NINO_UK"], "criticality": "if_available"},
+            {"field": "IP Address", "entity_types": ["IP_ADDRESS"], "criticality": "if_available"},
+        ],
+    },
+    "gdpr_article_33": {
+        "required": [
+            {"field": "Data Subject Name", "entity_types": ["PERSON"], "criticality": "required"},
+            {"field": "Email", "entity_types": ["EMAIL_ADDRESS"], "criticality": "required"},
+            {"field": "Address", "entity_types": ["LOCATION"], "criticality": "if_available"},
+            {"field": "Phone", "entity_types": ["PHONE_NUMBER"], "criticality": "if_available"},
+            {"field": "National ID", "entity_types": ["IBAN_CODE", "UK_NHS", "NINO_UK"], "criticality": "if_available"},
+            {"field": "IP Address", "entity_types": ["IP_ADDRESS"], "criticality": "if_available"},
+        ],
+    },
+    "dpdpa": {
+        "required": [
+            {"field": "Data Principal Name", "entity_types": ["PERSON"], "criticality": "required"},
+            {"field": "Email", "entity_types": ["EMAIL_ADDRESS"], "criticality": "required"},
+            {"field": "Phone", "entity_types": ["PHONE_NUMBER"], "criticality": "required"},
+            {"field": "Aadhaar", "entity_types": ["AADHAAR"], "criticality": "if_available"},
+            {"field": "PAN", "entity_types": ["PAN_CARD"], "criticality": "if_available"},
+            {"field": "Address", "entity_types": ["LOCATION"], "criticality": "if_available"},
+        ],
+    },
+    "pci_dss": {
+        "required": [
+            {"field": "Cardholder Name", "entity_types": ["PERSON"], "criticality": "required"},
+            {"field": "Card Number", "entity_types": ["CREDIT_CARD"], "criticality": "required"},
+            {"field": "Email", "entity_types": ["EMAIL_ADDRESS"], "criticality": "if_available"},
+            {"field": "Phone", "entity_types": ["PHONE_NUMBER"], "criticality": "if_available"},
+        ],
+    },
+    "ccpa": {
+        "required": [
+            {"field": "Consumer Name", "entity_types": ["PERSON"], "criticality": "required"},
+            {"field": "SSN", "entity_types": ["US_SSN"], "criticality": "if_available"},
+            {"field": "Email", "entity_types": ["EMAIL_ADDRESS"], "criticality": "required"},
+            {"field": "Address", "entity_types": ["LOCATION"], "criticality": "if_available"},
+            {"field": "Driver's License", "entity_types": ["US_DRIVER_LICENSE", "DRIVER_LICENSE_US"], "criticality": "if_available"},
+            {"field": "Financial Account", "entity_types": ["CREDIT_CARD", "US_BANK_NUMBER"], "criticality": "if_available"},
+        ],
+    },
+    "hitech": {
+        "required": [
+            {"field": "Individual Name", "entity_types": ["PERSON"], "criticality": "required"},
+            {"field": "Address", "entity_types": ["LOCATION"], "criticality": "required"},
+            {"field": "SSN", "entity_types": ["US_SSN"], "criticality": "if_available"},
+            {"field": "Medical Record", "entity_types": ["MEDICAL_LICENSE", "NPI_NUMBER", "MRN"], "criticality": "if_available"},
+            {"field": "Email", "entity_types": ["EMAIL_ADDRESS"], "criticality": "if_available"},
+            {"field": "Phone", "entity_types": ["PHONE_NUMBER", "PHONE_US"], "criticality": "if_available"},
+        ],
+    },
+    "bipa": {
+        "required": [
+            {"field": "Individual Name", "entity_types": ["PERSON"], "criticality": "required"},
+            {"field": "Biometric Data", "entity_types": ["BIOMETRIC"], "criticality": "required"},
+            {"field": "Email", "entity_types": ["EMAIL_ADDRESS"], "criticality": "if_available"},
+            {"field": "Phone", "entity_types": ["PHONE_NUMBER"], "criticality": "if_available"},
+        ],
+    },
+    "ferpa": {
+        "required": [
+            {"field": "Student Name", "entity_types": ["PERSON"], "criticality": "required"},
+            {"field": "Student ID", "entity_types": ["STUDENT_ID"], "criticality": "required"},
+            {"field": "SSN", "entity_types": ["US_SSN"], "criticality": "if_available"},
+            {"field": "Date of Birth", "entity_types": ["DATE_OF_BIRTH_DMY", "DATE_OF_BIRTH_MDY", "DATE_OF_BIRTH_ISO"], "criticality": "if_available"},
+            {"field": "Email", "entity_types": ["EMAIL_ADDRESS"], "criticality": "if_available"},
+            {"field": "Address", "entity_types": ["LOCATION"], "criticality": "if_available"},
+        ],
+    },
+}
