@@ -508,7 +508,7 @@ class DetectionReviewDecision(Base):
     confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
     page: Mapped[int | None] = mapped_column(Integer, nullable=True)
     include_in_extraction: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=True, server_default=sql_text("1")
+        Boolean, nullable=False, default=True, server_default=sql_text("true")
     )
     decision_reason: Mapped[str | None] = mapped_column(String(256), nullable=True)
     decided_by: Mapped[str | None] = mapped_column(String(128), nullable=True)

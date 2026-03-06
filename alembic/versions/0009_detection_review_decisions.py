@@ -2,14 +2,14 @@
 
 Step 15: Field-level detection review + protocol mapping.
 
-Revision ID: 0009
-Revises: 0008
+Revision ID: 0009_detection_review_decisions
+Revises: 0008_entity_analysis
 """
 from alembic import op
 import sqlalchemy as sa
 
-revision = "0009"
-down_revision = "0008"
+revision = "0009_detection_review_decisions"
+down_revision = "0008_entity_analysis"
 branch_labels = None
 depends_on = None
 
@@ -24,7 +24,7 @@ def upgrade() -> None:
         sa.Column("detected_value_masked", sa.String(256), nullable=True),
         sa.Column("confidence", sa.Float(), nullable=True),
         sa.Column("page", sa.Integer(), nullable=True),
-        sa.Column("include_in_extraction", sa.Boolean(), nullable=False, server_default=sa.text("1")),
+        sa.Column("include_in_extraction", sa.Boolean(), nullable=False, server_default=sa.text("true")),
         sa.Column("decision_reason", sa.String(256), nullable=True),
         sa.Column("decided_by", sa.String(128), nullable=True),
         sa.Column("decided_at", sa.DateTime(timezone=True), nullable=True),
