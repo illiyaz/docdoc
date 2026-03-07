@@ -1128,16 +1128,19 @@ class TestProjectJobs:
         resp = client.get(f"/projects/{project.id}/jobs")
         assert resp.status_code == 200
         data = resp.json()
-        assert len(data) == 1
-        assert data[0]["id"] == str(run.id)
-        assert data[0]["status"] == "completed"
-        assert data[0]["project_id"] == str(project.id)
+        assert data["total"] == 1
+        assert len(data["jobs"]) == 1
+        assert data["jobs"][0]["id"] == str(run.id)
+        assert data["jobs"][0]["status"] == "completed"
+        assert data["jobs"][0]["project_id"] == str(project.id)
 
     def test_empty_project_returns_empty_list(self, db_session: Session, client: TestClient) -> None:
         project = _make_project(db_session)
         resp = client.get(f"/projects/{project.id}/jobs")
         assert resp.status_code == 200
-        assert resp.json() == []
+        data = resp.json()
+        assert data["jobs"] == []
+        assert data["total"] == 0
 
     def test_project_not_found(self, client: TestClient) -> None:
         resp = client.get(f"/projects/{uuid4()}/jobs")
@@ -1153,7 +1156,7 @@ class TestProjectJobs:
 
         resp = client.get(f"/projects/{p1.id}/jobs")
         assert resp.status_code == 200
-        assert len(resp.json()) == 1
+        assert len(resp.json()["jobs"]) == 1
 
     def test_response_shape(self, db_session: Session, client: TestClient) -> None:
         project = _make_project(db_session)
@@ -1164,7 +1167,12 @@ class TestProjectJobs:
             completed_at=datetime(2025, 1, 1, 0, 5, 0, tzinfo=timezone.utc),
         )
         resp = client.get(f"/projects/{project.id}/jobs")
-        job = resp.json()[0]
+        data = resp.json()
+        assert "jobs" in data
+        assert "total" in data
+        assert "page" in data
+        assert "per_page" in data
+        job = data["jobs"][0]
         assert "id" in job
         assert "project_id" in job
         assert "status" in job
@@ -1174,13 +1182,15 @@ class TestProjectJobs:
         assert "created_at" in job
         assert "document_count" in job
         assert "duration_seconds" in job
+        assert "first_file_name" in job
+        assert "pipeline_mode" in job
         assert job["duration_seconds"] == 300.0
 
     def test_duration_none_when_not_completed(self, db_session: Session, client: TestClient) -> None:
         project = _make_project(db_session)
         _make_ingestion_run(db_session, project_id=project.id, status="running")
         resp = client.get(f"/projects/{project.id}/jobs")
-        assert resp.json()[0]["duration_seconds"] is None
+        assert resp.json()["jobs"][0]["duration_seconds"] is None
 
 
 # ===========================================================================
@@ -1469,15 +1479,15 @@ class TestPatchJob:
 
         # Initially no jobs for the project
         resp1 = client.get(f"/projects/{project.id}/jobs")
-        assert len(resp1.json()) == 0
+        assert resp1.json()["total"] == 0
 
         # Link the job
         client.patch(f"/jobs/{run.id}", json={"project_id": str(project.id)})
 
         # Now the job should appear
         resp2 = client.get(f"/projects/{project.id}/jobs")
-        assert len(resp2.json()) == 1
-        assert resp2.json()[0]["id"] == str(run.id)
+        assert resp2.json()["total"] == 1
+        assert resp2.json()["jobs"][0]["id"] == str(run.id)
 
 
 # ===========================================================================

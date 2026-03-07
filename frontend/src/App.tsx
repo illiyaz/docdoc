@@ -3,20 +3,17 @@ import { BrowserRouter, Routes, Route, NavLink } from "react-router-dom"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import {
   LayoutDashboard,
-  AlertCircle,
-  AlertTriangle,
   ClipboardCheck,
-  GitMerge,
-  Upload,
-  FlaskConical,
+  Play,
+  Settings as SettingsIcon,
   Shield,
   FolderOpen,
 } from "lucide-react"
 import { Dashboard } from "@/pages/Dashboard"
-import { QueueView } from "@/pages/QueueView"
+import { ReviewQueue } from "@/pages/ReviewQueue"
 import { SubjectDetail } from "@/pages/SubjectDetail"
 import { JobSubmit } from "@/pages/JobSubmit"
-import { Diagnostic } from "@/pages/Diagnostic"
+import { Settings } from "@/pages/Settings"
 import { Projects } from "@/pages/Projects"
 import { ProjectDetail } from "@/pages/ProjectDetail"
 
@@ -36,18 +33,15 @@ const queryClient = new QueryClient({
 })
 
 // ---------------------------------------------------------------------------
-// Navigation items
+// Navigation items (consolidated 8 → 5)
 // ---------------------------------------------------------------------------
 
 const NAV_ITEMS = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
   { to: "/projects", label: "Projects", icon: FolderOpen },
-  { to: "/queues/low_confidence", label: "Low Confidence", icon: AlertCircle },
-  { to: "/queues/escalation", label: "Escalation", icon: AlertTriangle },
-  { to: "/queues/qc_sampling", label: "QC Sampling", icon: ClipboardCheck },
-  { to: "/queues/rra_review", label: "RRA Review", icon: GitMerge },
-  { to: "/jobs", label: "Submit Job", icon: Upload },
-  { to: "/diagnostic", label: "Diagnostic", icon: FlaskConical },
+  { to: "/review", label: "Review Queue", icon: ClipboardCheck },
+  { to: "/jobs", label: "Jobs", icon: Play },
+  { to: "/settings", label: "Settings", icon: SettingsIcon },
 ]
 
 // ---------------------------------------------------------------------------
@@ -103,10 +97,10 @@ export default function App() {
                   <Route path="/" element={<Dashboard />} />
                   <Route path="/projects" element={<Projects />} />
                   <Route path="/projects/:id" element={<ProjectDetail />} />
-                  <Route path="/queues/:type" element={<QueueView />} />
+                  <Route path="/review" element={<ReviewQueue />} />
                   <Route path="/subjects/:id" element={<SubjectDetail />} />
                   <Route path="/jobs" element={<JobSubmit />} />
-                  <Route path="/diagnostic" element={<Diagnostic />} />
+                  <Route path="/settings" element={<Settings />} />
                 </Routes>
               </main>
             </div>

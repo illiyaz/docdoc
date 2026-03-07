@@ -29,6 +29,7 @@ export default defineConfig({
       "/audit": "http://localhost:3848",
       "/dashboard": "http://localhost:3848",
       "/diagnostic": "http://localhost:3848",
+      "/settings": "http://localhost:3848",
     },
   },
   resolve: {

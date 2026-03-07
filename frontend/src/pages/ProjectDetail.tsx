@@ -27,6 +27,10 @@ import {
   AlertCircle,
   Clock,
   Briefcase,
+  Trash2,
+  Ban,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react"
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -53,6 +57,8 @@ import {
   rejectDocument,
   approveAllDocuments,
   startExtractStreaming,
+  cancelJob,
+  archiveJob,
 } from "@/api/client"
 import type {
   ProjectDetail as ProjectDetailType,
@@ -66,6 +72,7 @@ import type {
   JobSummary,
   DetectionDecision,
   AnalysisReviewDetail,
+  PaginatedJobs,
 } from "@/api/client"
 
 // ---------------------------------------------------------------------------
@@ -106,7 +113,11 @@ const JOB_STATUS_STYLES: Record<string, string> = {
   failed: "bg-red-100 text-red-800 border-red-300",
   analyzed: "bg-amber-100 text-amber-800 border-amber-300",
   extracting: "bg-indigo-100 text-indigo-800 border-indigo-300",
+  cancelled: "bg-gray-100 text-gray-600 border-gray-300",
+  archived: "bg-gray-50 text-gray-400 border-gray-200",
 }
+
+const JOB_STATUS_FILTERS = ["all", "running", "analyzed", "completed", "failed", "cancelled"] as const
 
 const STAGE_STATUS_ICON_MAP: Record<string, string> = {
   completed: "green",
@@ -1653,6 +1664,10 @@ function JobsTab({
   const queryClient = useQueryClient()
   const [expandedJobId, setExpandedJobId] = useState<string | null>(null)
   const [showLinkJob, setShowLinkJob] = useState(false)
+  const [statusFilter, setStatusFilter] = useState<string>("all")
+  const [currentPage, setCurrentPage] = useState(1)
+  const [confirmArchiveId, setConfirmArchiveId] = useState<string | null>(null)
+  const perPage = 10
 
   // Link job state
   const [linkError, setLinkError] = useState<string | null>(null)
@@ -1660,12 +1675,21 @@ function JobsTab({
   const [isLinking, setIsLinking] = useState(false)
   const [selectedLinkJobId, setSelectedLinkJobId] = useState("")
 
-  // Fetch jobs for this project
-  const { data: jobs, isLoading } = useQuery({
-    queryKey: ["project-jobs", projectId],
-    queryFn: () => getProjectJobs(projectId),
+  // Fetch jobs for this project with filtering and pagination
+  const { data: jobsData, isLoading } = useQuery({
+    queryKey: ["project-jobs", projectId, statusFilter, currentPage],
+    queryFn: () =>
+      getProjectJobs(projectId, {
+        status: statusFilter === "all" ? undefined : statusFilter,
+        page: currentPage,
+        per_page: perPage,
+      }),
     refetchInterval: 10_000,
   })
+
+  const jobs = jobsData?.jobs ?? []
+  const totalJobs = jobsData?.total ?? 0
+  const totalPages = Math.max(1, Math.ceil(totalJobs / perPage))
 
   // Fetch recent unlinked jobs for link dropdown
   const { data: unlinkedJobs } = useQuery({
@@ -1692,6 +1716,11 @@ function JobsTab({
     prevJobsRef.current = jobs
   }, [jobs, onJobCompleted])
 
+  // Reset page when filter changes
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [statusFilter])
+
   // Link existing job handler
   async function handleLinkJob() {
     if (!selectedLinkJobId) return
@@ -1712,9 +1741,46 @@ function JobsTab({
     }
   }
 
+  // Cancel job handler
+  async function handleCancelJob(jobId: string, e: React.MouseEvent) {
+    e.stopPropagation()
+    try {
+      await cancelJob(jobId)
+      queryClient.invalidateQueries({ queryKey: ["project-jobs", projectId] })
+    } catch (err) {
+      console.error("Failed to cancel job:", err)
+    }
+  }
+
+  // Archive job handler
+  async function handleArchiveJob(jobId: string) {
+    try {
+      await archiveJob(jobId)
+      setConfirmArchiveId(null)
+      queryClient.invalidateQueries({ queryKey: ["project-jobs", projectId] })
+    } catch (err) {
+      console.error("Failed to archive job:", err)
+    }
+  }
+
+  // Format duration with phase label
+  function formatJobDuration(job: JobSummary): string {
+    if (job.duration_seconds == null) return "--"
+    const secs = Math.round(job.duration_seconds)
+    const mins = Math.floor(secs / 60)
+    const rem = secs % 60
+    const time = mins > 0 ? `${mins}m ${rem}s` : `${rem}s`
+    if (job.status === "analyzed" && job.pipeline_mode === "two_phase") return `${time} (analyze)`
+    if (job.status === "completed" && job.pipeline_mode === "two_phase") return `${time} (full)`
+    return time
+  }
+
+  const canCancel = (s: string) => ["pending", "running", "analyzing", "extracting"].includes(s)
+  const canArchive = (s: string) => ["completed", "failed", "cancelled", "analyzed"].includes(s)
+
   return (
     <div className="space-y-4">
-      {/* Action buttons */}
+      {/* Header with actions */}
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold">Project Jobs</h3>
         <div className="flex gap-2">
@@ -1800,16 +1866,42 @@ function JobsTab({
         </Card>
       )}
 
+      {/* Status filter */}
+      <div className="flex items-center gap-2">
+        {JOB_STATUS_FILTERS.map((f) => (
+          <button
+            key={f}
+            onClick={() => setStatusFilter(f)}
+            className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+              statusFilter === f
+                ? "bg-primary text-primary-foreground"
+                : "bg-muted text-muted-foreground hover:bg-accent"
+            }`}
+          >
+            {f === "all" ? "All" : f.charAt(0).toUpperCase() + f.slice(1)}
+          </button>
+        ))}
+        {totalJobs > 0 && (
+          <span className="ml-auto text-xs text-muted-foreground">
+            {totalJobs} job{totalJobs !== 1 ? "s" : ""}
+          </span>
+        )}
+      </div>
+
       {/* Jobs table */}
       {isLoading ? (
         <div className="flex items-center justify-center py-12 text-muted-foreground">
           <Loader2 className="h-5 w-5 animate-spin mr-2" />
           Loading jobs...
         </div>
-      ) : !jobs || jobs.length === 0 ? (
+      ) : jobs.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
           <Briefcase className="h-10 w-10 mb-2 opacity-40" />
-          <p className="text-sm">No jobs linked to this project</p>
+          <p className="text-sm">
+            {statusFilter === "all"
+              ? "No jobs linked to this project"
+              : `No ${statusFilter} jobs`}
+          </p>
           <p className="text-xs mt-1">Run a new job or link an existing one above</p>
         </div>
       ) : (
@@ -1820,10 +1912,12 @@ function JobsTab({
                 <thead>
                   <tr className="border-b bg-muted/50">
                     <th className="px-4 py-2.5 text-left font-medium">Job ID</th>
+                    <th className="px-4 py-2.5 text-left font-medium">Document</th>
                     <th className="px-4 py-2.5 text-left font-medium">Status</th>
                     <th className="px-4 py-2.5 text-left font-medium">Created</th>
                     <th className="px-4 py-2.5 text-right font-medium">Docs</th>
                     <th className="px-4 py-2.5 text-right font-medium">Duration</th>
+                    <th className="px-4 py-2.5 text-right font-medium w-20">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1831,14 +1925,21 @@ function JobsTab({
                     const isExpanded = expandedJobId === job.id
                     return (
                       <tr key={job.id} className="group">
-                        <td colSpan={5} className="p-0">
+                        <td colSpan={7} className="p-0">
                           <button
                             onClick={() => setExpandedJobId(isExpanded ? null : job.id)}
                             className="w-full text-left hover:bg-accent/50 transition-colors"
                           >
-                            <div className="grid grid-cols-[1fr_auto_1fr_auto_auto] items-center">
-                              <span className="px-4 py-2.5 font-mono text-xs">
+                            <div className="grid grid-cols-[minmax(90px,auto)_minmax(100px,1fr)_auto_minmax(80px,auto)_50px_80px_70px] items-center">
+                              <span className="px-4 py-2.5 font-mono text-xs truncate">
                                 {job.id.slice(0, 8)}...
+                              </span>
+                              <span className="px-4 py-2.5 text-xs text-muted-foreground truncate" title={job.first_file_name ?? undefined}>
+                                {job.first_file_name
+                                  ? job.first_file_name.length > 30
+                                    ? job.first_file_name.slice(0, 30) + "..."
+                                    : job.first_file_name
+                                  : "--"}
                               </span>
                               <span className="px-4 py-2.5">
                                 <Badge
@@ -1855,7 +1956,44 @@ function JobsTab({
                                 {job.document_count}
                               </span>
                               <span className="px-4 py-2.5 text-right text-xs text-muted-foreground">
-                                {formatDuration(job.duration_seconds)}
+                                {formatJobDuration(job)}
+                              </span>
+                              <span className="px-4 py-2.5 text-right flex justify-end gap-1" onClick={(e) => e.stopPropagation()}>
+                                {canCancel(job.status) && (
+                                  <button
+                                    onClick={(e) => handleCancelJob(job.id, e)}
+                                    className="rounded p-1 text-red-500 hover:bg-red-50 hover:text-red-700"
+                                    title="Cancel job"
+                                  >
+                                    <Ban className="h-3.5 w-3.5" />
+                                  </button>
+                                )}
+                                {canArchive(job.status) && (
+                                  confirmArchiveId === job.id ? (
+                                    <div className="flex gap-1">
+                                      <button
+                                        onClick={() => handleArchiveJob(job.id)}
+                                        className="rounded px-1.5 py-0.5 text-[10px] bg-red-500 text-white hover:bg-red-600"
+                                      >
+                                        Yes
+                                      </button>
+                                      <button
+                                        onClick={() => setConfirmArchiveId(null)}
+                                        className="rounded px-1.5 py-0.5 text-[10px] border hover:bg-accent"
+                                      >
+                                        No
+                                      </button>
+                                    </div>
+                                  ) : (
+                                    <button
+                                      onClick={() => setConfirmArchiveId(job.id)}
+                                      className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+                                      title="Archive job"
+                                    >
+                                      <Trash2 className="h-3.5 w-3.5" />
+                                    </button>
+                                  )
+                                )}
                               </span>
                             </div>
                           </button>
@@ -1893,6 +2031,49 @@ function JobsTab({
             </div>
           </CardContent>
         </Card>
+      )}
+
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between">
+          <span className="text-xs text-muted-foreground">
+            Page {currentPage} of {totalPages}
+          </span>
+          <div className="flex gap-1">
+            <button
+              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+              disabled={currentPage <= 1}
+              className="rounded-md border px-2 py-1 text-xs disabled:opacity-30 hover:bg-accent"
+            >
+              <ChevronLeft className="h-3.5 w-3.5" />
+            </button>
+            {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+              const start = Math.max(1, Math.min(currentPage - 2, totalPages - 4))
+              const page = start + i
+              if (page > totalPages) return null
+              return (
+                <button
+                  key={page}
+                  onClick={() => setCurrentPage(page)}
+                  className={`rounded-md border px-2.5 py-1 text-xs ${
+                    page === currentPage
+                      ? "bg-primary text-primary-foreground"
+                      : "hover:bg-accent"
+                  }`}
+                >
+                  {page}
+                </button>
+              )
+            })}
+            <button
+              onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+              disabled={currentPage >= totalPages}
+              className="rounded-md border px-2 py-1 text-xs disabled:opacity-30 hover:bg-accent"
+            >
+              <ChevronRight className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        </div>
       )}
     </div>
   )
@@ -2798,61 +2979,129 @@ function DensityTab({ projectId }: { projectId: string }) {
   }
 
   const ps = density.project_summary
+  const hasDensityData = ps && ps.total_entities > 0
+
+  // STATE 1: No density data yet — explain and link to Jobs
+  if (!hasDensityData) {
+    return (
+      <div className="space-y-4">
+        <Card>
+          <CardContent className="pt-6">
+            <div className="flex flex-col items-center justify-center py-10 text-center">
+              <BarChart3 className="h-12 w-12 text-muted-foreground/30 mb-4" />
+              <h3 className="text-lg font-semibold mb-2">No density data available yet</h3>
+              <p className="text-sm text-muted-foreground max-w-md mb-4">
+                Density analysis runs automatically after document extraction (Phase 2)
+                completes. It shows entity distribution by type and category across your
+                documents.
+              </p>
+              <p className="text-sm text-muted-foreground mb-6">
+                To generate density data: analyze documents, review sample extractions,
+                then run full extraction.
+              </p>
+              <button
+                onClick={() => {
+                  // Find the Jobs tab button and click it
+                  const jobsTab = document.querySelector('[data-tab="jobs"]') as HTMLElement
+                  if (jobsTab) jobsTab.click()
+                }}
+                className="rounded-md bg-primary text-primary-foreground px-4 py-2 text-sm font-medium"
+              >
+                Go to Jobs tab to review and extract
+              </button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
+
+  // STATE 2: Density data available — summary cards + category bars + per-doc table
+  const categoryEntries = ps.by_category
+    ? Object.entries(ps.by_category).sort((a, b) => b[1] - a[1])
+    : []
+  const maxCategoryCount = categoryEntries.length > 0 ? categoryEntries[0][1] : 1
 
   return (
     <div className="space-y-4">
-      {/* Project-level summary */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Project Density Summary</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {ps ? (
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="text-center">
-                  <p className="text-2xl font-bold">{ps.total_entities}</p>
-                  <p className="text-xs text-muted-foreground">Total Entities</p>
-                </div>
-                <div className="text-center">
-                  <p className="text-2xl font-bold">{ps.confidence ?? "—"}</p>
-                  <p className="text-xs text-muted-foreground">Confidence</p>
-                </div>
-              </div>
+      {/* Summary cards */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <Card>
+          <CardContent className="pt-4 pb-3 text-center">
+            <p className="text-2xl font-bold">{ps.total_entities}</p>
+            <p className="text-xs text-muted-foreground">Total Entities</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-4 pb-3 text-center">
+            <p className="text-2xl font-bold">{categoryEntries.length}</p>
+            <p className="text-xs text-muted-foreground">Categories</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-4 pb-3 text-center">
+            <p className="text-2xl font-bold">{density.document_summaries.length}</p>
+            <p className="text-xs text-muted-foreground">Documents</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-4 pb-3 text-center">
+            <p className="text-2xl font-bold">{ps.confidence ?? "—"}</p>
+            <p className="text-xs text-muted-foreground">Confidence</p>
+          </CardContent>
+        </Card>
+      </div>
 
-              {ps.by_category && Object.keys(ps.by_category).length > 0 && (
-                <div>
-                  <p className="text-xs font-medium text-muted-foreground mb-2">By Category</p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {Object.entries(ps.by_category).map(([cat, count]) => (
-                      <Badge key={cat} variant="secondary" className="text-xs">
-                        {cat}: {count}
-                      </Badge>
-                    ))}
+      {/* Category breakdown with visual bars */}
+      {categoryEntries.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">By Category</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              {categoryEntries.map(([cat, count]) => {
+                const pct = (count / ps.total_entities) * 100
+                const barWidth = (count / maxCategoryCount) * 100
+                return (
+                  <div key={cat} className="flex items-center gap-3">
+                    <span className="text-sm font-medium w-20 shrink-0">{cat}</span>
+                    <div className="flex-1 h-5 bg-muted rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-primary/70 rounded-full transition-all"
+                        style={{ width: `${barWidth}%` }}
+                      />
+                    </div>
+                    <span className="text-sm text-muted-foreground w-20 text-right shrink-0">
+                      {count} ({pct.toFixed(0)}%)
+                    </span>
                   </div>
-                </div>
-              )}
-
-              {ps.by_type && Object.keys(ps.by_type).length > 0 && (
-                <div>
-                  <p className="text-xs font-medium text-muted-foreground mb-2">By Entity Type</p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {Object.entries(ps.by_type).map(([type, count]) => (
-                      <Badge key={type} variant="outline" className="text-xs">
-                        {type}: {count}
-                      </Badge>
-                    ))}
-                  </div>
-                </div>
-              )}
+                )
+              })}
             </div>
-          ) : (
-            <p className="text-sm text-muted-foreground text-center py-4">
-              No density data available. Run the density scoring task to populate.
-            </p>
-          )}
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* By Entity Type */}
+      {ps.by_type && Object.keys(ps.by_type).length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">By Entity Type</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-wrap gap-1.5">
+              {Object.entries(ps.by_type)
+                .sort((a, b) => b[1] - a[1])
+                .map(([type, count]) => (
+                  <Badge key={type} variant="outline" className="text-xs">
+                    {type}: {count}
+                  </Badge>
+                ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Per-document summaries */}
       {density.document_summaries.length > 0 && (

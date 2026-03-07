@@ -9,6 +9,9 @@ GET /jobs/{job_id}/results returns masked NotificationSubjects.
 GET /jobs/{job_id}/status returns per-stage pipeline status (Step 8b).
 GET /jobs/recent returns recent jobs, optionally unlinked only (Step 8b).
 PATCH /jobs/{job_id} links a job to a project (Step 8b).
+
+POST /jobs/{job_id}/cancel cancels a running/pending job (Step 16b).
+DELETE /jobs/{job_id} soft-deletes (archives) a job (Step 16b).
 """
 from __future__ import annotations
 
@@ -757,6 +760,54 @@ def get_job_status(job_id: UUID, db: Session = Depends(get_db)):
     }
 
 
+@router.post("/{job_id}/cancel", summary="Cancel a running or pending job")
+def cancel_job(job_id: UUID, db: Session = Depends(get_db)):
+    """Set a running or pending job to cancelled status."""
+    run = db.execute(
+        select(IngestionRun).where(IngestionRun.id == job_id)
+    ).scalar_one_or_none()
+
+    if run is None:
+        raise HTTPException(status_code=404, detail=f"Job {str(job_id)!r} not found")
+
+    cancellable = {"pending", "running", "analyzing", "extracting"}
+    if run.status not in cancellable:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cannot cancel job with status {run.status!r}",
+        )
+
+    from datetime import datetime, timezone
+    run.status = "cancelled"
+    run.completed_at = datetime.now(timezone.utc)
+    db.flush()
+
+    return _ingestion_run_summary(run, db)
+
+
+@router.delete("/{job_id}", summary="Soft-delete (archive) a job")
+def archive_job(job_id: UUID, db: Session = Depends(get_db)):
+    """Set a completed/failed/cancelled job to archived status (soft delete)."""
+    run = db.execute(
+        select(IngestionRun).where(IngestionRun.id == job_id)
+    ).scalar_one_or_none()
+
+    if run is None:
+        raise HTTPException(status_code=404, detail=f"Job {str(job_id)!r} not found")
+
+    archivable = {"completed", "failed", "cancelled", "analyzed"}
+    if run.status not in archivable:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cannot archive job with status {run.status!r}",
+        )
+
+    run.status = "archived"
+    db.flush()
+
+    return _ingestion_run_summary(run, db)
+
+
 @router.patch("/{job_id}", summary="Update job (e.g. link to a project)")
 def patch_job(job_id: UUID, body: PatchJobBody, db: Session = Depends(get_db)):
     """Associate an existing job with a project.
@@ -856,9 +907,20 @@ def _ingestion_run_summary(run: IngestionRun, db: Session) -> dict:
         select(sqla_func.count(Document.id)).where(Document.ingestion_run_id == run.id)
     ).scalar() or 0
 
+    # First document filename for display
+    first_doc = db.execute(
+        select(Document.file_name)
+        .where(Document.ingestion_run_id == run.id)
+        .order_by(Document.created_at)
+        .limit(1)
+    ).scalar_one_or_none()
+
+    # Duration: use analysis_completed_at for analyzed jobs, completed_at otherwise
     duration_seconds: float | None = None
-    if run.started_at and run.completed_at:
-        duration_seconds = (run.completed_at - run.started_at).total_seconds()
+    if run.started_at:
+        end = run.completed_at or run.analysis_completed_at
+        if end:
+            duration_seconds = (end - run.started_at).total_seconds()
 
     return {
         "id": str(run.id),
@@ -867,8 +929,11 @@ def _ingestion_run_summary(run: IngestionRun, db: Session) -> dict:
         "source_path": run.source_path,
         "started_at": run.started_at.isoformat() if run.started_at else None,
         "completed_at": run.completed_at.isoformat() if run.completed_at else None,
+        "analysis_completed_at": run.analysis_completed_at.isoformat() if run.analysis_completed_at else None,
         "created_at": run.created_at.isoformat() if run.created_at else None,
         "document_count": doc_count,
+        "first_file_name": first_doc,
         "duration_seconds": duration_seconds,
+        "pipeline_mode": run.pipeline_mode,
         "error_summary": run.error_summary,
     }

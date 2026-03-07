@@ -13,9 +13,9 @@ from __future__ import annotations
 import logging
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func as sqla_func, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db
@@ -170,18 +170,58 @@ def get_density(project_id: UUID, db: Session = Depends(get_db)):
 
 
 @router.get("/{project_id}/jobs", summary="List jobs linked to project")
-def list_project_jobs(project_id: UUID, db: Session = Depends(get_db)):
+def list_project_jobs(
+    project_id: UUID,
+    status: str | None = Query(None, description="Filter by status"),
+    page: int = Query(1, ge=1, description="Page number"),
+    per_page: int = Query(20, ge=1, le=100, description="Items per page"),
+    db: Session = Depends(get_db),
+):
     project = db.get(Project, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    runs = db.execute(
+    stmt = (
         select(IngestionRun)
         .where(IngestionRun.project_id == project_id)
-        .order_by(IngestionRun.created_at.desc())
-    ).scalars().all()
+        .where(IngestionRun.status != "archived")
+    )
+    count_stmt = (
+        select(sqla_func.count(IngestionRun.id))
+        .where(IngestionRun.project_id == project_id)
+        .where(IngestionRun.status != "archived")
+    )
 
-    return [_job_summary(run, db) for run in runs]
+    if status:
+        if status == "archived":
+            # Special case: show archived
+            stmt = (
+                select(IngestionRun)
+                .where(IngestionRun.project_id == project_id)
+                .where(IngestionRun.status == "archived")
+            )
+            count_stmt = (
+                select(sqla_func.count(IngestionRun.id))
+                .where(IngestionRun.project_id == project_id)
+                .where(IngestionRun.status == "archived")
+            )
+        else:
+            stmt = stmt.where(IngestionRun.status == status)
+            count_stmt = count_stmt.where(IngestionRun.status == status)
+
+    total = db.execute(count_stmt).scalar() or 0
+
+    stmt = stmt.order_by(IngestionRun.created_at.desc())
+    stmt = stmt.offset((page - 1) * per_page).limit(per_page)
+
+    runs = db.execute(stmt).scalars().all()
+
+    return {
+        "jobs": [_job_summary(run, db) for run in runs],
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -227,15 +267,24 @@ def _density_dict(ds: DensitySummary) -> dict:
 
 
 def _job_summary(run: IngestionRun, db: Session) -> dict:
-    from sqlalchemy import func as sqla_func
-
     doc_count = db.execute(
         select(sqla_func.count(Document.id)).where(Document.ingestion_run_id == run.id)
     ).scalar() or 0
 
+    # First document filename for display
+    first_doc = db.execute(
+        select(Document.file_name)
+        .where(Document.ingestion_run_id == run.id)
+        .order_by(Document.created_at)
+        .limit(1)
+    ).scalar_one_or_none()
+
+    # Duration: use analysis_completed_at for analyzed jobs, completed_at otherwise
     duration_seconds: float | None = None
-    if run.started_at and run.completed_at:
-        duration_seconds = (run.completed_at - run.started_at).total_seconds()
+    if run.started_at:
+        end = run.completed_at or run.analysis_completed_at
+        if end:
+            duration_seconds = (end - run.started_at).total_seconds()
 
     return {
         "id": str(run.id),
@@ -244,8 +293,11 @@ def _job_summary(run: IngestionRun, db: Session) -> dict:
         "source_path": run.source_path,
         "started_at": run.started_at.isoformat() if run.started_at else None,
         "completed_at": run.completed_at.isoformat() if run.completed_at else None,
+        "analysis_completed_at": run.analysis_completed_at.isoformat() if run.analysis_completed_at else None,
         "created_at": run.created_at.isoformat() if run.created_at else None,
         "document_count": doc_count,
+        "first_file_name": first_doc,
         "duration_seconds": duration_seconds,
+        "pipeline_mode": run.pipeline_mode,
         "error_summary": run.error_summary,
     }

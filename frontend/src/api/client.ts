@@ -578,10 +578,20 @@ export interface JobSummary {
   source_path: string | null
   started_at: string | null
   completed_at: string | null
+  analysis_completed_at: string | null
   created_at: string | null
   document_count: number
+  first_file_name: string | null
   duration_seconds: number | null
+  pipeline_mode: string | null
   error_summary: string | null
+}
+
+export interface PaginatedJobs {
+  jobs: JobSummary[]
+  total: number
+  page: number
+  per_page: number
 }
 
 /** A single pipeline stage status within a job. */
@@ -629,9 +639,27 @@ export interface PatchJobBody {
   project_id: string
 }
 
-/** Get jobs linked to a project. */
-export function getProjectJobs(projectId: string): Promise<JobSummary[]> {
-  return api(`/projects/${projectId}/jobs`)
+/** Get jobs linked to a project with optional filtering and pagination. */
+export function getProjectJobs(
+  projectId: string,
+  opts?: { status?: string; page?: number; per_page?: number },
+): Promise<PaginatedJobs> {
+  const params = new URLSearchParams()
+  if (opts?.status) params.set("status", opts.status)
+  if (opts?.page) params.set("page", String(opts.page))
+  if (opts?.per_page) params.set("per_page", String(opts.per_page))
+  const qs = params.toString()
+  return api(`/projects/${projectId}/jobs${qs ? `?${qs}` : ""}`)
+}
+
+/** Cancel a running/pending job. */
+export function cancelJob(jobId: string): Promise<JobSummary> {
+  return api(`/jobs/${jobId}/cancel`, { method: "POST" })
+}
+
+/** Soft-delete (archive) a job. */
+export function archiveJob(jobId: string): Promise<JobSummary> {
+  return api(`/jobs/${jobId}`, { method: "DELETE" })
 }
 
 /** Get pipeline status for a job (8-stage breakdown). */
@@ -928,4 +956,23 @@ export async function startExtractStreaming(
 
 export function getDashboardSummary(): Promise<DashboardSummary> {
   return api("/dashboard/summary")
+}
+
+// ---------------------------------------------------------------------------
+// App Settings (read-only)
+// ---------------------------------------------------------------------------
+
+export interface AppSettings {
+  app_name: string
+  app_version: string
+  app_env: string
+  database_url_set: boolean
+  llm_assist_enabled: boolean
+  ollama_url: string
+  ollama_model: string
+  pii_masking_enabled: boolean
+}
+
+export function getAppSettings(): Promise<AppSettings> {
+  return api("/settings")
 }

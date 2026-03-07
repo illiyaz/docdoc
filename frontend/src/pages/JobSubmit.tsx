@@ -369,7 +369,7 @@ export function JobSubmit() {
             )}
             <div className="flex gap-3 pt-2">
               <button
-                onClick={() => navigate("/queues/low_confidence")}
+                onClick={() => navigate("/review")}
                 className="rounded-md bg-primary text-primary-foreground px-4 py-2 text-sm font-medium"
               >
                 View Review Queue &rarr;
