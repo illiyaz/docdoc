@@ -614,7 +614,7 @@ class TestExportAPI:
         _make_subject(db_session, project.id)
 
         resp = client.post(
-            f"/projects/{project.id}/exports",
+            f"/api/projects/{project.id}/exports",
             json={},
         )
         assert resp.status_code == 200
@@ -626,7 +626,7 @@ class TestExportAPI:
 
     def test_create_export_project_not_found(self, client):
         resp = client.post(
-            f"/projects/{uuid4()}/exports",
+            f"/api/projects/{uuid4()}/exports",
             json={},
         )
         assert resp.status_code == 404
@@ -636,48 +636,48 @@ class TestExportAPI:
         _make_subject(db_session, project.id)
 
         # Create two exports
-        client.post(f"/projects/{project.id}/exports", json={})
-        client.post(f"/projects/{project.id}/exports", json={})
+        client.post(f"/api/projects/{project.id}/exports", json={})
+        client.post(f"/api/projects/{project.id}/exports", json={})
 
-        resp = client.get(f"/projects/{project.id}/exports")
+        resp = client.get(f"/api/projects/{project.id}/exports")
         assert resp.status_code == 200
         assert len(resp.json()) == 2
 
     def test_list_exports_empty(self, db_session, client):
         project = _make_project(db_session)
-        resp = client.get(f"/projects/{project.id}/exports")
+        resp = client.get(f"/api/projects/{project.id}/exports")
         assert resp.status_code == 200
         assert resp.json() == []
 
     def test_list_exports_project_not_found(self, client):
-        resp = client.get(f"/projects/{uuid4()}/exports")
+        resp = client.get(f"/api/projects/{uuid4()}/exports")
         assert resp.status_code == 404
 
     def test_get_export(self, db_session, client):
         project = _make_project(db_session)
         _make_subject(db_session, project.id)
 
-        create_resp = client.post(f"/projects/{project.id}/exports", json={})
+        create_resp = client.post(f"/api/projects/{project.id}/exports", json={})
         export_id = create_resp.json()["id"]
 
-        resp = client.get(f"/projects/{project.id}/exports/{export_id}")
+        resp = client.get(f"/api/projects/{project.id}/exports/{export_id}")
         assert resp.status_code == 200
         assert resp.json()["id"] == export_id
         assert resp.json()["status"] == "completed"
 
     def test_get_export_not_found(self, db_session, client):
         project = _make_project(db_session)
-        resp = client.get(f"/projects/{project.id}/exports/{uuid4()}")
+        resp = client.get(f"/api/projects/{project.id}/exports/{uuid4()}")
         assert resp.status_code == 404
 
     def test_download_export(self, db_session, client):
         project = _make_project(db_session)
         _make_subject(db_session, project.id, name="Download Test")
 
-        create_resp = client.post(f"/projects/{project.id}/exports", json={})
+        create_resp = client.post(f"/api/projects/{project.id}/exports", json={})
         export_id = create_resp.json()["id"]
 
-        resp = client.get(f"/projects/{project.id}/exports/{export_id}/download")
+        resp = client.get(f"/api/projects/{project.id}/exports/{export_id}/download")
         assert resp.status_code == 200
         assert "text/csv" in resp.headers["content-type"]
         assert "canonical_name" in resp.text
@@ -687,16 +687,16 @@ class TestExportAPI:
         project = _make_project(db_session)
         _make_subject(db_session, project.id, email="confidential@corp.com")
 
-        create_resp = client.post(f"/projects/{project.id}/exports", json={})
+        create_resp = client.post(f"/api/projects/{project.id}/exports", json={})
         export_id = create_resp.json()["id"]
 
-        resp = client.get(f"/projects/{project.id}/exports/{export_id}/download")
+        resp = client.get(f"/api/projects/{project.id}/exports/{export_id}/download")
         assert resp.status_code == 200
         assert "confidential@corp.com" not in resp.text
 
     def test_download_not_found(self, db_session, client):
         project = _make_project(db_session)
-        resp = client.get(f"/projects/{project.id}/exports/{uuid4()}/download")
+        resp = client.get(f"/api/projects/{project.id}/exports/{uuid4()}/download")
         assert resp.status_code == 404
 
     def test_create_with_protocol_config(self, db_session, client):
@@ -709,7 +709,7 @@ class TestExportAPI:
         _make_subject(db_session, project.id)
 
         resp = client.post(
-            f"/projects/{project.id}/exports",
+            f"/api/projects/{project.id}/exports",
             json={"protocol_config_id": str(pc.id)},
         )
         assert resp.status_code == 200
@@ -717,7 +717,7 @@ class TestExportAPI:
 
         # Download and verify columns
         export_id = resp.json()["id"]
-        dl = client.get(f"/projects/{project.id}/exports/{export_id}/download")
+        dl = client.get(f"/api/projects/{project.id}/exports/{export_id}/download")
         reader = csv.reader(io.StringIO(dl.text))
         header = next(reader)
         assert header == ["canonical_name", "review_status"]
@@ -728,7 +728,7 @@ class TestExportAPI:
         _make_subject(db_session, project.id, name="Low", merge_confidence=0.30)
 
         resp = client.post(
-            f"/projects/{project.id}/exports",
+            f"/api/projects/{project.id}/exports",
             json={"filters": {"confidence_threshold": 0.80}},
         )
         assert resp.status_code == 200
@@ -738,7 +738,7 @@ class TestExportAPI:
         project = _make_project(db_session)
         _make_subject(db_session, project.id)
 
-        resp = client.post(f"/projects/{project.id}/exports", json={})
+        resp = client.post(f"/api/projects/{project.id}/exports", json={})
         data = resp.json()
 
         assert "id" in data

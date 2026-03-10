@@ -196,19 +196,19 @@ def _make_audit_event(
 
 class TestHealth:
     def test_health_returns_200(self, client: TestClient) -> None:
-        resp = client.get("/health")
+        resp = client.get("/api/health")
         assert resp.status_code == 200
 
     def test_health_body_has_status_ok(self, client: TestClient) -> None:
-        resp = client.get("/health")
+        resp = client.get("/api/health")
         assert resp.json()["status"] == "ok"
 
     def test_health_body_has_version(self, client: TestClient) -> None:
-        resp = client.get("/health")
+        resp = client.get("/api/health")
         assert "version" in resp.json()
 
     def test_health_content_type_is_json(self, client: TestClient) -> None:
-        resp = client.get("/health")
+        resp = client.get("/api/health")
         assert "application/json" in resp.headers["content-type"]
 
 
@@ -220,7 +220,7 @@ class TestHealth:
 class TestGetJob:
     def test_found(self, db_session: Session, client: TestClient) -> None:
         _make_notification_list(db_session, "job-1", ["sid-1"])
-        resp = client.get("/jobs/job-1")
+        resp = client.get("/api/jobs/job-1")
         assert resp.status_code == 200
         data = resp.json()
         assert data["job_id"] == "job-1"
@@ -229,7 +229,7 @@ class TestGetJob:
         assert data["subject_count"] == 1
 
     def test_not_found(self, client: TestClient) -> None:
-        resp = client.get("/jobs/nonexistent")
+        resp = client.get("/api/jobs/nonexistent")
         assert resp.status_code == 404
 
 
@@ -242,7 +242,7 @@ class TestGetJobResults:
     def test_returns_masked_email(self, db_session: Session, client: TestClient) -> None:
         subj = _make_subject(db_session, email="jane@example.com")
         _make_notification_list(db_session, "job-mask", [str(subj.subject_id)])
-        resp = client.get("/jobs/job-mask/results")
+        resp = client.get("/api/jobs/job-mask/results")
         assert resp.status_code == 200
         results = resp.json()
         assert len(results) == 1
@@ -251,50 +251,50 @@ class TestGetJobResults:
     def test_returns_masked_phone(self, db_session: Session, client: TestClient) -> None:
         subj = _make_subject(db_session, phone="+12025551234")
         _make_notification_list(db_session, "job-mask2", [str(subj.subject_id)])
-        resp = client.get("/jobs/job-mask2/results")
+        resp = client.get("/api/jobs/job-mask2/results")
         results = resp.json()
         assert results[0]["canonical_phone"] == "***-***-1234"
 
     def test_null_email_stays_null(self, db_session: Session, client: TestClient) -> None:
         subj = _make_subject(db_session, email=None)
         _make_notification_list(db_session, "job-null", [str(subj.subject_id)])
-        resp = client.get("/jobs/job-null/results")
+        resp = client.get("/api/jobs/job-null/results")
         results = resp.json()
         assert results[0]["canonical_email"] is None
 
     def test_null_phone_stays_null(self, db_session: Session, client: TestClient) -> None:
         subj = _make_subject(db_session, phone=None)
         _make_notification_list(db_session, "job-null2", [str(subj.subject_id)])
-        resp = client.get("/jobs/job-null2/results")
+        resp = client.get("/api/jobs/job-null2/results")
         results = resp.json()
         assert results[0]["canonical_phone"] is None
 
     def test_no_raw_email_in_response(self, db_session: Session, client: TestClient) -> None:
         subj = _make_subject(db_session, email="jane@example.com")
         _make_notification_list(db_session, "job-safe", [str(subj.subject_id)])
-        resp = client.get("/jobs/job-safe/results")
+        resp = client.get("/api/jobs/job-safe/results")
         assert "jane@example.com" not in resp.text
 
     def test_no_raw_phone_in_response(self, db_session: Session, client: TestClient) -> None:
         subj = _make_subject(db_session, phone="+12025551234")
         _make_notification_list(db_session, "job-safe2", [str(subj.subject_id)])
-        resp = client.get("/jobs/job-safe2/results")
+        resp = client.get("/api/jobs/job-safe2/results")
         assert "+12025551234" not in resp.text
 
     def test_address_not_in_response(self, db_session: Session, client: TestClient) -> None:
         subj = _make_subject(db_session)
         _make_notification_list(db_session, "job-addr", [str(subj.subject_id)])
-        resp = client.get("/jobs/job-addr/results")
+        resp = client.get("/api/jobs/job-addr/results")
         assert "123 Main St" not in resp.text
 
     def test_not_found(self, client: TestClient) -> None:
-        resp = client.get("/jobs/nonexistent/results")
+        resp = client.get("/api/jobs/nonexistent/results")
         assert resp.status_code == 404
 
     def test_response_shape(self, db_session: Session, client: TestClient) -> None:
         subj = _make_subject(db_session)
         _make_notification_list(db_session, "job-shape", [str(subj.subject_id)])
-        resp = client.get("/jobs/job-shape/results")
+        resp = client.get("/api/jobs/job-shape/results")
         item = resp.json()[0]
         assert "subject_id" in item
         assert "canonical_name" in item
@@ -310,7 +310,7 @@ class TestGetJobResults:
 
 class TestReviewQueues:
     def test_empty_queues(self, client: TestClient) -> None:
-        resp = client.get("/review/queues")
+        resp = client.get("/api/review/queues")
         assert resp.status_code == 200
         data = resp.json()
         assert data["low_confidence"] == 0
@@ -322,7 +322,7 @@ class TestReviewQueues:
         subj = _make_subject(db_session)
         _make_review_task(db_session, subj.subject_id, "low_confidence")
         _make_review_task(db_session, subj.subject_id, "escalation", role="LEGAL_REVIEWER")
-        resp = client.get("/review/queues")
+        resp = client.get("/api/review/queues")
         data = resp.json()
         assert data["low_confidence"] == 1
         assert data["escalation"] == 1
@@ -337,14 +337,14 @@ class TestReviewQueueList:
     def test_valid_queue_type(self, db_session: Session, client: TestClient) -> None:
         subj = _make_subject(db_session)
         task = _make_review_task(db_session, subj.subject_id, "low_confidence")
-        resp = client.get("/review/queues/low_confidence")
+        resp = client.get("/api/review/queues/low_confidence")
         assert resp.status_code == 200
         items = resp.json()
         assert len(items) == 1
         assert items[0]["review_task_id"] == str(task.review_task_id)
 
     def test_invalid_queue_type(self, client: TestClient) -> None:
-        resp = client.get("/review/queues/invalid_queue")
+        resp = client.get("/api/review/queues/invalid_queue")
         assert resp.status_code == 400
 
 
@@ -358,7 +358,7 @@ class TestReviewAssign:
         subj = _make_subject(db_session)
         task = _make_review_task(db_session, subj.subject_id, "low_confidence")
         resp = client.post(
-            f"/review/tasks/{task.review_task_id}/assign",
+            f"/api/review/tasks/{task.review_task_id}/assign",
             json={"reviewer_id": "rev-1", "role": "REVIEWER"},
         )
         assert resp.status_code == 200
@@ -369,14 +369,14 @@ class TestReviewAssign:
         subj = _make_subject(db_session)
         task = _make_review_task(db_session, subj.subject_id, "low_confidence")
         resp = client.post(
-            f"/review/tasks/{task.review_task_id}/assign",
+            f"/api/review/tasks/{task.review_task_id}/assign",
             json={"reviewer_id": "rev-1", "role": "QC_SAMPLER"},
         )
         assert resp.status_code == 400
 
     def test_not_found(self, client: TestClient) -> None:
         resp = client.post(
-            f"/review/tasks/{uuid4()}/assign",
+            f"/api/review/tasks/{uuid4()}/assign",
             json={"reviewer_id": "rev-1", "role": "REVIEWER"},
         )
         assert resp.status_code == 404
@@ -397,7 +397,7 @@ class TestReviewComplete:
         db_session.flush()
 
         resp = client.post(
-            f"/review/tasks/{task.review_task_id}/complete",
+            f"/api/review/tasks/{task.review_task_id}/complete",
             json={
                 "reviewer_id": "rev-1",
                 "role": "REVIEWER",
@@ -418,7 +418,7 @@ class TestReviewComplete:
         db_session.flush()
 
         resp = client.post(
-            f"/review/tasks/{task.review_task_id}/complete",
+            f"/api/review/tasks/{task.review_task_id}/complete",
             json={
                 "reviewer_id": "rev-1",
                 "role": "REVIEWER",
@@ -437,7 +437,7 @@ class TestReviewComplete:
         db_session.flush()
 
         resp = client.post(
-            f"/review/tasks/{task.review_task_id}/complete",
+            f"/api/review/tasks/{task.review_task_id}/complete",
             json={
                 "reviewer_id": "rev-1",
                 "role": "REVIEWER",
@@ -450,7 +450,7 @@ class TestReviewComplete:
 
     def test_not_found(self, client: TestClient) -> None:
         resp = client.post(
-            f"/review/tasks/{uuid4()}/complete",
+            f"/api/review/tasks/{uuid4()}/complete",
             json={
                 "reviewer_id": "rev-1",
                 "role": "REVIEWER",
@@ -468,7 +468,7 @@ class TestReviewComplete:
         db_session.flush()
 
         resp = client.post(
-            f"/review/tasks/{task.review_task_id}/complete",
+            f"/api/review/tasks/{task.review_task_id}/complete",
             json={
                 "reviewer_id": "rev-1",
                 "role": "REVIEWER",
@@ -489,7 +489,7 @@ class TestAuditHistory:
         sid = str(uuid4())
         _make_audit_event(db_session, sid, "human_review", "system", "triage")
         _make_audit_event(db_session, sid, "approval", "rev-1", "confirmed")
-        resp = client.get(f"/audit/{sid}/history")
+        resp = client.get(f"/api/audit/{sid}/history")
         assert resp.status_code == 200
         events = resp.json()
         assert len(events) == 2
@@ -499,7 +499,7 @@ class TestAuditHistory:
     def test_rationale_not_in_response(self, db_session: Session, client: TestClient) -> None:
         sid = str(uuid4())
         _make_audit_event(db_session, sid, "human_review", "system", "SECRET RATIONALE")
-        resp = client.get(f"/audit/{sid}/history")
+        resp = client.get(f"/api/audit/{sid}/history")
         events = resp.json()
         # rationale field must not appear in the response
         assert "rationale" not in events[0]
@@ -508,7 +508,7 @@ class TestAuditHistory:
     def test_response_shape(self, db_session: Session, client: TestClient) -> None:
         sid = str(uuid4())
         _make_audit_event(db_session, sid, "approval", "legal-1", "ok")
-        resp = client.get(f"/audit/{sid}/history")
+        resp = client.get(f"/api/audit/{sid}/history")
         ev = resp.json()[0]
         assert "event_type" in ev
         assert "actor" in ev
@@ -517,13 +517,13 @@ class TestAuditHistory:
         assert "regulatory_basis" in ev
 
     def test_not_found(self, client: TestClient) -> None:
-        resp = client.get(f"/audit/{uuid4()}/history")
+        resp = client.get(f"/api/audit/{uuid4()}/history")
         assert resp.status_code == 404
 
     def test_actor_matches(self, db_session: Session, client: TestClient) -> None:
         sid = str(uuid4())
         _make_audit_event(db_session, sid, "human_review", "auto-triage", "test")
-        resp = client.get(f"/audit/{sid}/history")
+        resp = client.get(f"/api/audit/{sid}/history")
         assert resp.json()[0]["actor"] == "auto-triage"
 
 
@@ -566,7 +566,7 @@ class TestPIIFilterMiddleware:
 class TestDiagnosticFile:
     def test_unsupported_file_type_returns_400(self, client: TestClient) -> None:
         resp = client.post(
-            "/diagnostic/file",
+            "/api/diagnostic/file",
             files={"file": ("test.xyz", b"hello", "application/octet-stream")},
             data={"protocol_id": "hipaa_breach_rule"},
         )
@@ -575,7 +575,7 @@ class TestDiagnosticFile:
 
     def test_unknown_protocol_returns_400(self, client: TestClient) -> None:
         resp = client.post(
-            "/diagnostic/file",
+            "/api/diagnostic/file",
             files={"file": ("test.csv", b"name,ssn\nJohn,123-45-6789", "text/csv")},
             data={"protocol_id": "nonexistent_protocol"},
         )
@@ -637,7 +637,7 @@ class TestDiagnosticFile:
             with patch("app.api.routes.diagnostic.get_reader", return_value=_FakeReader()):
                 csv_content = b"name,ssn\nJohn Doe,123-45-6789\nJane Doe,987-65-4321\n"
                 resp = client.post(
-                    "/diagnostic/file",
+                    "/api/diagnostic/file",
                     files={"file": ("test.csv", csv_content, "text/csv")},
                     data={"protocol_id": "hipaa_breach_rule"},
                 )
@@ -691,7 +691,7 @@ class TestDiagnosticFile:
 class TestUploadFiles:
     def test_upload_single_csv(self, client: TestClient, tmp_path) -> None:
         resp = client.post(
-            "/jobs/upload",
+            "/api/jobs/upload",
             files=[("files", ("data.csv", b"name,ssn\nJohn,123-45-6789", "text/csv"))],
         )
         assert resp.status_code == 200
@@ -702,7 +702,7 @@ class TestUploadFiles:
 
     def test_upload_multiple_files(self, client: TestClient) -> None:
         resp = client.post(
-            "/jobs/upload",
+            "/api/jobs/upload",
             files=[
                 ("files", ("a.csv", b"col1\nval1", "text/csv")),
                 ("files", ("b.pdf", b"%PDF-fake", "application/pdf")),
@@ -713,7 +713,7 @@ class TestUploadFiles:
 
     def test_upload_skips_unsupported(self, client: TestClient) -> None:
         resp = client.post(
-            "/jobs/upload",
+            "/api/jobs/upload",
             files=[
                 ("files", (".DS_Store", b"junk", "application/octet-stream")),
                 ("files", ("notes.txt", b"hello", "text/plain")),
@@ -725,7 +725,7 @@ class TestUploadFiles:
 
     def test_upload_all_unsupported_returns_400(self, client: TestClient) -> None:
         resp = client.post(
-            "/jobs/upload",
+            "/api/jobs/upload",
             files=[
                 ("files", (".DS_Store", b"junk", "application/octet-stream")),
                 ("files", ("readme.txt", b"hello", "text/plain")),
@@ -738,7 +738,7 @@ class TestUploadFiles:
         """Two-step flow: upload files, then submit job with upload_id."""
         # Step 1: upload
         up_resp = client.post(
-            "/jobs/upload",
+            "/api/jobs/upload",
             files=[("files", ("data.csv", b"name\nJohn", "text/csv"))],
         )
         assert up_resp.status_code == 200
@@ -763,7 +763,7 @@ class TestUploadFiles:
             mock_nl.return_value = MagicMock()
 
             resp = client.post(
-                "/jobs",
+                "/api/jobs",
                 json={"protocol_id": "hipaa_breach_rule", "upload_id": upload_id},
             )
 
@@ -772,7 +772,7 @@ class TestUploadFiles:
 
     def test_create_job_both_fields_returns_422(self, client: TestClient) -> None:
         resp = client.post(
-            "/jobs",
+            "/api/jobs",
             json={
                 "protocol_id": "hipaa_breach_rule",
                 "source_directory": "/some/path",
@@ -783,14 +783,14 @@ class TestUploadFiles:
 
     def test_create_job_neither_field_returns_422(self, client: TestClient) -> None:
         resp = client.post(
-            "/jobs",
+            "/api/jobs",
             json={"protocol_id": "hipaa_breach_rule"},
         )
         assert resp.status_code == 422
 
     def test_expired_upload_returns_404(self, client: TestClient) -> None:
         resp = client.post(
-            "/jobs",
+            "/api/jobs",
             json={
                 "protocol_id": "hipaa_breach_rule",
                 "upload_id": "nonexistent-upload-id",
@@ -805,7 +805,7 @@ class TestUploadFiles:
 
         # Upload a file first
         up_resp = client.post(
-            "/jobs/upload",
+            "/api/jobs/upload",
             files=[("files", ("data.csv", b"name\nJohn", "text/csv"))],
         )
         upload_id = up_resp.json()["upload_id"]
@@ -842,7 +842,7 @@ class TestUploadFiles:
                 patch("app.pii.presidio_engine.PresidioEngine", return_value=_FakeEngine()),
             ):
                 resp = client.post(
-                    "/jobs/run/stream",
+                    "/api/jobs/run/stream",
                     json={"protocol_id": "hipaa_breach_rule", "upload_id": upload_id},
                 )
 
@@ -875,7 +875,7 @@ class TestUploadFiles:
         import os
 
         up_resp = client.post(
-            "/jobs/upload",
+            "/api/jobs/upload",
             files=[("files", ("data.csv", b"name\nJohn", "text/csv"))],
         )
         upload_id = up_resp.json()["upload_id"]
@@ -897,7 +897,7 @@ class TestUploadFiles:
             mock_nl.return_value = MagicMock()
 
             client.post(
-                "/jobs",
+                "/api/jobs",
                 json={"protocol_id": "hipaa_breach_rule", "upload_id": upload_id},
             )
 
@@ -911,7 +911,7 @@ class TestUploadFiles:
 
 class TestProjectsCRUD:
     def test_create_project(self, client: TestClient) -> None:
-        resp = client.post("/projects", json={"name": "Test Breach"})
+        resp = client.post("/api/projects", json={"name": "Test Breach"})
         assert resp.status_code == 200
         data = resp.json()
         assert data["name"] == "Test Breach"
@@ -919,44 +919,44 @@ class TestProjectsCRUD:
         assert "id" in data
 
     def test_list_projects(self, client: TestClient) -> None:
-        client.post("/projects", json={"name": "P1"})
-        client.post("/projects", json={"name": "P2"})
-        resp = client.get("/projects")
+        client.post("/api/projects", json={"name": "P1"})
+        client.post("/api/projects", json={"name": "P2"})
+        resp = client.get("/api/projects")
         assert resp.status_code == 200
         assert len(resp.json()) == 2
 
     def test_get_project(self, client: TestClient) -> None:
-        cr = client.post("/projects", json={"name": "Detail"}).json()
-        resp = client.get(f"/projects/{cr['id']}")
+        cr = client.post("/api/projects", json={"name": "Detail"}).json()
+        resp = client.get(f"/api/projects/{cr['id']}")
         assert resp.status_code == 200
         assert resp.json()["name"] == "Detail"
         assert "protocols" in resp.json()
 
     def test_get_project_not_found(self, client: TestClient) -> None:
-        resp = client.get(f"/projects/{uuid4()}")
+        resp = client.get(f"/api/projects/{uuid4()}")
         assert resp.status_code == 404
 
     def test_update_project(self, client: TestClient) -> None:
-        cr = client.post("/projects", json={"name": "Old"}).json()
-        resp = client.patch(f"/projects/{cr['id']}", json={"name": "New", "status": "archived"})
+        cr = client.post("/api/projects", json={"name": "Old"}).json()
+        resp = client.patch(f"/api/projects/{cr['id']}", json={"name": "New", "status": "archived"})
         assert resp.status_code == 200
         assert resp.json()["name"] == "New"
         assert resp.json()["status"] == "archived"
 
     def test_update_project_invalid_status(self, client: TestClient) -> None:
-        cr = client.post("/projects", json={"name": "P"}).json()
-        resp = client.patch(f"/projects/{cr['id']}", json={"status": "invalid"})
+        cr = client.post("/api/projects", json={"name": "P"}).json()
+        resp = client.patch(f"/api/projects/{cr['id']}", json={"status": "invalid"})
         assert resp.status_code == 400
 
     def test_catalog_summary_empty(self, client: TestClient) -> None:
-        cr = client.post("/projects", json={"name": "Empty"}).json()
-        resp = client.get(f"/projects/{cr['id']}/catalog-summary")
+        cr = client.post("/api/projects", json={"name": "Empty"}).json()
+        resp = client.get(f"/api/projects/{cr['id']}/catalog-summary")
         assert resp.status_code == 200
         assert resp.json()["total_documents"] == 0
 
     def test_density_empty(self, client: TestClient) -> None:
-        cr = client.post("/projects", json={"name": "Empty"}).json()
-        resp = client.get(f"/projects/{cr['id']}/density")
+        cr = client.post("/api/projects", json={"name": "Empty"}).json()
+        resp = client.get(f"/api/projects/{cr['id']}/density")
         assert resp.status_code == 200
         assert resp.json()["project_summary"] is None
 
@@ -968,9 +968,9 @@ class TestProjectsCRUD:
 
 class TestProtocolConfigCRUD:
     def test_create_protocol_config(self, client: TestClient) -> None:
-        pr = client.post("/projects", json={"name": "P"}).json()
+        pr = client.post("/api/projects", json={"name": "P"}).json()
         resp = client.post(
-            f"/projects/{pr['id']}/protocols",
+            f"/api/projects/{pr['id']}/protocols",
             json={
                 "name": "HIPAA Custom",
                 "base_protocol_id": "hipaa_breach_rule",
@@ -984,31 +984,31 @@ class TestProtocolConfigCRUD:
         assert data["config_json"]["sampling_rate"] == 0.1
 
     def test_list_protocol_configs(self, client: TestClient) -> None:
-        pr = client.post("/projects", json={"name": "P"}).json()
-        client.post(f"/projects/{pr['id']}/protocols", json={"name": "A", "config_json": {}})
-        client.post(f"/projects/{pr['id']}/protocols", json={"name": "B", "config_json": {}})
-        resp = client.get(f"/projects/{pr['id']}/protocols")
+        pr = client.post("/api/projects", json={"name": "P"}).json()
+        client.post(f"/api/projects/{pr['id']}/protocols", json={"name": "A", "config_json": {}})
+        client.post(f"/api/projects/{pr['id']}/protocols", json={"name": "B", "config_json": {}})
+        resp = client.get(f"/api/projects/{pr['id']}/protocols")
         assert resp.status_code == 200
         assert len(resp.json()) == 2
 
     def test_get_protocol_config(self, client: TestClient) -> None:
-        pr = client.post("/projects", json={"name": "P"}).json()
+        pr = client.post("/api/projects", json={"name": "P"}).json()
         pc = client.post(
-            f"/projects/{pr['id']}/protocols",
+            f"/api/projects/{pr['id']}/protocols",
             json={"name": "Test", "config_json": {"key": "val"}},
         ).json()
-        resp = client.get(f"/projects/{pr['id']}/protocols/{pc['id']}")
+        resp = client.get(f"/api/projects/{pr['id']}/protocols/{pc['id']}")
         assert resp.status_code == 200
         assert resp.json()["name"] == "Test"
 
     def test_update_protocol_config(self, client: TestClient) -> None:
-        pr = client.post("/projects", json={"name": "P"}).json()
+        pr = client.post("/api/projects", json={"name": "P"}).json()
         pc = client.post(
-            f"/projects/{pr['id']}/protocols",
+            f"/api/projects/{pr['id']}/protocols",
             json={"name": "Old", "config_json": {}},
         ).json()
         resp = client.patch(
-            f"/projects/{pr['id']}/protocols/{pc['id']}",
+            f"/api/projects/{pr['id']}/protocols/{pc['id']}",
             json={"name": "New", "status": "active"},
         )
         assert resp.status_code == 200
@@ -1016,23 +1016,23 @@ class TestProtocolConfigCRUD:
         assert resp.json()["status"] == "active"
 
     def test_update_locked_returns_409(self, client: TestClient) -> None:
-        pr = client.post("/projects", json={"name": "P"}).json()
+        pr = client.post("/api/projects", json={"name": "P"}).json()
         pc = client.post(
-            f"/projects/{pr['id']}/protocols",
+            f"/api/projects/{pr['id']}/protocols",
             json={"name": "Lock", "config_json": {}},
         ).json()
         # Lock it
-        client.patch(f"/projects/{pr['id']}/protocols/{pc['id']}", json={"status": "locked"})
+        client.patch(f"/api/projects/{pr['id']}/protocols/{pc['id']}", json={"status": "locked"})
         # Try to edit
         resp = client.patch(
-            f"/projects/{pr['id']}/protocols/{pc['id']}",
+            f"/api/projects/{pr['id']}/protocols/{pc['id']}",
             json={"name": "Fail"},
         )
         assert resp.status_code == 409
 
     def test_not_found(self, client: TestClient) -> None:
-        pr = client.post("/projects", json={"name": "P"}).json()
-        resp = client.get(f"/projects/{pr['id']}/protocols/{uuid4()}")
+        pr = client.post("/api/projects", json={"name": "P"}).json()
+        resp = client.get(f"/api/projects/{pr['id']}/protocols/{uuid4()}")
         assert resp.status_code == 404
 
 
@@ -1043,7 +1043,7 @@ class TestProtocolConfigCRUD:
 
 class TestBaseProtocols:
     def test_returns_all_base_protocols(self, client: TestClient) -> None:
-        resp = client.get("/protocols/base")
+        resp = client.get("/api/protocols/base")
         assert resp.status_code == 200
         data = resp.json()
         assert isinstance(data, list)
@@ -1058,14 +1058,14 @@ class TestBaseProtocols:
         assert "state_breach_generic" in ids
 
     def test_new_protocols_included(self, client: TestClient) -> None:
-        resp = client.get("/protocols/base")
+        resp = client.get("/api/protocols/base")
         data = resp.json()
         ids = [p["protocol_id"] for p in data]
         assert "bipa" in ids
         assert "dpdpa" in ids
 
     def test_response_shape(self, client: TestClient) -> None:
-        resp = client.get("/protocols/base")
+        resp = client.get("/api/protocols/base")
         data = resp.json()
         for p in data:
             assert "protocol_id" in p
@@ -1125,7 +1125,7 @@ class TestProjectJobs:
     def test_list_jobs_for_project(self, db_session: Session, client: TestClient) -> None:
         project = _make_project(db_session)
         run = _make_ingestion_run(db_session, project_id=project.id, status="completed")
-        resp = client.get(f"/projects/{project.id}/jobs")
+        resp = client.get(f"/api/projects/{project.id}/jobs")
         assert resp.status_code == 200
         data = resp.json()
         assert data["total"] == 1
@@ -1136,14 +1136,14 @@ class TestProjectJobs:
 
     def test_empty_project_returns_empty_list(self, db_session: Session, client: TestClient) -> None:
         project = _make_project(db_session)
-        resp = client.get(f"/projects/{project.id}/jobs")
+        resp = client.get(f"/api/projects/{project.id}/jobs")
         assert resp.status_code == 200
         data = resp.json()
         assert data["jobs"] == []
         assert data["total"] == 0
 
     def test_project_not_found(self, client: TestClient) -> None:
-        resp = client.get(f"/projects/{uuid4()}/jobs")
+        resp = client.get(f"/api/projects/{uuid4()}/jobs")
         assert resp.status_code == 404
 
     def test_only_returns_project_jobs(self, db_session: Session, client: TestClient) -> None:
@@ -1154,7 +1154,7 @@ class TestProjectJobs:
         _make_ingestion_run(db_session, project_id=p2.id)
         _make_ingestion_run(db_session)  # unlinked
 
-        resp = client.get(f"/projects/{p1.id}/jobs")
+        resp = client.get(f"/api/projects/{p1.id}/jobs")
         assert resp.status_code == 200
         assert len(resp.json()["jobs"]) == 1
 
@@ -1166,7 +1166,7 @@ class TestProjectJobs:
             started_at=datetime(2025, 1, 1, tzinfo=timezone.utc),
             completed_at=datetime(2025, 1, 1, 0, 5, 0, tzinfo=timezone.utc),
         )
-        resp = client.get(f"/projects/{project.id}/jobs")
+        resp = client.get(f"/api/projects/{project.id}/jobs")
         data = resp.json()
         assert "jobs" in data
         assert "total" in data
@@ -1189,7 +1189,7 @@ class TestProjectJobs:
     def test_duration_none_when_not_completed(self, db_session: Session, client: TestClient) -> None:
         project = _make_project(db_session)
         _make_ingestion_run(db_session, project_id=project.id, status="running")
-        resp = client.get(f"/projects/{project.id}/jobs")
+        resp = client.get(f"/api/projects/{project.id}/jobs")
         assert resp.json()["jobs"][0]["duration_seconds"] is None
 
 
@@ -1201,19 +1201,19 @@ class TestProjectJobs:
 class TestJobStatus:
     def test_returns_status(self, db_session: Session, client: TestClient) -> None:
         run = _make_ingestion_run(db_session, status="running")
-        resp = client.get(f"/jobs/{run.id}/status")
+        resp = client.get(f"/api/jobs/{run.id}/status")
         assert resp.status_code == 200
         data = resp.json()
         assert data["id"] == str(run.id)
         assert data["status"] == "running"
 
     def test_not_found(self, client: TestClient) -> None:
-        resp = client.get(f"/jobs/{uuid4()}/status")
+        resp = client.get(f"/api/jobs/{uuid4()}/status")
         assert resp.status_code == 404
 
     def test_has_8_stages(self, db_session: Session, client: TestClient) -> None:
         run = _make_ingestion_run(db_session)
-        resp = client.get(f"/jobs/{run.id}/status")
+        resp = client.get(f"/api/jobs/{run.id}/status")
         data = resp.json()
         assert len(data["stages"]) == 8
         stage_names = [s["name"] for s in data["stages"]]
@@ -1228,7 +1228,7 @@ class TestJobStatus:
 
     def test_completed_run_all_stages_completed(self, db_session: Session, client: TestClient) -> None:
         run = _make_ingestion_run(db_session, status="completed")
-        resp = client.get(f"/jobs/{run.id}/status")
+        resp = client.get(f"/api/jobs/{run.id}/status")
         data = resp.json()
         assert data["progress_pct"] == 100.0
         for stage in data["stages"]:
@@ -1236,7 +1236,7 @@ class TestJobStatus:
 
     def test_pending_run_no_progress(self, db_session: Session, client: TestClient) -> None:
         run = _make_ingestion_run(db_session, status="pending")
-        resp = client.get(f"/jobs/{run.id}/status")
+        resp = client.get(f"/api/jobs/{run.id}/status")
         data = resp.json()
         assert data["progress_pct"] == 0.0
         assert data["current_stage"] == "Discovery"
@@ -1251,14 +1251,14 @@ class TestJobStatus:
             }
         }
         run = _make_ingestion_run(db_session, status="running", metrics=metrics)
-        resp = client.get(f"/jobs/{run.id}/status")
+        resp = client.get(f"/api/jobs/{run.id}/status")
         data = resp.json()
         assert data["current_stage"] == "PII Detection"
         assert data["progress_pct"] == 25.0  # 2/8 completed
 
     def test_response_shape(self, db_session: Session, client: TestClient) -> None:
         run = _make_ingestion_run(db_session)
-        resp = client.get(f"/jobs/{run.id}/status")
+        resp = client.get(f"/api/jobs/{run.id}/status")
         data = resp.json()
         assert "id" in data
         assert "status" in data
@@ -1273,7 +1273,7 @@ class TestJobStatus:
 
     def test_stage_shape(self, db_session: Session, client: TestClient) -> None:
         run = _make_ingestion_run(db_session)
-        resp = client.get(f"/jobs/{run.id}/status")
+        resp = client.get(f"/api/jobs/{run.id}/status")
         stage = resp.json()["stages"][0]
         assert "name" in stage
         assert "status" in stage
@@ -1283,7 +1283,7 @@ class TestJobStatus:
 
     def test_failed_run_stages(self, db_session: Session, client: TestClient) -> None:
         run = _make_ingestion_run(db_session, status="failed", error_summary="Out of memory")
-        resp = client.get(f"/jobs/{run.id}/status")
+        resp = client.get(f"/api/jobs/{run.id}/status")
         data = resp.json()
         assert data["error_summary"] == "Out of memory"
         for stage in data["stages"]:
@@ -1298,7 +1298,7 @@ class TestJobStatus:
 class TestRunJobPolling:
     def test_returns_job_id(self, db_session: Session, client: TestClient) -> None:
         resp = client.post(
-            "/jobs/run",
+            "/api/jobs/run",
             json={
                 "protocol_id": "hipaa_breach_rule",
                 "source_directory": "/data/test",
@@ -1312,7 +1312,7 @@ class TestRunJobPolling:
     def test_with_project_id(self, db_session: Session, client: TestClient) -> None:
         project = _make_project(db_session)
         resp = client.post(
-            "/jobs/run",
+            "/api/jobs/run",
             json={
                 "protocol_id": "hipaa_breach_rule",
                 "source_directory": "/data/test",
@@ -1325,7 +1325,7 @@ class TestRunJobPolling:
 
     def test_with_protocol_config_id(self, db_session: Session, client: TestClient) -> None:
         resp = client.post(
-            "/jobs/run",
+            "/api/jobs/run",
             json={
                 "protocol_id": "hipaa_breach_rule",
                 "source_directory": "/data/test",
@@ -1338,7 +1338,7 @@ class TestRunJobPolling:
 
     def test_invalid_protocol_returns_400(self, client: TestClient) -> None:
         resp = client.post(
-            "/jobs/run",
+            "/api/jobs/run",
             json={
                 "protocol_id": "nonexistent",
                 "source_directory": "/data/test",
@@ -1349,14 +1349,14 @@ class TestRunJobPolling:
     def test_job_is_pollable_via_status(self, db_session: Session, client: TestClient) -> None:
         """After POST /jobs/run, the job should be queryable via GET /jobs/{id}/status."""
         run_resp = client.post(
-            "/jobs/run",
+            "/api/jobs/run",
             json={
                 "protocol_id": "hipaa_breach_rule",
                 "source_directory": "/data/test",
             },
         )
         job_id = run_resp.json()["job_id"]
-        status_resp = client.get(f"/jobs/{job_id}/status")
+        status_resp = client.get(f"/api/jobs/{job_id}/status")
         assert status_resp.status_code == 200
         assert status_resp.json()["status"] == "pending"
 
@@ -1370,12 +1370,12 @@ class TestRecentJobs:
     def test_returns_recent_jobs(self, db_session: Session, client: TestClient) -> None:
         _make_ingestion_run(db_session)
         _make_ingestion_run(db_session)
-        resp = client.get("/jobs/recent")
+        resp = client.get("/api/jobs/recent")
         assert resp.status_code == 200
         assert len(resp.json()) == 2
 
     def test_empty_returns_empty_list(self, client: TestClient) -> None:
-        resp = client.get("/jobs/recent")
+        resp = client.get("/api/jobs/recent")
         assert resp.status_code == 200
         assert resp.json() == []
 
@@ -1385,7 +1385,7 @@ class TestRecentJobs:
         _make_ingestion_run(db_session)  # unlinked
         _make_ingestion_run(db_session)  # unlinked
 
-        resp = client.get("/jobs/recent?unlinked=true")
+        resp = client.get("/api/jobs/recent?unlinked=true")
         assert resp.status_code == 200
         data = resp.json()
         assert len(data) == 2
@@ -1396,20 +1396,20 @@ class TestRecentJobs:
         project = _make_project(db_session)
         _make_ingestion_run(db_session, project_id=project.id)
         _make_ingestion_run(db_session)
-        resp = client.get("/jobs/recent?unlinked=false")
+        resp = client.get("/api/jobs/recent?unlinked=false")
         assert resp.status_code == 200
         assert len(resp.json()) == 2
 
     def test_limit_parameter(self, db_session: Session, client: TestClient) -> None:
         for _ in range(5):
             _make_ingestion_run(db_session)
-        resp = client.get("/jobs/recent?limit=3")
+        resp = client.get("/api/jobs/recent?limit=3")
         assert resp.status_code == 200
         assert len(resp.json()) == 3
 
     def test_response_shape(self, db_session: Session, client: TestClient) -> None:
         _make_ingestion_run(db_session)
-        resp = client.get("/jobs/recent")
+        resp = client.get("/api/jobs/recent")
         job = resp.json()[0]
         assert "id" in job
         assert "project_id" in job
@@ -1429,7 +1429,7 @@ class TestPatchJob:
         project = _make_project(db_session)
         run = _make_ingestion_run(db_session)
         resp = client.patch(
-            f"/jobs/{run.id}",
+            f"/api/jobs/{run.id}",
             json={"project_id": str(project.id)},
         )
         assert resp.status_code == 200
@@ -1438,7 +1438,7 @@ class TestPatchJob:
 
     def test_job_not_found(self, client: TestClient) -> None:
         resp = client.patch(
-            f"/jobs/{uuid4()}",
+            f"/api/jobs/{uuid4()}",
             json={"project_id": str(uuid4())},
         )
         assert resp.status_code == 404
@@ -1446,7 +1446,7 @@ class TestPatchJob:
     def test_project_not_found(self, db_session: Session, client: TestClient) -> None:
         run = _make_ingestion_run(db_session)
         resp = client.patch(
-            f"/jobs/{run.id}",
+            f"/api/jobs/{run.id}",
             json={"project_id": str(uuid4())},
         )
         assert resp.status_code == 404
@@ -1456,7 +1456,7 @@ class TestPatchJob:
         project = _make_project(db_session)
         run = _make_ingestion_run(db_session, project_id=project.id)
         resp = client.patch(
-            f"/jobs/{run.id}",
+            f"/api/jobs/{run.id}",
             json={"project_id": str(project.id)},
         )
         assert resp.status_code == 200
@@ -1467,7 +1467,7 @@ class TestPatchJob:
         p2 = _make_project(db_session, name="P2")
         run = _make_ingestion_run(db_session, project_id=p1.id)
         resp = client.patch(
-            f"/jobs/{run.id}",
+            f"/api/jobs/{run.id}",
             json={"project_id": str(p2.id)},
         )
         assert resp.status_code == 409
@@ -1478,14 +1478,14 @@ class TestPatchJob:
         run = _make_ingestion_run(db_session)
 
         # Initially no jobs for the project
-        resp1 = client.get(f"/projects/{project.id}/jobs")
+        resp1 = client.get(f"/api/projects/{project.id}/jobs")
         assert resp1.json()["total"] == 0
 
         # Link the job
-        client.patch(f"/jobs/{run.id}", json={"project_id": str(project.id)})
+        client.patch(f"/api/jobs/{run.id}", json={"project_id": str(project.id)})
 
         # Now the job should appear
-        resp2 = client.get(f"/projects/{project.id}/jobs")
+        resp2 = client.get(f"/api/projects/{project.id}/jobs")
         assert resp2.json()["total"] == 1
         assert resp2.json()["jobs"][0]["id"] == str(run.id)
 
@@ -1511,11 +1511,11 @@ class TestPIIFilterAllowlist:
         monkeypatch.setenv("PII_MASKING_ENABLED", "true")
         get_settings.cache_clear()
 
-        pr = client.post("/projects", json={"name": "PII Test"})
+        pr = client.post("/api/projects", json={"name": "PII Test"})
         assert pr.status_code == 200
         pid = pr.json()["id"]
 
-        resp = client.get(f"/projects/{pid}/catalog-summary")
+        resp = client.get(f"/api/projects/{pid}/catalog-summary")
         assert resp.status_code == 200
         assert resp.json()["total_documents"] == 0
         get_settings.cache_clear()
@@ -1528,11 +1528,11 @@ class TestPIIFilterAllowlist:
         monkeypatch.setenv("PII_MASKING_ENABLED", "true")
         get_settings.cache_clear()
 
-        pr = client.post("/projects", json={"name": "PII Detail"})
+        pr = client.post("/api/projects", json={"name": "PII Detail"})
         assert pr.status_code == 200
         pid = pr.json()["id"]
 
-        resp = client.get(f"/projects/{pid}")
+        resp = client.get(f"/api/projects/{pid}")
         assert resp.status_code == 200
         assert resp.json()["name"] == "PII Detail"
         get_settings.cache_clear()
@@ -1545,11 +1545,11 @@ class TestPIIFilterAllowlist:
         monkeypatch.setenv("PII_MASKING_ENABLED", "true")
         get_settings.cache_clear()
 
-        pr = client.post("/projects", json={"name": "PII Density"})
+        pr = client.post("/api/projects", json={"name": "PII Density"})
         assert pr.status_code == 200
         pid = pr.json()["id"]
 
-        resp = client.get(f"/projects/{pid}/density")
+        resp = client.get(f"/api/projects/{pid}/density")
         assert resp.status_code == 200
         get_settings.cache_clear()
 
@@ -1575,7 +1575,7 @@ class TestAnalysisReview:
         )
         db_session.add(run)
         db_session.commit()
-        resp = client.get(f"/jobs/{run.id}/analysis")
+        resp = client.get(f"/api/jobs/{run.id}/analysis")
         assert resp.status_code == 200
         assert resp.json() == []
 
@@ -1611,7 +1611,7 @@ class TestAnalysisReview:
         )
         db_session.add(review)
         db_session.commit()
-        resp = client.get(f"/jobs/{run.id}/analysis")
+        resp = client.get(f"/api/jobs/{run.id}/analysis")
         assert resp.status_code == 200
         data = resp.json()
         assert len(data) == 1
@@ -1650,7 +1650,7 @@ class TestAnalysisReview:
         db_session.add(review)
         db_session.commit()
         resp = client.post(
-            f"/jobs/{run.id}/documents/{doc.id}/approve",
+            f"/api/jobs/{run.id}/documents/{doc.id}/approve",
             json={"reviewer_id": "user1", "rationale": "Looks good"},
         )
         assert resp.status_code == 200
@@ -1689,7 +1689,7 @@ class TestAnalysisReview:
         db_session.add(review)
         db_session.commit()
         resp = client.post(
-            f"/jobs/{run.id}/documents/{doc.id}/reject",
+            f"/api/jobs/{run.id}/documents/{doc.id}/reject",
             json={"reviewer_id": "user1", "rationale": "Wrong doc type"},
         )
         assert resp.status_code == 200
@@ -1727,7 +1727,7 @@ class TestAnalysisReview:
             db_session.add(review)
         db_session.commit()
         resp = client.post(
-            f"/jobs/{run.id}/approve-all",
+            f"/api/jobs/{run.id}/approve-all",
             json={"reviewer_id": "user1"},
         )
         assert resp.status_code == 200
@@ -1764,7 +1764,7 @@ class TestAnalysisReview:
         db_session.add(review)
         db_session.commit()
         resp = client.post(
-            f"/jobs/{run.id}/documents/{doc.id}/approve",
+            f"/api/jobs/{run.id}/documents/{doc.id}/approve",
             json={"reviewer_id": "user1"},
         )
         assert resp.status_code == 409
@@ -1772,5 +1772,5 @@ class TestAnalysisReview:
     def test_job_not_found_returns_404(self, client: TestClient) -> None:
         """GET /jobs/{fake_id}/analysis returns 404 for non-existent job."""
         fake_id = str(uuid4())
-        resp = client.get(f"/jobs/{fake_id}/analysis")
+        resp = client.get(f"/api/jobs/{fake_id}/analysis")
         assert resp.status_code == 404

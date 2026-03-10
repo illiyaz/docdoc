@@ -613,7 +613,7 @@ class TestDensityEndpointIntegration:
         DensityTask(api_session).run(project.id, extraction_inputs=inputs)
         api_session.commit()
 
-        resp = client.get(f"/projects/{project.id}/density")
+        resp = client.get(f"/api/projects/{project.id}/density")
         assert resp.status_code == 200
         data = resp.json()
 
@@ -642,7 +642,7 @@ class TestDensityEndpointIntegration:
         project = _make_project(api_session)
         api_session.commit()
 
-        resp = client.get(f"/projects/{project.id}/density")
+        resp = client.get(f"/api/projects/{project.id}/density")
         assert resp.status_code == 200
         data = resp.json()
 
@@ -650,5 +650,5 @@ class TestDensityEndpointIntegration:
         assert data["document_summaries"] == []
 
     def test_density_endpoint_404_for_unknown_project(self, client) -> None:
-        resp = client.get(f"/projects/{uuid4()}/density")
+        resp = client.get(f"/api/projects/{uuid4()}/density")
         assert resp.status_code == 404

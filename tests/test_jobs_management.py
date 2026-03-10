@@ -119,24 +119,24 @@ class TestCancelJob:
 
     def test_cancel_running_job(self, db_session: Session, client: TestClient) -> None:
         run = _make_run(db_session, status="running", started_at=datetime.now(timezone.utc))
-        resp = client.post(f"/jobs/{run.id}/cancel")
+        resp = client.post(f"/api/jobs/{run.id}/cancel")
         assert resp.status_code == 200
         data = resp.json()
         assert data["status"] == "cancelled"
 
     def test_cancel_pending_job(self, db_session: Session, client: TestClient) -> None:
         run = _make_run(db_session, status="pending")
-        resp = client.post(f"/jobs/{run.id}/cancel")
+        resp = client.post(f"/api/jobs/{run.id}/cancel")
         assert resp.status_code == 200
         assert resp.json()["status"] == "cancelled"
 
     def test_cancel_completed_job_fails(self, db_session: Session, client: TestClient) -> None:
         run = _make_run(db_session, status="completed")
-        resp = client.post(f"/jobs/{run.id}/cancel")
+        resp = client.post(f"/api/jobs/{run.id}/cancel")
         assert resp.status_code == 409
 
     def test_cancel_nonexistent_job(self, client: TestClient) -> None:
-        resp = client.post(f"/jobs/{uuid4()}/cancel")
+        resp = client.post(f"/api/jobs/{uuid4()}/cancel")
         assert resp.status_code == 404
 
 
@@ -149,35 +149,35 @@ class TestArchiveJob:
 
     def test_archive_completed_job(self, db_session: Session, client: TestClient) -> None:
         run = _make_run(db_session, status="completed")
-        resp = client.delete(f"/jobs/{run.id}")
+        resp = client.delete(f"/api/jobs/{run.id}")
         assert resp.status_code == 200
         assert resp.json()["status"] == "archived"
 
     def test_archive_failed_job(self, db_session: Session, client: TestClient) -> None:
         run = _make_run(db_session, status="failed")
-        resp = client.delete(f"/jobs/{run.id}")
+        resp = client.delete(f"/api/jobs/{run.id}")
         assert resp.status_code == 200
         assert resp.json()["status"] == "archived"
 
     def test_archive_cancelled_job(self, db_session: Session, client: TestClient) -> None:
         run = _make_run(db_session, status="cancelled")
-        resp = client.delete(f"/jobs/{run.id}")
+        resp = client.delete(f"/api/jobs/{run.id}")
         assert resp.status_code == 200
         assert resp.json()["status"] == "archived"
 
     def test_archive_analyzed_job(self, db_session: Session, client: TestClient) -> None:
         run = _make_run(db_session, status="analyzed")
-        resp = client.delete(f"/jobs/{run.id}")
+        resp = client.delete(f"/api/jobs/{run.id}")
         assert resp.status_code == 200
         assert resp.json()["status"] == "archived"
 
     def test_archive_running_job_fails(self, db_session: Session, client: TestClient) -> None:
         run = _make_run(db_session, status="running")
-        resp = client.delete(f"/jobs/{run.id}")
+        resp = client.delete(f"/api/jobs/{run.id}")
         assert resp.status_code == 409
 
     def test_archive_nonexistent_job(self, client: TestClient) -> None:
-        resp = client.delete(f"/jobs/{uuid4()}")
+        resp = client.delete(f"/api/jobs/{uuid4()}")
         assert resp.status_code == 404
 
 
@@ -194,7 +194,7 @@ class TestJobsFiltering:
         _make_run(db_session, proj, status="completed")
         _make_run(db_session, proj, status="failed")
 
-        resp = client.get(f"/projects/{proj.id}/jobs?status=completed")
+        resp = client.get(f"/api/projects/{proj.id}/jobs?status=completed")
         assert resp.status_code == 200
         data = resp.json()
         assert data["total"] == 2
@@ -206,7 +206,7 @@ class TestJobsFiltering:
         _make_run(db_session, proj, status="completed")
         _make_run(db_session, proj, status="archived")
 
-        resp = client.get(f"/projects/{proj.id}/jobs")
+        resp = client.get(f"/api/projects/{proj.id}/jobs")
         assert resp.status_code == 200
         data = resp.json()
         assert data["total"] == 1
@@ -217,7 +217,7 @@ class TestJobsFiltering:
         _make_run(db_session, proj, status="completed")
         _make_run(db_session, proj, status="archived")
 
-        resp = client.get(f"/projects/{proj.id}/jobs?status=archived")
+        resp = client.get(f"/api/projects/{proj.id}/jobs?status=archived")
         assert resp.status_code == 200
         data = resp.json()
         assert data["total"] == 1
@@ -230,7 +230,7 @@ class TestJobsFiltering:
             _make_run(db_session, proj, status="completed")
 
         # Page 1
-        resp = client.get(f"/projects/{proj.id}/jobs?per_page=5&page=1")
+        resp = client.get(f"/api/projects/{proj.id}/jobs?per_page=5&page=1")
         data = resp.json()
         assert data["total"] == 15
         assert data["page"] == 1
@@ -238,12 +238,12 @@ class TestJobsFiltering:
         assert len(data["jobs"]) == 5
 
         # Page 3
-        resp = client.get(f"/projects/{proj.id}/jobs?per_page=5&page=3")
+        resp = client.get(f"/api/projects/{proj.id}/jobs?per_page=5&page=3")
         data = resp.json()
         assert len(data["jobs"]) == 5
 
         # Page 4 (last, partial)
-        resp = client.get(f"/projects/{proj.id}/jobs?per_page=5&page=4")
+        resp = client.get(f"/api/projects/{proj.id}/jobs?per_page=5&page=4")
         data = resp.json()
         assert data["total"] == 15
 
@@ -251,7 +251,7 @@ class TestJobsFiltering:
         proj = _make_project(db_session)
         _make_run(db_session, proj, status="completed")
 
-        resp = client.get(f"/projects/{proj.id}/jobs")
+        resp = client.get(f"/api/projects/{proj.id}/jobs")
         data = resp.json()
         assert "jobs" in data
         assert "total" in data
@@ -271,7 +271,7 @@ class TestJobResponseFields:
         run = _make_run(db_session, proj, status="completed")
         _make_doc(db_session, run, file_name="report.pdf")
 
-        resp = client.get(f"/projects/{proj.id}/jobs")
+        resp = client.get(f"/api/projects/{proj.id}/jobs")
         data = resp.json()
         assert len(data["jobs"]) == 1
         assert data["jobs"][0]["first_file_name"] == "report.pdf"
@@ -280,7 +280,7 @@ class TestJobResponseFields:
         proj = _make_project(db_session)
         _make_run(db_session, proj, status="completed")
 
-        resp = client.get(f"/projects/{proj.id}/jobs")
+        resp = client.get(f"/api/projects/{proj.id}/jobs")
         data = resp.json()
         assert data["jobs"][0]["first_file_name"] is None
 
@@ -288,7 +288,7 @@ class TestJobResponseFields:
         proj = _make_project(db_session)
         _make_run(db_session, proj, status="analyzed", pipeline_mode="two_phase")
 
-        resp = client.get(f"/projects/{proj.id}/jobs")
+        resp = client.get(f"/api/projects/{proj.id}/jobs")
         data = resp.json()
         assert data["jobs"][0]["pipeline_mode"] == "two_phase"
 
@@ -303,7 +303,7 @@ class TestJobResponseFields:
             analysis_completed_at=now,
         )
 
-        resp = client.get(f"/projects/{proj.id}/jobs")
+        resp = client.get(f"/api/projects/{proj.id}/jobs")
         data = resp.json()
         # Duration should be ~120 seconds (analysis_completed_at - started_at)
         assert data["jobs"][0]["duration_seconds"] is not None
@@ -314,6 +314,6 @@ class TestJobResponseFields:
         now = datetime.now(timezone.utc)
         _make_run(db_session, proj, status="analyzed", analysis_completed_at=now)
 
-        resp = client.get(f"/projects/{proj.id}/jobs")
+        resp = client.get(f"/api/projects/{proj.id}/jobs")
         data = resp.json()
         assert data["jobs"][0]["analysis_completed_at"] is not None

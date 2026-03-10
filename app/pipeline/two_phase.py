@@ -29,6 +29,7 @@ from app.core.settings import get_settings
 from app.db.models import Document, DocumentAnalysisReview, IngestionRun
 from app.db.repositories import ExtractionRepository
 from app.pipeline.auto_approve import should_auto_approve
+from app.pipeline.record_mapper import detection_to_pii_record
 from app.pipeline.content_onset import (
     filter_sample_blocks,
     find_content_onset_from_blocks,
@@ -710,6 +711,7 @@ def extract_generator(
         from app.readers.registry import get_reader
         from app.rra.entity_resolver import PIIRecord
 
+        settings = get_settings()
         engine = PresidioEngine()
         all_records: list[PIIRecord] = []
 
@@ -781,13 +783,7 @@ def extract_generator(
                         pass  # best-effort; use unfiltered detections
 
                 for det in detections:
-                    rec = PIIRecord(
-                        record_id=str(uuid4()),
-                        entity_type=det.entity_type,
-                        normalized_value=det.block.text[det.start:det.end] if hasattr(det, "block") else "",
-                        source_document_id=str(doc.id),
-                        page_or_sheet=det.block.page_or_sheet if hasattr(det, "block") else 0,
-                    )
+                    rec = detection_to_pii_record(det, str(doc.id))
                     all_records.append(rec)
             except Exception as e:
                 logger.warning("Detection failed for doc %s: %s", doc.file_name, type(e).__name__)
@@ -819,9 +815,35 @@ def extract_generator(
         dedup = Deduplicator(db)
         subjects = dedup.build_subjects(groups)
 
+        # Set project_id on each NotificationSubject
+        for subj in subjects:
+            if subj.project_id is None and run.project_id is not None:
+                subj.project_id = run.project_id
+
+        # Create ReviewTasks based on merge confidence
+        review_count = 0
+        try:
+            from app.review.queue_manager import QueueManager
+            qm = QueueManager(db)
+            for i, group in enumerate(groups):
+                if i >= len(subjects):
+                    break
+                subj = subjects[i]
+                sid = str(subj.subject_id)
+                if group.merge_confidence < 0.60:
+                    qm.create_task("escalation", sid)
+                    review_count += 1
+                elif group.merge_confidence < 0.80 or group.needs_human_review:
+                    qm.create_task("low_confidence", sid)
+                    review_count += 1
+        except Exception:
+            pass  # best-effort; don't fail pipeline if review queue fails
+
+        db.flush()
+
         yield _sse({
             "stage": "deduplication", "status": "complete",
-            "message": f"Built {len(subjects)} subject(s)",
+            "message": f"Built {len(subjects)} subject(s), {review_count} for review",
         })
 
         # --- Stage 4: Notification ---

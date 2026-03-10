@@ -296,7 +296,7 @@ class TestApproveWithDecisions:
         review = _make_review(db_session, doc, run)
 
         resp = client.post(
-            f"/jobs/{run.id}/documents/{doc.id}/approve",
+            f"/api/jobs/{run.id}/documents/{doc.id}/approve",
             json={
                 "reviewer_id": "test-reviewer",
                 "rationale": "Approved with selections",
@@ -331,7 +331,7 @@ class TestApproveWithDecisions:
         review = _make_review(db_session, doc, run)
 
         resp = client.post(
-            f"/jobs/{run.id}/documents/{doc.id}/approve",
+            f"/api/jobs/{run.id}/documents/{doc.id}/approve",
             json={"reviewer_id": "test-reviewer"},
         )
         assert resp.status_code == 200
@@ -353,7 +353,7 @@ class TestProtocolMappingEndpoint:
         doc = _make_doc(db_session, run, file_name="medical.pdf")
         _make_extraction(db_session, doc, run, pii_type="PERSON", masked_value="Jane D***")
 
-        resp = client.get(f"/jobs/{run.id}/documents/{doc.id}/protocol-mapping")
+        resp = client.get(f"/api/jobs/{run.id}/documents/{doc.id}/protocol-mapping")
         assert resp.status_code == 200
 
         data = resp.json()
@@ -368,7 +368,7 @@ class TestProtocolMappingEndpoint:
         run = _make_run(db_session, protocol_id="state_breach")
         doc = _make_doc(db_session, run, file_name="doc.pdf")
 
-        resp = client.get(f"/jobs/{run.id}/documents/{doc.id}/protocol-mapping")
+        resp = client.get(f"/api/jobs/{run.id}/documents/{doc.id}/protocol-mapping")
         assert resp.status_code == 200
 
         data = resp.json()
@@ -383,7 +383,7 @@ class TestProtocolMappingEndpoint:
         doc = _make_doc(db_session, run, file_name="card.pdf")
         _make_extraction(db_session, doc, run, pii_type="PERSON", masked_value="Cardholder")
 
-        resp = client.get(f"/jobs/{run.id}/documents/{doc.id}/protocol-mapping")
+        resp = client.get(f"/api/jobs/{run.id}/documents/{doc.id}/protocol-mapping")
         data = resp.json()
         coverage = data["coverage"]
 
@@ -407,7 +407,7 @@ class TestBulkTypeToggle:
         review = _make_review(db_session, doc, run)
 
         resp = client.post(
-            f"/jobs/{run.id}/documents/{doc.id}/approve",
+            f"/api/jobs/{run.id}/documents/{doc.id}/approve",
             json={
                 "reviewer_id": "reviewer",
                 "detection_decisions": [
@@ -432,7 +432,7 @@ class TestBulkTypeToggle:
         review = _make_review(db_session, doc, run)
 
         resp = client.post(
-            f"/jobs/{run.id}/documents/{doc.id}/approve",
+            f"/api/jobs/{run.id}/documents/{doc.id}/approve",
             json={
                 "reviewer_id": "reviewer",
                 "detection_decisions": [

@@ -128,6 +128,7 @@ project-root/
 │   ├── pipeline/
 │   │   ├── dag.py                 # Prefect DAG wiring
 │   │   ├── two_phase.py           # Two-phase pipeline: analyze_generator + extract_generator
+│   │   ├── record_mapper.py       # DetectionResult → PIIRecord with raw_* fields populated
 │   │   ├── content_onset.py       # Generalized content onset detection (all file types)
 │   │   └── auto_approve.py        # Auto-approve logic for document analysis review
 │   ├── pdf/
@@ -333,7 +334,7 @@ These are detailed in [docs/SCHEMA.md](docs/SCHEMA.md). Summary:
 | 15. Field-Level Review + Protocol Mapping | COMPLETE | Two-tier detection toggle (type-level bulk + individual override) before extraction approval. Protocol field mapping shows required vs detected vs missing fields with completeness percentage. `DetectionReviewDecision` model + `detection_review_decisions` table (migration 0009, 19 total tables). Phase 2 extraction only runs on included types. `PROTOCOL_REQUIRED_FIELDS` for 12 protocols. Frontend: protocol mapping section + detection controls with toggles + "Approve with selections" button. 53 tests. |
 | 16. UX Consolidation: Dashboard, Jobs, Sidebar, Density | COMPLETE | **16a Dashboard DONE** — command center with stat cards, needs attention, running jobs, active projects, recent activity feed (GET /dashboard/summary), 10 tests. **16b Jobs Tab DONE** — cancel/archive endpoints, status filter, pagination, first_file_name, 20 tests. **16c Sidebar DONE** — consolidated 8→5 items: Dashboard, Projects, Review Queue (merged 4 queues), Jobs, Settings. ReviewQueue.tsx, Settings.tsx (app config + diagnostic). **16d Density DONE** — state-driven display (empty explanation vs summary cards + category bars + per-doc table). |
 
-**1840 tests passing after Steps 1–16.**
+**1864 tests passing after Steps 1–16 + record mapper fix.**
 
 See [docs/PLAN.md](docs/PLAN.md) for active steps and [docs/PLAN_COMPLETED.md](docs/PLAN_COMPLETED.md) for completed reference.
 

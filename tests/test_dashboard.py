@@ -138,7 +138,7 @@ class TestDashboardEmpty:
     """Empty database returns zeros and empty lists."""
 
     def test_empty_state(self, client: TestClient) -> None:
-        resp = client.get("/dashboard/summary")
+        resp = client.get("/api/dashboard/summary")
         assert resp.status_code == 200
         data = resp.json()
 
@@ -164,7 +164,7 @@ class TestDashboardStats:
         _make_doc(db_session, run, status="processed")
         _make_doc(db_session, run, file_name="b.pdf", status="processed")
 
-        resp = client.get("/dashboard/summary")
+        resp = client.get("/api/dashboard/summary")
         data = resp.json()
 
         assert data["stats"]["active_projects"] == 2
@@ -181,7 +181,7 @@ class TestNeedsAttention:
         doc = _make_doc(db_session, run)
         _make_review(db_session, doc, run, status="pending_review")
 
-        resp = client.get("/dashboard/summary")
+        resp = client.get("/api/dashboard/summary")
         data = resp.json()
 
         assert data["stats"]["pending_reviews"] == 1
@@ -199,7 +199,7 @@ class TestRunningJobs:
         _make_doc(db_session, run, status="processed")
         _make_doc(db_session, run, file_name="b.pdf", status="discovered")
 
-        resp = client.get("/dashboard/summary")
+        resp = client.get("/api/dashboard/summary")
         data = resp.json()
 
         assert len(data["running_jobs"]) == 1
@@ -220,7 +220,7 @@ class TestRecentActivity:
             completed_at=datetime.now(timezone.utc),
         )
 
-        resp = client.get("/dashboard/summary")
+        resp = client.get("/api/dashboard/summary")
         data = resp.json()
 
         job_events = [e for e in data["recent_activity"] if e["type"] == "job_completed"]
@@ -234,7 +234,7 @@ class TestRecentActivity:
         _make_run(db_session, proj, status="completed", completed_at=now - timedelta(hours=2))
         _make_run(db_session, proj, status="completed", completed_at=now - timedelta(hours=1))
 
-        resp = client.get("/dashboard/summary")
+        resp = client.get("/api/dashboard/summary")
         data = resp.json()
 
         timestamps = [e["timestamp"] for e in data["recent_activity"] if e["timestamp"]]
@@ -252,7 +252,7 @@ class TestRecentActivity:
                 completed_at=now - timedelta(minutes=i),
             )
 
-        resp = client.get("/dashboard/summary")
+        resp = client.get("/api/dashboard/summary")
         data = resp.json()
 
         assert len(data["recent_activity"]) <= 20
@@ -275,7 +275,7 @@ class TestActiveProjects:
         r2.updated_at = now
         db_session.flush()
 
-        resp = client.get("/dashboard/summary")
+        resp = client.get("/api/dashboard/summary")
         data = resp.json()
 
         names = [p["name"] for p in data["active_projects"]]
@@ -287,7 +287,7 @@ class TestActiveProjects:
         _make_doc(db_session, run, file_name="a.pdf")
         _make_doc(db_session, run, file_name="b.pdf")
 
-        resp = client.get("/dashboard/summary")
+        resp = client.get("/api/dashboard/summary")
         data = resp.json()
 
         match = [p for p in data["active_projects"] if p["name"] == "WithDocs"]
@@ -300,7 +300,7 @@ class TestActiveProjects:
         doc = _make_doc(db_session, run)
         _make_review(db_session, doc, run, status="pending_review")
 
-        resp = client.get("/dashboard/summary")
+        resp = client.get("/api/dashboard/summary")
         data = resp.json()
 
         match = [p for p in data["active_projects"] if p["name"] == "Pending"]

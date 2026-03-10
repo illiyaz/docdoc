@@ -34,6 +34,7 @@ from app.db.models import Document, IngestionRun, NotificationList, Notification
 from app.notification.list_builder import build_notification_list, get_notification_subjects
 from app.protocols.registry import ProtocolRegistry
 from app.rra.deduplicator import Deduplicator
+from app.pipeline.record_mapper import detection_to_pii_record
 from app.rra.entity_resolver import EntityResolver
 from app.tasks.discovery import DiscoveryTask, FilesystemConnector
 
@@ -410,15 +411,8 @@ def _pipeline_generator(
             blocks = reader.read()
             detections = engine.analyze(blocks)
 
-            from app.rra.entity_resolver import PIIRecord
-
             for det in detections:
-                rec = PIIRecord(
-                    record_id=str(uuid4()),
-                    entity_type=det.entity_type,
-                    normalized_value=det.text if hasattr(det, "text") else "",
-                    source_document_id=doc_info["source_path"],
-                )
+                rec = detection_to_pii_record(det, doc_info["source_path"])
                 all_records.append(rec)
 
         yield _sse({
@@ -440,9 +434,36 @@ def _pipeline_generator(
         yield _sse({"stage": "deduplication", "status": "running", "message": "Building notification subjects..."})
         dedup = Deduplicator(db)
         subjects = dedup.build_subjects(groups)
+
+        # Set project_id on each NotificationSubject
+        for subj in subjects:
+            if subj.project_id is None and run.project_id is not None:
+                subj.project_id = run.project_id
+
+        # Create ReviewTasks based on merge confidence
+        review_count = 0
+        try:
+            from app.review.queue_manager import QueueManager
+            qm = QueueManager(db)
+            for i, group in enumerate(groups):
+                if i >= len(subjects):
+                    break
+                subj = subjects[i]
+                sid = str(subj.subject_id)
+                if group.merge_confidence < 0.60:
+                    qm.create_task("escalation", sid)
+                    review_count += 1
+                elif group.merge_confidence < 0.80 or group.needs_human_review:
+                    qm.create_task("low_confidence", sid)
+                    review_count += 1
+        except Exception:
+            pass  # best-effort; don't fail pipeline if review queue fails
+
+        db.flush()
+
         yield _sse({
             "stage": "deduplication", "status": "complete",
-            "message": f"Built {len(subjects)} subject(s)",
+            "message": f"Built {len(subjects)} subject(s), {review_count} for review",
         })
 
         # --- Stage 6: Notification ---
@@ -641,16 +662,8 @@ def create_job(
             reader = get_reader(doc_info["source_path"])
             blocks = reader.read()
             detections = engine.analyze(blocks)
-            # Convert detections to PIIRecord-like objects for entity resolver
-            from app.rra.entity_resolver import PIIRecord
-
             for det in detections:
-                rec = PIIRecord(
-                    record_id=str(uuid4()),
-                    entity_type=det.entity_type,
-                    normalized_value=det.text if hasattr(det, "text") else "",
-                    source_document_id=doc_info["source_path"],
-                )
+                rec = detection_to_pii_record(det, doc_info["source_path"])
                 all_records.append(rec)
 
         # 4. Entity resolution

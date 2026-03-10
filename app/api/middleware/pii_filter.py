@@ -36,12 +36,12 @@ _SKIP_HEADERS = frozenset({"content-length", "transfer-encoding"})
 # credit-card regex pattern.  The /jobs/{id}/results endpoint is *not*
 # listed here because it returns notification subjects with PII fields.
 _PII_SAFE_PATH_PREFIXES: tuple[str, ...] = (
-    "/health",
-    "/projects",
-    "/protocols",
-    "/jobs/recent",
-    "/jobs/protocols",
-    "/jobs/run",
+    "/api/health",
+    "/api/projects",
+    "/api/protocols",
+    "/api/jobs/recent",
+    "/api/jobs/protocols",
+    "/api/jobs/run",
 )
 
 

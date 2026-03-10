@@ -372,7 +372,7 @@ class TestCatalogSummaryIntegration:
         CatalogerTask(api_session).run(docs)
         api_session.commit()
 
-        resp = client.get(f"/projects/{project.id}/catalog-summary")
+        resp = client.get(f"/api/projects/{project.id}/catalog-summary")
         assert resp.status_code == 200
         data = resp.json()
 
