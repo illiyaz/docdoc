@@ -68,6 +68,30 @@ _REFERENCE_LABEL_PATTERN = re.compile(
 # Entity types that are prone to false positives on common words / short nums
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Financial term deny-list for PERSON false positives (Step 17)
+# ---------------------------------------------------------------------------
+# Terms that appear on financial/pension documents and should never be
+# classified as PERSON names.
+
+FINANCIAL_TERM_DENY_LIST = frozenset({
+    "lump sum", "transfer value", "pension", "premium", "annuity",
+    "retirement", "benefit", "contribution", "entitlement", "remuneration",
+    "scheme", "fund", "allowance", "deduction", "commission",
+    "qualifying", "protected rights", "pensionable", "guaranteed minimum",
+    "final remuneration", "basic scheme", "buy-out", "buy out",
+    "salary", "earnings", "dividend", "interest", "capital",
+    "gratuity", "stipend", "bonus", "rebate", "refund",
+    "withdrawal", "deposit", "balance", "credit", "debit",
+})
+
+# Title patterns for cross-type suppression
+_TITLE_PATTERN = re.compile(
+    r"^(?:mr|mrs|ms|miss|dr|prof|rev|sir|dame|lord|lady)\b",
+    re.IGNORECASE,
+)
+
+
 _FP_PRONE_ENTITY_TYPES = frozenset({
     "STUDENT_ID",
     "VAT_EU",
@@ -168,10 +192,17 @@ def is_likely_false_positive(
         (is_fp, reason) — True if the detection should be suppressed,
         with a human-readable reason for the audit log.
     """
+    text_lower = detected_text.strip().lower()
+
+    # ------------------------------------------------------------------
+    # 0. PERSON: financial term deny-list (Step 17)
+    # ------------------------------------------------------------------
+    if entity_type == "PERSON":
+        if text_lower in FINANCIAL_TERM_DENY_LIST:
+            return True, f"financial_term: '{detected_text}' is a financial term, not a person"
+
     if entity_type not in _FP_PRONE_ENTITY_TYPES:
         return False, ""
-
-    text_lower = detected_text.strip().lower()
 
     # ------------------------------------------------------------------
     # 1. Common-word deny-list (STUDENT_ID, VAT_EU)
@@ -245,3 +276,94 @@ def is_likely_false_positive(
             return True, f"currency_pattern: '{detected_text}' is a financial amount, not a phone number"
 
     return False, ""
+
+
+# ---------------------------------------------------------------------------
+# Cross-type suppression (Step 17)
+# ---------------------------------------------------------------------------
+
+def cross_type_suppression(
+    detections: list,
+) -> list:
+    """Suppress ambiguous detections when the same text is classified as multiple types.
+
+    When the same text span is detected as both PERSON and LOCATION (or ORGANIZATION),
+    apply heuristics to keep the more likely classification.
+
+    Rules for PERSON vs LOCATION:
+    - Has title (Mr/Mrs/Dr/Prof) → keep PERSON
+    - Contains digits → suppress PERSON
+    - Matches FINANCIAL_TERM_DENY_LIST → suppress PERSON
+    - Default: keep LOCATION, suppress PERSON
+
+    Rules for PERSON vs ORGANIZATION:
+    - Default: keep ORGANIZATION (less FP-prone)
+
+    Parameters
+    ----------
+    detections:
+        List of DetectionResult objects (from PresidioEngine.analyze()).
+
+    Returns
+    -------
+    list
+        Filtered detections with ambiguous duplicates removed.
+    """
+    if not detections:
+        return detections
+
+    # Group by (start, end) text span
+    from collections import defaultdict
+
+    span_groups: dict[tuple, list] = defaultdict(list)
+    for det in detections:
+        key = (det.start, det.end)
+        span_groups[key].append(det)
+
+    keep: list = []
+    for key, group in span_groups.items():
+        if len(group) == 1:
+            keep.append(group[0])
+            continue
+
+        types_in_group = {d.entity_type for d in group}
+        has_person = "PERSON" in types_in_group
+        has_location = bool(types_in_group & {"LOCATION", "ADDRESS"})
+        has_org = "ORGANIZATION" in types_in_group
+
+        if has_person and (has_location or has_org):
+            # Get the detected text
+            det_text = ""
+            for d in group:
+                if hasattr(d, "block") and d.block:
+                    det_text = d.block.text[d.start:d.end]
+                    break
+
+            text_lower = det_text.strip().lower()
+            keep_person = False
+
+            # Has title → keep PERSON
+            if _TITLE_PATTERN.match(det_text.strip()):
+                keep_person = True
+            # Contains digits → suppress PERSON
+            elif any(c.isdigit() for c in det_text):
+                keep_person = False
+            # Financial term → suppress PERSON
+            elif text_lower in FINANCIAL_TERM_DENY_LIST:
+                keep_person = False
+            # Default: suppress PERSON in favor of LOCATION/ORG
+            else:
+                keep_person = False
+
+            for d in group:
+                if d.entity_type == "PERSON":
+                    if keep_person:
+                        keep.append(d)
+                else:
+                    if not keep_person:
+                        keep.append(d)
+        else:
+            # No PERSON vs LOCATION/ORG conflict — keep all
+            keep.extend(group)
+
+    return keep

@@ -1194,7 +1194,6 @@ Step 15: Field-level detection review + protocol mapping.
     Update CLAUDE.md.
 ```
 
----
 
 ### Step 16 — UX Consolidation: Dashboard, Jobs, Sidebar, Density (PENDING)
 
@@ -1634,4 +1633,447 @@ Step 16 Part 2: Sidebar navigation consolidation + Density tab clarity.
 8. Run pytest on ALL changed files. Fix failures up to 3 attempts.
    Document any blockers in docs/BLOCKERS.md. Update CLAUDE.md with
    everything done including test counts.
+```
+
+---
+
+### Step 17 — Cross-Page Template Linking + FP Cleanup + Auto-Export (PENDING)
+
+**Goal:** Handle real-world multi-page documents where one individual's PII spans multiple pages. The LLM reads enough pages to detect repeating templates, groups pages into per-individual records, and feeds pre-grouped data to entity resolution. Also fix remaining false positive patterns (financial terms as PERSON) and auto-generate exports after job completion.
+
+**Observed problem (Boosey & Hawkes Pension Transfer — multi-individual, multi-page):**
+
+A 6-page PDF with 2 individuals, 3 pages each:
+```
+Pages 1-3: K P Acheampong
+  Page 1: Statement of Entitlement (name, scheme name, transfer values £5170)
+  Page 2: Member Details (name, address 85 Waltings Gardens London NW2 3UD, DOB 10-Aug-1959, NI NE724362D)
+  Page 3: Benefit Components (pension £861.31, lump sum, spouse/dependant details)
+
+Pages 4-6: M S Alcock
+  Page 4: Same template as page 1 (transfer values £16713)
+  Page 5: Same template as page 2 (address 3 Whitworth Road Wellingborough, DOB 29-Aug-1960, NI WK393925C)
+  Page 6: Same template as page 3
+```
+
+**Current failures:**
+1. Page-by-page extraction creates isolated PIIRecords — "K P Acheampong" on page 1 is never linked to "NE724362D" on page 2
+2. EntityResolver gets records with only one raw_* field each → all merge confidence = 1.0 (each record is its own group) → no cross-page merging
+3. "Lump Sum", "Harrow Weald", "Buckman", "Gallick" classified as PERSON (financial terms and location names)
+4. "Cole WI726762D" — name + NI number concatenated (extraction boundary error)
+5. CSV export shows 20+ garbage rows instead of 2 clean individuals
+6. No auto-export after job completion — user must manually trigger
+
+---
+
+#### 17a. Document Template Detection
+
+**Extension to `app/structure/document_schema.py`:**
+
+```python
+@dataclass
+class PageRole:
+    page_offset: int            # 0, 1, 2 within template
+    role: str                   # "financial_summary", "member_details", "benefit_details"
+    pii_fields_expected: list[str]  # ["PERSON", "LOCATION", "DATE_OF_BIRTH", "NI_NUMBER"]
+    is_identity_page: bool      # True if this page has the primary subject name
+
+@dataclass
+class DocumentTemplate:
+    """Describes a repeating multi-page template within a document."""
+    template_name: str              # "pension_transfer_statement"
+    pages_per_instance: int         # 3
+    total_instances_estimate: int   # 2 (based on total pages / pages_per_instance)
+    page_roles: list[PageRole]
+    identity_page_offset: int       # 0 — which page within the template has the name
+    
+    # For extraction: group pages into instances
+    def get_instance_pages(self, total_pages: int) -> list[list[int]]:
+        """Returns [[0,1,2], [3,4,5]] for a 6-page doc with 3-page template."""
+        instances = []
+        for start in range(0, total_pages, self.pages_per_instance):
+            end = min(start + self.pages_per_instance, total_pages)
+            instances.append(list(range(start, end)))
+        return instances
+
+@dataclass
+class DocumentSchema:
+    # ... all existing fields ...
+    template: DocumentTemplate | None = None  # NEW — for repeating multi-page documents
+```
+
+#### 17b. Configurable LLM Page Reading per Protocol
+
+**Extension to `app/core/constants.py`:**
+
+```python
+PROTOCOL_LLM_CONFIG = {
+    "hipaa": {
+        "llm_pages_to_read": 5,        # medical records can have long headers
+        "expect_multi_page_records": True,
+    },
+    "gdpr": {
+        "llm_pages_to_read": 3,
+        "expect_multi_page_records": True,
+    },
+    "state_breach": {
+        "llm_pages_to_read": 3,
+        "expect_multi_page_records": True,
+    },
+    "pci_dss": {
+        "llm_pages_to_read": 2,        # card data usually on 1-2 pages
+        "expect_multi_page_records": False,
+    },
+    "dpdpa": {
+        "llm_pages_to_read": 3,
+        "expect_multi_page_records": True,
+    },
+    "bipa": {
+        "llm_pages_to_read": 2,
+        "expect_multi_page_records": False,
+    },
+    "ferpa": {
+        "llm_pages_to_read": 4,        # student records can be multi-page
+        "expect_multi_page_records": True,
+    },
+    "ccpa": {
+        "llm_pages_to_read": 3,
+        "expect_multi_page_records": True,
+    },
+}
+```
+
+Also extend `protocol_configs.config_json`:
+
+```json
+{
+  "target_entity_types": [...],
+  "llm_pages_to_read": 6,
+  "expect_multi_page_records": true,
+  "...existing fields..."
+}
+```
+
+User-configured value overrides protocol default. Fallback to protocol default. Fallback to 3 pages if no protocol.
+
+#### 17c. LLM Multi-Page Understanding Prompt
+
+**Update `app/llm/prompts.py`** — Extend `UNDERSTAND_DOCUMENT` template or add `UNDERSTAND_MULTI_PAGE_DOCUMENT`:
+
+The LLM now reads **N pages** (configurable) instead of just the onset page:
+
+```
+You are analyzing a multi-page document to understand its structure.
+
+Document: {file_name} ({file_type}, {total_pages} pages)
+Protocol: {protocol_name}
+
+--- PAGE 1 ---
+{page_1_text}
+--- PAGE 2 ---
+{page_2_text}
+--- PAGE 3 ---
+{page_3_text}
+[... up to N pages ...]
+
+Analyze this document and determine:
+
+1. Is this a REPEATING TEMPLATE document where the same form repeats
+   for multiple individuals? If yes, identify:
+   - How many pages per individual
+   - Which page within the template has the person's name
+   - What PII fields appear on each page
+
+2. For each page, identify fields and their types (same as before).
+
+Respond ONLY with JSON:
+{
+  "document_type": "...",
+  "template": {
+    "is_repeating": true/false,
+    "template_name": "descriptive name",
+    "pages_per_instance": N,
+    "total_instances_estimate": N,
+    "page_roles": [
+      {
+        "page_offset": 0,
+        "role": "what this page contains",
+        "pii_fields_expected": ["PERSON", "LOCATION", ...],
+        "is_identity_page": true/false
+      }
+    ]
+  },
+  "field_map": [...],
+  "people": [...],
+  "tables": [...],
+  "suppression_hints": [...]
+}
+
+IMPORTANT:
+- Financial terms (Lump Sum, Transfer Value, Premium, Pension) are NOT person names
+- Location names (Harrow Weald, Buckman, Gallick) should be LOCATION, not PERSON
+- If a value contains both a name and an ID number concatenated (e.g., "Cole WI726762D"),
+  these are SEPARATE entities that should be extracted independently
+- For repeating templates, describe the PATTERN (pages_per_instance), not every instance
+```
+
+#### 17d. Template-Aware Extraction Grouping
+
+**File: `app/pipeline/two_phase.py`** — Modify `extract_generator()`:
+
+When DocumentSchema has a `template` field with `is_repeating=True`:
+
+```python
+def extract_with_template(doc, schema, detections_by_page):
+    """
+    Group extractions by template instance, not just by page.
+    
+    For a 6-page doc with 3-page template:
+      Instance 1 (pages 0-2): all detections → one PIIRecord set
+        raw_name from page 0 (identity page)
+        raw_address from page 1
+        raw_dob from page 1
+        raw_government_id from page 1 (NI number)
+      Instance 2 (pages 3-5): all detections → another PIIRecord set
+        raw_name from page 3
+        raw_address from page 4
+        ...
+    """
+    template = schema.template
+    instances = template.get_instance_pages(doc.total_pages)
+    
+    grouped_records = []
+    for instance_pages in instances:
+        # Collect all detections across pages in this instance
+        instance_detections = []
+        for page in instance_pages:
+            instance_detections.extend(detections_by_page.get(page, []))
+        
+        # Build ONE composite PIIRecord per instance
+        # (merges name from page 0 + address from page 1 + DOB from page 1)
+        composite_record = build_composite_record(instance_detections, doc.id)
+        grouped_records.append(composite_record)
+    
+    return grouped_records
+
+def build_composite_record(detections, doc_id):
+    """
+    Merge multiple detections into a single PIIRecord with all raw_* fields populated.
+    Takes the highest-confidence detection for each field type.
+    """
+    rec = PIIRecord(
+        record_id=str(uuid4()),
+        source_document_id=str(doc_id),
+    )
+    
+    # Group detections by semantic field type
+    names = [d for d in detections if d.entity_type in PERSON_TYPES]
+    emails = [d for d in detections if d.entity_type in EMAIL_TYPES]
+    phones = [d for d in detections if d.entity_type in PHONE_TYPES]
+    dobs = [d for d in detections if d.entity_type in DOB_TYPES]
+    addresses = [d for d in detections if d.entity_type in ADDRESS_TYPES]
+    gov_ids = [d for d in detections if d.entity_type in GOV_ID_TYPES]
+    
+    # Take highest-confidence detection for each field
+    if names:
+        best = max(names, key=lambda d: d.confidence)
+        rec.raw_name = extract_text(best)
+        rec.entity_type = best.entity_type
+    if emails:
+        rec.raw_email = extract_text(max(emails, key=lambda d: d.confidence))
+    if phones:
+        rec.raw_phone = extract_text(max(phones, key=lambda d: d.confidence))
+    if dobs:
+        rec.raw_dob = extract_text(max(dobs, key=lambda d: d.confidence))
+    if addresses:
+        rec.raw_address = extract_text(max(addresses, key=lambda d: d.confidence))
+    if gov_ids:
+        rec.raw_government_id = extract_text(max(gov_ids, key=lambda d: d.confidence))
+    
+    # Store all PII types found across all pages
+    rec.pii_types_found = list(set(d.entity_type for d in detections))
+    rec.page_range = f"{detections[0].block.page_or_sheet}-{detections[-1].block.page_or_sheet}"
+    
+    return rec
+```
+
+**Without template (single-page or no LLM):** Falls back to existing per-detection PIIRecord creation (the record_mapper fix already applied).
+
+**With template:** Produces one rich PIIRecord per individual with all fields populated from across their pages. EntityResolver then has real data to work with.
+
+**Expected result for the pension document:**
+
+```
+Without template (current):
+  20+ PIIRecords, each with 1 field → 20+ NotificationSubjects → garbage CSV
+
+With template:
+  2 PIIRecords:
+    Record 1: raw_name="K P Acheampong", raw_address="85 Waltings Gardens, London NW2 3UD",
+              raw_dob="10-Aug-1959", raw_government_id="NE724362D"
+    Record 2: raw_name="M S Alcock", raw_address="3 Whitworth Road, Wellingborough, Northants NN8 1QQ",
+              raw_dob="29-Aug-1960", raw_government_id="WK393925C"
+  → 2 NotificationSubjects → clean CSV with 2 rows
+```
+
+#### 17e. Enhanced False Positive Suppression for Financial Documents
+
+**Add to `app/pii/context_deny_list.py`:**
+
+```python
+FINANCIAL_TERM_DENY_LIST = frozenset({
+    "lump sum", "transfer value", "pension", "premium", "annuity",
+    "retirement", "benefit", "contribution", "entitlement", "remuneration",
+    "scheme", "fund", "allowance", "deduction", "commission",
+    "qualifying", "protected rights", "pensionable", "guaranteed minimum",
+    "final remuneration", "basic scheme", "buy-out", "buy out",
+})
+
+UK_LOCATION_DENY_FOR_PERSON = frozenset({
+    "harrow weald", "buckman", "gallick", "alford",  # Add as encountered
+    # More systematic: any LOCATION detection should suppress PERSON for same text
+})
+```
+
+**Better approach — cross-type suppression rule:**
+
+If the same text is detected as both LOCATION (85%) and PERSON (85%), and the text matches a known geographic pattern or doesn't match a name pattern (no title, no first+last structure), suppress the PERSON detection. Add to `schema_filter.py`:
+
+```python
+def cross_type_suppression(detections):
+    """
+    If same text is detected as both PERSON and LOCATION/ORGANIZATION,
+    apply heuristic to keep the more likely one.
+    
+    Rules:
+    - Has title (Mr, Mrs, Dr) → keep PERSON
+    - Has comma-separated multi-word → likely LOCATION
+    - Is a single word matching UK postcode area → LOCATION
+    - Contains digits → NOT a PERSON
+    - Is a well-known financial term → NOT a PERSON
+    """
+```
+
+#### 17f. Auto-Export After Job Completion
+
+**File: `app/pipeline/two_phase.py`** — At end of `extract_generator()`, after notification stage completes:
+
+```python
+# After notification list is built, auto-generate CSV export
+if notification_subjects:
+    from app.export.csv_exporter import CSVExporter
+    exporter = CSVExporter(db_session)
+    export_job = exporter.run(
+        project_id=project_id,
+        protocol_config_id=protocol_config_id,
+        output_dir=settings.export_dir,
+    )
+    yield sse_event("export", "complete", f"CSV export ready: {export_job.row_count} subjects")
+```
+
+**File: `app/api/routes/jobs.py`** — Same for `_pipeline_generator()`.
+
+**Frontend:** Exports tab should auto-refresh when a job completes. Show most recent export at the top with download link.
+
+#### 17g. Execution Prompts (split into 2 runs)
+
+**Step 17 Part 1 — Template detection + cross-page grouping (run first):**
+
+```
+@agent-general-purpose Read CLAUDE.md and docs/PLAN.md Step 17 for context.
+
+Step 17 Part 1: Multi-page template detection and cross-page PII grouping.
+
+1. Add DocumentTemplate, PageRole dataclasses to app/structure/document_schema.py
+   (exact definitions in PLAN.md Step 17a). Add template field to DocumentSchema.
+
+2. Add PROTOCOL_LLM_CONFIG dict to app/core/constants.py with llm_pages_to_read
+   and expect_multi_page_records per protocol (8 protocols).
+   See PLAN.md Step 17b for exact values.
+
+3. Extend protocol_configs.config_json schema to accept llm_pages_to_read
+   and expect_multi_page_records (optional, overrides protocol defaults).
+
+4. Update app/structure/llm_document_understanding.py:
+   - Read N pages (from protocol config → protocol default → 3) instead of just onset page
+   - Send multi-page text to LLM with UNDERSTAND_MULTI_PAGE_DOCUMENT prompt
+   - Parse template field from LLM response into DocumentTemplate
+   - If template.is_repeating, store on DocumentSchema
+
+5. Update or add UNDERSTAND_MULTI_PAGE_DOCUMENT prompt to app/llm/prompts.py
+   (see PLAN.md Step 17c for exact prompt). Instructs LLM to detect repeating
+   templates, identify pages_per_instance, page roles, and identity page.
+
+6. Create app/pipeline/record_mapper.py (or extend existing):
+   - build_composite_record(detections, doc_id) → single PIIRecord with all
+     raw_* fields populated from multiple detections
+   - extract_with_template(doc, schema, detections_by_page) → list of composite
+     PIIRecords, one per template instance (groups pages by instance)
+
+7. Update app/pipeline/two_phase.py extract_generator():
+   - If DocumentSchema has template with is_repeating=True:
+     use extract_with_template() to group pages → composite records
+   - If no template: use existing per-detection record_mapper (from PIIRecord fix)
+   - Pass composite records to EntityResolver
+
+8. Create tests/test_template_detection.py:
+   - DocumentTemplate.get_instance_pages: 6 pages / 3 per = [[0,1,2],[3,4,5]]
+   - build_composite_record: merges PERSON + LOCATION + DOB from different pages
+   - Composite record has raw_name + raw_address + raw_dob all populated
+   - Without template: falls back to per-detection records
+   - Pension doc mock: 2 instances → 2 composite records → 2 NotificationSubjects
+
+9. Run pytest on all changed files. Fix failures up to 3 attempts.
+   Update CLAUDE.md.
+```
+
+**Step 17 Part 2 — FP cleanup + auto-export (run after Part 1):**
+
+```
+@agent-general-purpose Read CLAUDE.md and docs/PLAN.md Step 17 for context.
+
+Step 17 Part 2: Financial term FP suppression, cross-type suppression, auto-export.
+
+1. Add FINANCIAL_TERM_DENY_LIST to app/pii/context_deny_list.py:
+   frozenset of financial terms that should never be classified as PERSON
+   (lump sum, transfer value, pension, premium, annuity, remuneration,
+   contribution, entitlement, protected rights, etc.)
+   Update is_likely_false_positive() to check FINANCIAL_TERM_DENY_LIST
+   when entity_type is PERSON.
+
+2. Add cross_type_suppression() to app/pii/schema_filter.py (or context_deny_list.py):
+   When same text is detected as both PERSON and LOCATION:
+   - If text has title (Mr/Mrs/Dr) → keep PERSON
+   - If text is a single common word or matches location pattern → keep LOCATION
+   - If text contains digits → suppress PERSON
+   - If text matches FINANCIAL_TERM_DENY_LIST → suppress PERSON
+   Apply before other filters in the detection pipeline.
+
+3. Add extraction boundary fix:
+   When detected text contains both a name and an ID pattern concatenated
+   (e.g., "Cole WI726762D"), split into separate detections:
+   - "Cole" → PERSON
+   - "WI726762D" → NI_NUMBER / government ID
+   Add as a post-processing step in detection pipeline.
+
+4. Wire auto-export into pipeline completion:
+   In app/pipeline/two_phase.py extract_generator(), after notification
+   stage completes, auto-generate CSV export via CSVExporter.run().
+   Emit SSE event: {"stage": "export", "status": "complete"}.
+   Same in app/api/routes/jobs.py _pipeline_generator().
+
+5. Update frontend Exports tab in ProjectDetail.tsx:
+   Auto-refresh when job completes (invalidate react-query cache).
+   Show most recent export at top with prominent download link.
+   Add "Auto-generated" badge on exports created by pipeline (vs manual).
+
+6. Create tests/test_financial_fp.py:
+   - "Lump Sum" → PERSON suppressed by FINANCIAL_TERM_DENY_LIST
+   - "Harrow Weald" → PERSON suppressed when also detected as LOCATION
+   - "Mr K P Acheampong" → PERSON kept (has title)
+   - "Cole WI726762D" → split into PERSON "Cole" + NI_NUMBER "WI726762D"
+   - Auto-export: after pipeline completes, ExportJob exists with status=completed
+
+7. Run pytest on all changed files. Fix failures up to 3 attempts.
+   Update CLAUDE.md.
 ```

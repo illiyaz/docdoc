@@ -128,7 +128,6 @@ project-root/
 │   ├── pipeline/
 │   │   ├── dag.py                 # Prefect DAG wiring
 │   │   ├── two_phase.py           # Two-phase pipeline: analyze_generator + extract_generator
-│   │   ├── record_mapper.py       # DetectionResult → PIIRecord with raw_* fields populated
 │   │   ├── content_onset.py       # Generalized content onset detection (all file types)
 │   │   └── auto_approve.py        # Auto-approve logic for document analysis review
 │   ├── pdf/
@@ -205,7 +204,9 @@ project-root/
 │   ├── test_density.py
 │   ├── test_llm.py
 │   ├── test_structure_analysis.py   # DSA: doc type, sections, roles, masking, RRA prevention
-│   └── test_two_phase.py            # Two-phase pipeline: content onset, auto-approve, review
+│   ├── test_two_phase.py            # Two-phase pipeline: content onset, auto-approve, review
+│   ├── test_template_detection.py   # Step 17: template detection, composite records, multi-page
+│   └── test_financial_fp.py         # Step 17: financial FP suppression, cross-type suppression
 ├── models/                        # pre-packaged spaCy and Presidio models
 └── scripts/
     └── retrain.py                 # supervised retraining from human labels
@@ -215,9 +216,9 @@ project-root/
 
 ## 4) Schema Contract
 
-The canonical DB schema (19 tables) is defined by:
+The canonical DB schema (18 tables) is defined by:
 - `app/db/models.py`
-- `alembic/versions/0001_initial.py` through `0009_detection_review_decisions.py`
+- `alembic/versions/0001_initial.py` through `0008_entity_analysis.py`
 - `tests/test_schema.py` and `tests/test_repositories.py`
 
 ### Rules
@@ -332,9 +333,10 @@ These are detailed in [docs/SCHEMA.md](docs/SCHEMA.md). Summary:
 | 13. LLM Entity Relationship Analysis | COMPLETE | PII-verified onset detection (two-pass: heuristic candidates → Presidio verification). LLM entity relationship analysis: reads onset page + PII detections, proposes entity groups with confidence + rationale. New analyze stages: `verified_onset` + `entity_analysis`. `EntityRelationshipAnalysis` dataclass, `LLMEntityAnalyzer`, `ANALYZE_ENTITY_RELATIONSHIPS` prompt. API returns entity groups/relationships/guidance. Frontend entity group cards with role badges, relationship display, extraction guidance. Migration 0008 (`documents.entity_analysis` JSON column). 20 new tests. |
 | 14. LLM Document Understanding & Detection Quality | COMPLETE | **14a** — context deny-lists, tighter Presidio patterns (38→23 detections). **14a-ii** — protocol-driven recognizer filtering (only jurisdiction-relevant recognizers run). **14b** — LLM Document Understanding (DocumentSchema + SchemaFilter + TableSchema), Boosey 23→8, Washington CMD 68→16. **14c** — detection tuning (min confidence 10% floor, currency pattern filter, detection dedup), integration (schema→entity analysis, suppression audit trail, API returns suppression log), Catalog tab UX fix (state-driven layout: upload→run→results). |
 | 15. Field-Level Review + Protocol Mapping | COMPLETE | Two-tier detection toggle (type-level bulk + individual override) before extraction approval. Protocol field mapping shows required vs detected vs missing fields with completeness percentage. `DetectionReviewDecision` model + `detection_review_decisions` table (migration 0009, 19 total tables). Phase 2 extraction only runs on included types. `PROTOCOL_REQUIRED_FIELDS` for 12 protocols. Frontend: protocol mapping section + detection controls with toggles + "Approve with selections" button. 53 tests. |
-| 16. UX Consolidation: Dashboard, Jobs, Sidebar, Density | COMPLETE | **16a Dashboard DONE** — command center with stat cards, needs attention, running jobs, active projects, recent activity feed (GET /dashboard/summary), 10 tests. **16b Jobs Tab DONE** — cancel/archive endpoints, status filter, pagination, first_file_name, 20 tests. **16c Sidebar DONE** — consolidated 8→5 items: Dashboard, Projects, Review Queue (merged 4 queues), Jobs, Settings. ReviewQueue.tsx, Settings.tsx (app config + diagnostic). **16d Density DONE** — state-driven display (empty explanation vs summary cards + category bars + per-doc table). |
+| 16. UX Consolidation: Dashboard, Jobs, Sidebar, Density | COMPLETE | **16a Dashboard** — command center with stat cards, needs attention, running jobs, active projects, recent activity feed (GET /dashboard/summary), 10 tests. **16b Jobs Tab** — cancel/archive endpoints, status filter, pagination, first_file_name, 20 tests. **16c Sidebar** — consolidated 8→5 items: Dashboard, Projects, Review Queue (merged 4 queues), Jobs, Settings. ReviewQueue.tsx, Settings.tsx (app config + diagnostic). **16d Density** — state-driven display (empty explanation vs summary cards + category bars + per-doc table). |
+| 17. Cross-Page Template Linking + FP Cleanup + Auto-Export | COMPLETE | Multi-page template detection: `DocumentTemplate` + `PageRole` dataclasses, `PROTOCOL_LLM_CONFIG` (8 protocols), `UNDERSTAND_MULTI_PAGE_DOCUMENT` prompt (7th template). LLM reads N pages (configurable per protocol) to detect repeating templates. `build_composite_record()` merges cross-page detections into single PIIRecord with all raw_* fields. `extract_with_template()` groups pages by instance. `raw_government_id` field on PIIRecord + gov ID matching in `build_confidence()`. `FINANCIAL_TERM_DENY_LIST` suppresses "Lump Sum"/"Pension" as PERSON. `cross_type_suppression()` resolves PERSON vs LOCATION/ORG conflicts. Auto-CSV-export on pipeline completion. Frontend exports auto-refresh. 48 new tests. |
 
-**1864 tests passing after Steps 1–16 + record mapper fix.**
+**1913 tests passing after Steps 1–17.**
 
 See [docs/PLAN.md](docs/PLAN.md) for active steps and [docs/PLAN_COMPLETED.md](docs/PLAN_COMPLETED.md) for completed reference.
 

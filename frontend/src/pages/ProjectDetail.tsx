@@ -2004,6 +2004,7 @@ function JobsTab({
                                   jobId={job.id}
                                   onExtractionComplete={() => {
                                     queryClient.invalidateQueries({ queryKey: ["project-jobs", projectId] })
+                                    queryClient.invalidateQueries({ queryKey: ["exports", projectId] })
                                     onJobCompleted()
                                   }}
                                 />
@@ -2339,9 +2340,10 @@ function CatalogTab({
       )
       setRunResult(result)
       setForceExpandUpload(false)
-      // Refresh catalog + jobs
+      // Refresh catalog + jobs + exports (auto-export generates CSV on completion)
       queryClient.invalidateQueries({ queryKey: ["catalog-summary", projectId] })
       queryClient.invalidateQueries({ queryKey: ["project-jobs", projectId] })
+      queryClient.invalidateQueries({ queryKey: ["exports", projectId] })
     } catch (err) {
       setRunError(err instanceof Error ? err.message : "Job failed")
     } finally {

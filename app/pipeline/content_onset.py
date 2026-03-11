@@ -55,15 +55,32 @@ def filter_sample_blocks(
     *,
     max_tabular_rows: int = 50,
     max_prose_blocks: int = 20,
+    pdf_extra_pages: int = 2,
 ) -> list[ExtractedBlock]:
     """Filter blocks to only the sample set from the onset page/sheet.
 
-    PDF: all blocks on the onset page.
+    PDF: all blocks on the onset page + next ``pdf_extra_pages`` pages.
+         Many documents have summary/financial info on the onset page with
+         personal details (name, address, DOB) on the following page(s).
     Tabular: first max_tabular_rows blocks from onset sheet.
     Prose: first max_prose_blocks blocks starting from onset page.
     """
     if file_type.lower() == "pdf":
-        return [b for b in blocks if b.page_or_sheet == onset_page]
+        # Collect distinct page numbers in order
+        all_pages: list[int | str] = []
+        seen: set[int | str] = set()
+        for b in blocks:
+            if b.page_or_sheet not in seen:
+                seen.add(b.page_or_sheet)
+                all_pages.append(b.page_or_sheet)
+
+        # Find onset page index, include onset + next N pages
+        try:
+            idx = all_pages.index(onset_page)
+        except ValueError:
+            idx = 0
+        sample_pages = set(all_pages[idx : idx + 1 + pdf_extra_pages])
+        return [b for b in blocks if b.page_or_sheet in sample_pages]
 
     if file_type.lower() in _TABULAR:
         result = []

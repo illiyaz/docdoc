@@ -29,7 +29,10 @@ from app.core.settings import get_settings
 from app.db.models import Document, DocumentAnalysisReview, IngestionRun
 from app.db.repositories import ExtractionRepository
 from app.pipeline.auto_approve import should_auto_approve
-from app.pipeline.record_mapper import detection_to_pii_record
+from app.pipeline.record_mapper import (
+    detection_to_pii_record,
+    extract_with_template,
+)
 from app.pipeline.content_onset import (
     filter_sample_blocks,
     find_content_onset_from_blocks,
@@ -756,24 +759,30 @@ def extract_generator(
                 detections = engine.analyze(blocks, target_entity_types=doc_targets)
 
                 # Apply SchemaFilter if LLM is available
+                schema = None
                 if doc_understanding_cls is not None and schema_filter_cls is not None:
                     try:
-                        # Get onset page sample for document understanding
                         onset_page = doc.sample_onset_page or 0
-                        sample_blocks = filter_sample_blocks(blocks, onset_page, doc.file_type or "unknown")
                         heuristic_doc_type = "unknown"
                         if doc.structure_analysis and isinstance(doc.structure_analysis, dict):
                             heuristic_doc_type = doc.structure_analysis.get("document_type", "unknown")
 
+                        # Compute total pages for multi-page understanding
+                        doc_pages = set(b.page_or_sheet for b in blocks)
+                        total_pages = len(doc_pages)
+
                         du = doc_understanding_cls(db_session=db)
                         schema = du.understand(
-                            sample_blocks,
+                            blocks,
                             heuristic_doc_type=heuristic_doc_type,
                             file_name=doc.file_name or "",
                             file_type=doc.file_type or "",
                             structure_class=doc.structure_class or "",
                             onset_page=onset_page,
                             document_id=str(doc.id),
+                            total_pages=total_pages,
+                            protocol_name=protocol_id,
+                            protocol_config=protocol_config,
                         )
                         if schema is not None:
                             sf = schema_filter_cls(schema)
@@ -782,9 +791,15 @@ def extract_generator(
                     except Exception:
                         pass  # best-effort; use unfiltered detections
 
-                for det in detections:
-                    rec = detection_to_pii_record(det, str(doc.id))
-                    all_records.append(rec)
+                # Template-aware extraction: group cross-page detections
+                if schema is not None and schema.template and schema.template.pages_per_instance >= 2:
+                    doc_pages = set(b.page_or_sheet for b in blocks)
+                    records = extract_with_template(detections, schema, str(doc.id), len(doc_pages))
+                    all_records.extend(records)
+                else:
+                    for det in detections:
+                        rec = detection_to_pii_record(det, str(doc.id))
+                        all_records.append(rec)
             except Exception as e:
                 logger.warning("Detection failed for doc %s: %s", doc.file_name, type(e).__name__)
 
@@ -859,6 +874,29 @@ def extract_generator(
             "message": f"{notif_count} notification(s) required",
         })
 
+        # --- Auto-export CSV ---
+        export_count = 0
+        if subjects and run.project_id:
+            try:
+                from app.export.csv_exporter import CSVExporter
+                from app.db.models import ExportJob as _EJ
+
+                export_dir = Path("/tmp/docdoc_exports") / str(run.project_id)
+                export_dir.mkdir(parents=True, exist_ok=True)
+
+                exporter = CSVExporter(db)
+                export_job = exporter.run(
+                    project_id=run.project_id,
+                    output_dir=export_dir,
+                )
+                export_count = export_job.row_count or 0
+                yield _sse({
+                    "stage": "export", "status": "complete",
+                    "message": f"CSV export ready: {export_count} subject(s)",
+                })
+            except Exception:
+                logger.debug("Auto-export failed (best-effort)", exc_info=True)
+
         # --- Mark run as completed ---
         run.status = "completed"
         run.completed_at = datetime.now(timezone.utc)
@@ -872,6 +910,7 @@ def extract_generator(
                 "status": "COMPLETE",
                 "subjects_found": len(subjects),
                 "notification_required": notif_count,
+                "export_count": export_count,
             },
         })
 

@@ -34,7 +34,10 @@ from app.db.models import Document, IngestionRun, NotificationList, Notification
 from app.notification.list_builder import build_notification_list, get_notification_subjects
 from app.protocols.registry import ProtocolRegistry
 from app.rra.deduplicator import Deduplicator
-from app.pipeline.record_mapper import detection_to_pii_record
+from app.pipeline.record_mapper import (
+    detection_to_pii_record,
+    extract_with_template,
+)
 from app.rra.entity_resolver import EntityResolver
 from app.tasks.discovery import DiscoveryTask, FilesystemConnector
 
@@ -401,6 +404,19 @@ def _pipeline_generator(
         engine = PresidioEngine()
         all_records = []
 
+        # Optionally set up LLM document understanding + schema filter
+        schema_filter_cls = None
+        doc_understanding_cls = None
+        try:
+            from app.core.settings import get_settings as _gs
+            if _gs().llm_assist_enabled:
+                from app.pii.schema_filter import SchemaFilter as _SF
+                from app.structure.llm_document_understanding import LLMDocumentUnderstanding as _LDU
+                schema_filter_cls = _SF
+                doc_understanding_cls = _LDU
+        except Exception:
+            pass
+
         for i, doc_info in enumerate(docs, 1):
             yield _sse({
                 "stage": "detection", "status": "running",
@@ -411,9 +427,33 @@ def _pipeline_generator(
             blocks = reader.read()
             detections = engine.analyze(blocks)
 
-            for det in detections:
-                rec = detection_to_pii_record(det, doc_info["source_path"])
-                all_records.append(rec)
+            # LLM Document Understanding + Schema Filter + Template extraction
+            schema = None
+            if doc_understanding_cls is not None and schema_filter_cls is not None:
+                try:
+                    doc_pages = set(b.page_or_sheet for b in blocks)
+                    du = doc_understanding_cls(db_session=db)
+                    schema = du.understand(
+                        blocks,
+                        file_name=doc_info.get("file_name", ""),
+                        file_type=doc_info.get("file_type", ""),
+                        total_pages=len(doc_pages),
+                    )
+                    if schema is not None:
+                        sf = schema_filter_cls(schema)
+                        result = sf.filter_detections(detections)
+                        detections = result.kept
+                except Exception:
+                    pass
+
+            if schema is not None and schema.template and schema.template.pages_per_instance >= 2:
+                doc_pages = set(b.page_or_sheet for b in blocks)
+                records = extract_with_template(detections, schema, doc_info["source_path"], len(doc_pages))
+                all_records.extend(records)
+            else:
+                for det in detections:
+                    rec = detection_to_pii_record(det, doc_info["source_path"])
+                    all_records.append(rec)
 
         yield _sse({
             "stage": "detection", "status": "complete",
@@ -475,6 +515,28 @@ def _pipeline_generator(
             "message": f"{notif_count} notification(s) required",
         })
 
+        # --- Auto-export CSV ---
+        export_count = 0
+        if subjects and run.project_id:
+            try:
+                from app.export.csv_exporter import CSVExporter
+
+                export_dir = Path("/tmp/docdoc_exports") / str(run.project_id)
+                export_dir.mkdir(parents=True, exist_ok=True)
+
+                exporter = CSVExporter(db)
+                export_job = exporter.run(
+                    project_id=run.project_id,
+                    output_dir=export_dir,
+                )
+                export_count = export_job.row_count or 0
+                yield _sse({
+                    "stage": "export", "status": "complete",
+                    "message": f"CSV export ready: {export_count} subject(s)",
+                })
+            except Exception:
+                pass  # best-effort
+
         # --- Mark run as completed ---
         run.status = "completed"
         run.completed_at = datetime.now(timezone.utc)
@@ -488,6 +550,7 @@ def _pipeline_generator(
                 "status": "COMPLETE",
                 "subjects_found": len(subjects),
                 "notification_required": notif_count,
+                "export_count": export_count,
             },
         })
 
@@ -662,6 +725,7 @@ def create_job(
             reader = get_reader(doc_info["source_path"])
             blocks = reader.read()
             detections = engine.analyze(blocks)
+
             for det in detections:
                 rec = detection_to_pii_record(det, doc_info["source_path"])
                 all_records.append(rec)

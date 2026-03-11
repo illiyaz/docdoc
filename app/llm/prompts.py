@@ -262,6 +262,70 @@ UNDERSTAND_DOCUMENT = (
 )
 
 # ---------------------------------------------------------------------------
+# UNDERSTAND_MULTI_PAGE_DOCUMENT (Step 17 — template detection)
+# ---------------------------------------------------------------------------
+
+UNDERSTAND_MULTI_PAGE_DOCUMENT = (
+    "You are analyzing a multi-page document to understand its structure.\n"
+    "\n"
+    "Document: {file_name} ({file_type}, {total_pages} pages)\n"
+    "Protocol: {protocol_name}\n"
+    "\n"
+    "{pages_text}\n"
+    "\n"
+    "Analyze this document and determine:\n"
+    "\n"
+    "1. Is this a REPEATING TEMPLATE document where the same form repeats\n"
+    "   for multiple individuals? If yes, identify:\n"
+    "   - How many pages per individual\n"
+    "   - Which page within the template has the person's name\n"
+    "   - What PII fields appear on each page\n"
+    "\n"
+    "2. For each page, identify fields and their types.\n"
+    "\n"
+    "Respond ONLY with JSON:\n"
+    '{{\n'
+    '  "document_type": "the type of document",\n'
+    '  "document_subtype": "more specific type",\n'
+    '  "issuing_entity": "organization or null",\n'
+    '  "template": {{\n'
+    '    "is_repeating": true,\n'
+    '    "template_name": "descriptive name for the repeating form",\n'
+    '    "pages_per_instance": 3,\n'
+    '    "total_instances_estimate": 2,\n'
+    '    "page_roles": [\n'
+    '      {{\n'
+    '        "page_offset": 0,\n'
+    '        "role": "what this page contains",\n'
+    '        "pii_fields_expected": ["PERSON", "LOCATION"],\n'
+    '        "is_identity_page": true\n'
+    '      }}\n'
+    '    ]\n'
+    '  }},\n'
+    '  "field_map": [],\n'
+    '  "people": [],\n'
+    '  "organizations": [],\n'
+    '  "date_contexts": [],\n'
+    '  "tables": [],\n'
+    '  "suppression_hints": [],\n'
+    '  "extraction_notes": "brief notes",\n'
+    '  "schema_confidence": 0.85\n'
+    '}}\n'
+    "\n"
+    "IMPORTANT:\n"
+    "- Financial terms (Lump Sum, Transfer Value, Premium, Pension, Annuity, "
+    "Retirement, Benefit, Contribution, Entitlement, Remuneration) are NOT person names.\n"
+    "- Location names (Harrow Weald, Buckman, Gallick) should be LOCATION, not PERSON.\n"
+    "- If a value contains both a name and an ID number concatenated (e.g., \"Cole WI726762D\"), "
+    "these are SEPARATE entities that should be extracted independently.\n"
+    "- For repeating templates, describe the PATTERN (pages_per_instance), not every instance.\n"
+    "- If the document is NOT a repeating template, set template to null.\n"
+    "- Be precise about what IS and ISN'T PII.\n"
+    "\n"
+    "Respond ONLY with valid JSON.  No additional text."
+)
+
+# ---------------------------------------------------------------------------
 # Template registry for programmatic access
 # ---------------------------------------------------------------------------
 
@@ -272,4 +336,5 @@ PROMPT_TEMPLATES: dict[str, str] = {
     "analyze_document_structure": ANALYZE_DOCUMENT_STRUCTURE,
     "analyze_entity_relationships": ANALYZE_ENTITY_RELATIONSHIPS,
     "understand_document": UNDERSTAND_DOCUMENT,
+    "understand_multi_page_document": UNDERSTAND_MULTI_PAGE_DOCUMENT,
 }

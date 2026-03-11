@@ -559,9 +559,9 @@ class TestPromptTemplate:
         ]:
             assert placeholder in UNDERSTAND_DOCUMENT
 
-    def test_six_templates_total(self) -> None:
+    def test_seven_templates_total(self) -> None:
         from app.llm.prompts import PROMPT_TEMPLATES
-        assert len(PROMPT_TEMPLATES) == 6
+        assert len(PROMPT_TEMPLATES) == 7
 
 
 # ---------------------------------------------------------------------------

@@ -296,6 +296,51 @@ def get_entity_categories(entity_type: str) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# Protocol LLM configuration — Step 17
+# ---------------------------------------------------------------------------
+# Controls how many pages the LLM reads for document understanding per protocol
+# and whether to expect multi-page repeating templates.
+# User-configured protocol_config overrides → protocol default → fallback (3 pages).
+
+PROTOCOL_LLM_CONFIG: dict[str, dict[str, int | bool]] = {
+    "hipaa": {
+        "llm_pages_to_read": 5,
+        "expect_multi_page_records": True,
+    },
+    "gdpr": {
+        "llm_pages_to_read": 3,
+        "expect_multi_page_records": True,
+    },
+    "ccpa": {
+        "llm_pages_to_read": 3,
+        "expect_multi_page_records": True,
+    },
+    "hitech": {
+        "llm_pages_to_read": 5,
+        "expect_multi_page_records": True,
+    },
+    "ferpa": {
+        "llm_pages_to_read": 4,
+        "expect_multi_page_records": True,
+    },
+    "state_breach_generic": {
+        "llm_pages_to_read": 3,
+        "expect_multi_page_records": True,
+    },
+    "bipa": {
+        "llm_pages_to_read": 2,
+        "expect_multi_page_records": False,
+    },
+    "dpdpa": {
+        "llm_pages_to_read": 3,
+        "expect_multi_page_records": True,
+    },
+}
+
+DEFAULT_LLM_PAGES_TO_READ = 3
+
+
+# ---------------------------------------------------------------------------
 # Protocol required fields — Step 15
 # ---------------------------------------------------------------------------
 # Maps each protocol to its required/optional fields and the entity types

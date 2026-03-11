@@ -108,17 +108,31 @@ class TestFindContentOnsetFromBlocks:
 class TestFilterSampleBlocks:
     """Tests for filter_sample_blocks()."""
 
-    def test_pdf_filter_returns_only_onset_page_blocks(self):
-        """PDF filtering returns all blocks on the onset page only."""
+    def test_pdf_filter_returns_onset_plus_extra_pages(self):
+        """PDF filtering returns onset page + next 2 pages by default."""
         blocks = [
             _block("page 0 content", page=0),
             _block("page 1 block A", page=1),
             _block("page 1 block B", page=1),
             _block("page 2 content", page=2),
+            _block("page 3 content", page=3),
+            _block("page 4 content", page=4),
         ]
         result = filter_sample_blocks(blocks, onset_page=1, file_type="pdf")
-        assert len(result) == 2
-        assert all(b.page_or_sheet == 1 for b in result)
+        pages = {b.page_or_sheet for b in result}
+        # onset=1 + 2 extra = pages 1, 2, 3
+        assert pages == {1, 2, 3}
+        assert len(result) == 4  # 2 from page 1 + 1 from page 2 + 1 from page 3
+
+    def test_pdf_filter_single_page_only_onset(self):
+        """PDF with pdf_extra_pages=0 returns only onset page."""
+        blocks = [
+            _block("page 0 content", page=0),
+            _block("page 1 content", page=1),
+        ]
+        result = filter_sample_blocks(blocks, onset_page=0, file_type="pdf", pdf_extra_pages=0)
+        assert len(result) == 1
+        assert result[0].page_or_sheet == 0
 
     def test_csv_filter_limits_to_max_tabular_rows(self):
         """CSV filtering respects max_tabular_rows limit."""

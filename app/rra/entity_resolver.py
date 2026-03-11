@@ -76,6 +76,7 @@ class PIIRecord:
     raw_phone: str | None = None
     raw_email: str | None = None
     raw_dob: str | None = None
+    raw_government_id: str | None = None
     country: str = "US"
     source_document_id: str = ""
     page_or_sheet: str | int = 0
@@ -159,16 +160,21 @@ def build_confidence(
 
     # --- Government ID match (+0.50) ---
     if "ssn" in anchors:
+        gov_matched = False
+        # Match via entity_type (single-field records from per-detection mapping)
         if (
             r1.entity_type.upper() in _GOV_ID_TYPES
             and r2.entity_type.upper() in _GOV_ID_TYPES
         ):
-            matched, _ = government_ids_match(
+            gov_matched, _ = government_ids_match(
                 r1.entity_type, r1.normalized_value,
                 r2.entity_type, r2.normalized_value,
             )
-            if matched:
-                score += 0.50
+        # Match via raw_government_id (composite records from template grouping)
+        if not gov_matched and r1.raw_government_id and r2.raw_government_id:
+            gov_matched = r1.raw_government_id.strip() == r2.raw_government_id.strip()
+        if gov_matched:
+            score += 0.50
 
     # --- Email match (+0.40) ---
     if "email" in anchors:

@@ -70,6 +70,43 @@ class TableSchema:
 
 
 @dataclass
+class PageRole:
+    """A single page's role within a repeating multi-page template."""
+
+    page_offset: int                    # 0, 1, 2 within template
+    role: str                           # "financial_summary", "member_details"
+    pii_fields_expected: list[str] = field(default_factory=list)  # ["PERSON", "LOCATION"]
+    is_identity_page: bool = False      # True if this page has the primary subject name
+
+
+@dataclass
+class DocumentTemplate:
+    """Describes a repeating multi-page template within a document.
+
+    For example, a 6-page pension document with 2 individuals at 3 pages each:
+    ``pages_per_instance=3``, ``total_instances_estimate=2``,
+    ``page_roles=[PageRole(0, "summary"), PageRole(1, "details"), PageRole(2, "benefits")]``.
+    """
+
+    template_name: str              # "pension_transfer_statement"
+    pages_per_instance: int         # 3
+    total_instances_estimate: int   # 2
+    page_roles: list[PageRole] = field(default_factory=list)
+    identity_page_offset: int = 0   # which page within template has the name
+
+    def get_instance_pages(self, total_pages: int) -> list[list[int]]:
+        """Return page groupings per template instance.
+
+        For a 6-page doc with 3-page template: ``[[0,1,2], [3,4,5]]``.
+        """
+        instances: list[list[int]] = []
+        for start in range(0, total_pages, self.pages_per_instance):
+            end = min(start + self.pages_per_instance, total_pages)
+            instances.append(list(range(start, end)))
+        return instances
+
+
+@dataclass
 class DocumentSchema:
     """LLM-produced understanding of a document's structure and field semantics.
 
@@ -92,6 +129,8 @@ class DocumentSchema:
 
     schema_confidence: float            # 0.0-1.0
     detected_by: str                    # "llm" | "heuristic" | "llm+heuristic"
+
+    template: DocumentTemplate | None = None  # repeating multi-page template
 
     def to_dict(self) -> dict:
         """Serialize to a JSON-compatible dict."""
@@ -150,6 +189,25 @@ class DocumentSchema:
             "extraction_notes": self.extraction_notes,
             "schema_confidence": self.schema_confidence,
             "detected_by": self.detected_by,
+            "template": (
+                {
+                    "template_name": self.template.template_name,
+                    "pages_per_instance": self.template.pages_per_instance,
+                    "total_instances_estimate": self.template.total_instances_estimate,
+                    "identity_page_offset": self.template.identity_page_offset,
+                    "page_roles": [
+                        {
+                            "page_offset": pr.page_offset,
+                            "role": pr.role,
+                            "pii_fields_expected": pr.pii_fields_expected,
+                            "is_identity_page": pr.is_identity_page,
+                        }
+                        for pr in self.template.page_roles
+                    ],
+                }
+                if self.template is not None
+                else None
+            ),
         }
 
     @classmethod
@@ -210,4 +268,30 @@ class DocumentSchema:
             extraction_notes=data.get("extraction_notes", ""),
             schema_confidence=data.get("schema_confidence", 0.0),
             detected_by=data.get("detected_by", "unknown"),
+            template=cls._parse_template(data.get("template")),
         )
+
+    @staticmethod
+    def _parse_template(tpl: dict | None) -> DocumentTemplate | None:
+        """Parse a template dict into a DocumentTemplate, or None."""
+        if not tpl or not isinstance(tpl, dict):
+            return None
+        try:
+            page_roles = [
+                PageRole(
+                    page_offset=int(pr.get("page_offset", 0)),
+                    role=str(pr.get("role", "")),
+                    pii_fields_expected=list(pr.get("pii_fields_expected", [])),
+                    is_identity_page=bool(pr.get("is_identity_page", False)),
+                )
+                for pr in tpl.get("page_roles", [])
+            ]
+            return DocumentTemplate(
+                template_name=str(tpl.get("template_name", "")),
+                pages_per_instance=int(tpl.get("pages_per_instance", 1)),
+                total_instances_estimate=int(tpl.get("total_instances_estimate", 1)),
+                page_roles=page_roles,
+                identity_page_offset=int(tpl.get("identity_page_offset", 0)),
+            )
+        except (TypeError, ValueError, KeyError):
+            return None

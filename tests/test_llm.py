@@ -457,7 +457,8 @@ class TestPromptTemplates:
         assert "analyze_document_structure" in PROMPT_TEMPLATES
         assert "analyze_entity_relationships" in PROMPT_TEMPLATES
         assert "understand_document" in PROMPT_TEMPLATES
-        assert len(PROMPT_TEMPLATES) == 6
+        assert "understand_multi_page_document" in PROMPT_TEMPLATES
+        assert len(PROMPT_TEMPLATES) == 7
 
     def test_classify_template_has_entity_type_key(self) -> None:
         """The template response schema should mention entity_type."""
@@ -509,6 +510,13 @@ class TestPromptTemplates:
                 "heuristic_doc_type": "financial_statement",
                 "onset_page": 1,
                 "page_text": "Client: 001968  Statement Nr.: 1121799\nAdeline Chandler\nTax No.: ***-**-5085",
+            },
+            "understand_multi_page_document": {
+                "file_name": "pension.pdf",
+                "file_type": "pdf",
+                "total_pages": 6,
+                "protocol_name": "dpdpa",
+                "pages_text": "--- PAGE 0 ---\nStatement of Entitlement\n--- PAGE 1 ---\nMember Details",
             },
         }
         for name, template in PROMPT_TEMPLATES.items():

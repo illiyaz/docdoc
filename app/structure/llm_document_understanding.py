@@ -1,8 +1,11 @@
-"""LLM Document Understanding: produce a DocumentSchema from onset page text.
+"""LLM Document Understanding: produce a DocumentSchema from document text.
 
-Phase 14b — sends the onset page text (masked if pii_masking_enabled) to the
+Phase 14b — sends document text (masked if pii_masking_enabled) to the
 local Ollama LLM, which returns a structured JSON describing what the document
 is, what fields mean, and what is real PII vs. reference numbers.
+
+Step 17 — multi-page reading: sends N pages (configurable per protocol) to
+detect repeating templates where one individual's PII spans multiple pages.
 
 The resulting ``DocumentSchema`` is used by ``SchemaFilter`` to post-process
 Presidio detections.  This is a single LLM call per document — efficient even
@@ -15,16 +18,20 @@ from __future__ import annotations
 
 import json
 import logging
+from collections import defaultdict
 
 from sqlalchemy.orm import Session
 
+from app.core.constants import DEFAULT_LLM_PAGES_TO_READ, PROTOCOL_LLM_CONFIG
 from app.llm.client import OllamaClient, LLMDisabledError
 from app.llm.prompts import PROMPT_TEMPLATES, SYSTEM_PROMPT
 from app.readers.base import ExtractedBlock
 from app.structure.document_schema import (
     DateContext,
     DocumentSchema,
+    DocumentTemplate,
     FieldContext,
+    PageRole,
     PersonContext,
     TableColumn,
     TableSchema,
@@ -34,10 +41,11 @@ from app.structure.masking import mask_text_for_llm
 logger = logging.getLogger(__name__)
 
 _MAX_PAGE_TEXT_CHARS = 4000
+_MAX_MULTI_PAGE_CHARS = 12000  # 3x single-page budget for multi-page
 
 
 class LLMDocumentUnderstanding:
-    """Produces a DocumentSchema by sending onset page text to the LLM.
+    """Produces a DocumentSchema by sending document text to the LLM.
 
     Parameters
     ----------
@@ -59,8 +67,15 @@ class LLMDocumentUnderstanding:
         structure_class: str = "",
         onset_page: int | str = 0,
         document_id: str = "",
+        total_pages: int = 0,
+        protocol_name: str = "",
+        protocol_config: dict | None = None,
     ) -> DocumentSchema | None:
-        """Run LLM document understanding on onset-page blocks.
+        """Run LLM document understanding on document blocks.
+
+        When multiple pages are available and the protocol requests multi-page
+        reading, uses UNDERSTAND_MULTI_PAGE_DOCUMENT prompt to detect
+        repeating templates.
 
         Returns ``None`` if LLM is disabled, the call fails, or no blocks
         are provided.  Never raises — failures are logged and swallowed.
@@ -76,6 +91,9 @@ class LLMDocumentUnderstanding:
                 structure_class=structure_class,
                 onset_page=onset_page,
                 document_id=document_id,
+                total_pages=total_pages,
+                protocol_name=protocol_name,
+                protocol_config=protocol_config,
             )
         except LLMDisabledError:
             logger.debug("LLM assist is disabled; skipping document understanding")
@@ -83,6 +101,27 @@ class LLMDocumentUnderstanding:
         except Exception:
             logger.exception("LLM document understanding failed")
             return None
+
+    def _resolve_pages_to_read(
+        self,
+        protocol_name: str,
+        protocol_config: dict | None,
+    ) -> int:
+        """Determine how many pages the LLM should read.
+
+        Priority: protocol_config override → PROTOCOL_LLM_CONFIG default → 3.
+        """
+        if protocol_config and "llm_pages_to_read" in protocol_config:
+            try:
+                return max(1, int(protocol_config["llm_pages_to_read"]))
+            except (TypeError, ValueError):
+                pass
+
+        base = protocol_name.lower().replace("-", "_").replace(" ", "_")
+        if base in PROTOCOL_LLM_CONFIG:
+            return int(PROTOCOL_LLM_CONFIG[base]["llm_pages_to_read"])
+
+        return DEFAULT_LLM_PAGES_TO_READ
 
     def _do_understand(
         self,
@@ -94,24 +133,42 @@ class LLMDocumentUnderstanding:
         structure_class: str,
         onset_page: int | str,
         document_id: str,
+        total_pages: int,
+        protocol_name: str,
+        protocol_config: dict | None,
     ) -> DocumentSchema:
         """Internal logic — may raise."""
-        page_text = self._build_page_text(blocks)
+        pages_to_read = self._resolve_pages_to_read(protocol_name, protocol_config)
+        use_multi_page = pages_to_read > 1 and total_pages > 1
 
-        prompt_template = PROMPT_TEMPLATES["understand_document"]
-        prompt = prompt_template.format(
-            file_name=file_name,
-            file_type=file_type,
-            structure_class=structure_class,
-            heuristic_doc_type=heuristic_doc_type,
-            onset_page=onset_page,
-            page_text=page_text,
-        )
+        if use_multi_page:
+            pages_text = self._build_multi_page_text(blocks, onset_page, pages_to_read)
+            prompt_template = PROMPT_TEMPLATES["understand_multi_page_document"]
+            prompt = prompt_template.format(
+                file_name=file_name,
+                file_type=file_type,
+                total_pages=total_pages,
+                protocol_name=protocol_name or "general",
+                pages_text=pages_text,
+            )
+            use_case = "understand_multi_page_document"
+        else:
+            page_text = self._build_page_text(blocks)
+            prompt_template = PROMPT_TEMPLATES["understand_document"]
+            prompt = prompt_template.format(
+                file_name=file_name,
+                file_type=file_type,
+                structure_class=structure_class,
+                heuristic_doc_type=heuristic_doc_type,
+                onset_page=onset_page,
+                page_text=page_text,
+            )
+            use_case = "understand_document"
 
         response_text = self.client.generate(
             prompt,
             system=SYSTEM_PROMPT,
-            use_case="understand_document",
+            use_case=use_case,
             document_id=document_id,
         )
 
@@ -131,6 +188,58 @@ class LLMDocumentUnderstanding:
                 break
             parts.append(masked)
             total_chars += len(masked) + 1  # +1 for newline
+
+        return "\n".join(parts)
+
+    def _build_multi_page_text(
+        self,
+        blocks: list[ExtractedBlock],
+        onset_page: int | str,
+        pages_to_read: int,
+    ) -> str:
+        """Build masked multi-page text from blocks starting at onset_page.
+
+        Groups blocks by page, includes up to ``pages_to_read`` pages starting
+        from the onset page, with per-page headers.
+        """
+        # Collect distinct pages in order
+        page_order: list[int | str] = []
+        page_blocks: dict[int | str, list[ExtractedBlock]] = defaultdict(list)
+        seen: set[int | str] = set()
+        for b in blocks:
+            if b.page_or_sheet not in seen:
+                seen.add(b.page_or_sheet)
+                page_order.append(b.page_or_sheet)
+            page_blocks[b.page_or_sheet].append(b)
+
+        # Find onset page index
+        try:
+            start_idx = page_order.index(onset_page)
+        except ValueError:
+            start_idx = 0
+
+        target_pages = page_order[start_idx : start_idx + pages_to_read]
+
+        parts: list[str] = []
+        total_chars = 0
+        for page in target_pages:
+            header = f"--- PAGE {page} ---"
+            parts.append(header)
+            total_chars += len(header) + 1
+
+            for block in page_blocks[page]:
+                masked = mask_text_for_llm(block.text)
+                if total_chars + len(masked) + 1 > _MAX_MULTI_PAGE_CHARS:
+                    remaining = _MAX_MULTI_PAGE_CHARS - total_chars
+                    if remaining > 10:
+                        parts.append(masked[:remaining])
+                    total_chars = _MAX_MULTI_PAGE_CHARS
+                    break
+                parts.append(masked)
+                total_chars += len(masked) + 1
+
+            if total_chars >= _MAX_MULTI_PAGE_CHARS:
+                break
 
         return "\n".join(parts)
 
@@ -209,6 +318,9 @@ class LLMDocumentUnderstanding:
         confidence = float(data.get("schema_confidence", 0.5))
         confidence = max(0.0, min(1.0, confidence))
 
+        # Parse template (Step 17)
+        template = DocumentSchema._parse_template(data.get("template"))
+
         return DocumentSchema(
             document_type=str(data.get("document_type", "unknown")),
             document_subtype=data.get("document_subtype"),
@@ -222,4 +334,5 @@ class LLMDocumentUnderstanding:
             extraction_notes=str(data.get("extraction_notes", "")),
             schema_confidence=confidence,
             detected_by="llm",
+            template=template,
         )
