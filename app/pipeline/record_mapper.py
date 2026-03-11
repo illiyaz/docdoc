@@ -176,7 +176,21 @@ def build_composite_record(
     if dobs:
         raw_dob = _extract_text(max(dobs, key=lambda d: d.score))
     if addresses:
-        raw_address = {"raw": _extract_text(max(addresses, key=lambda d: d.score))}
+        # Join all LOCATION detections in order of appearance (by start offset)
+        # to build a complete address like "85 Waltings Gardens, London, NW2 3UD"
+        sorted_addrs = sorted(addresses, key=lambda d: (
+            d.block.page_or_sheet if hasattr(d, "block") and d.block else 0,
+            d.start if hasattr(d, "start") else 0,
+        ))
+        # Deduplicate exact-same text (case-insensitive)
+        seen_texts: set[str] = set()
+        unique_parts: list[str] = []
+        for d in sorted_addrs:
+            txt = _extract_text(d).strip()
+            if txt and txt.lower() not in seen_texts:
+                seen_texts.add(txt.lower())
+                unique_parts.append(txt)
+        raw_address = {"raw": ", ".join(unique_parts)} if unique_parts else {"raw": _extract_text(addresses[0])}
     if gov_ids:
         raw_government_id = _extract_text(max(gov_ids, key=lambda d: d.score))
 
@@ -255,6 +269,16 @@ def extract_with_template(
             instance_dets.extend(by_page.get(page, []))
 
         if instance_dets:
-            records.append(build_composite_record(instance_dets, doc_id))
+            rec = build_composite_record(instance_dets, doc_id)
+            # Override page_range to match template instance pages (1-indexed)
+            pages_1 = sorted(int(p) + 1 for p in instance_pages)
+            if len(pages_1) == 1:
+                tmpl_range = str(pages_1[0])
+            else:
+                tmpl_range = f"{pages_1[0]}-{pages_1[-1]}"
+            # Replace frozen PIIRecord with updated page_range
+            from dataclasses import replace
+            rec = replace(rec, page_range=tmpl_range)
+            records.append(rec)
 
     return records

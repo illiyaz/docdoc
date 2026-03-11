@@ -160,6 +160,23 @@ def build_confidence(
 
     score = 0.0
 
+    # --- Same-document same-name safety net (+0.95) ---
+    # If two records come from the same document AND have the same name,
+    # they almost certainly refer to the same individual (e.g. per-detection
+    # records from template grouping that didn't fully merge).
+    # Only triggers when source_document_id looks like a real reference
+    # (UUID, file path, or 8+ char identifier — not short test stubs).
+    if (
+        r1.source_document_id
+        and len(r1.source_document_id) >= 8
+        and r1.source_document_id == r2.source_document_id
+        and r1.raw_name and r2.raw_name
+    ):
+        n1 = " ".join(r1.raw_name.lower().split())
+        n2 = " ".join(r2.raw_name.lower().split())
+        if n1 == n2:
+            return 0.95
+
     # --- Government ID match (+0.50) ---
     if "ssn" in anchors:
         gov_matched = False
