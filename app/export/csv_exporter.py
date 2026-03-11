@@ -81,18 +81,46 @@ def _mask_phone(phone: str | None) -> str:
     return "***"
 
 
+def format_address(addr: Any) -> str:
+    """Convert address dict/JSON to a readable string.
+
+    Handles multiple formats:
+    - ``{"raw": "85 Waltings Gardens"}`` → ``"85 Waltings Gardens"``
+    - ``{"street": "85 Waltings", "city": "London", "postcode": "NW2 3UD"}``
+      → ``"85 Waltings, London, NW2 3UD"``
+    - ``"85 Waltings Gardens"`` (already a string) → passthrough
+    - ``None`` → ``""``
+    """
+    if addr is None:
+        return ""
+    if isinstance(addr, str):
+        return addr
+    if isinstance(addr, dict):
+        if "raw" in addr:
+            return str(addr["raw"])
+        parts: list[str] = []
+        for key in ("street", "city", "county", "state", "postcode", "zip", "country"):
+            val = addr.get(key)
+            if val:
+                parts.append(str(val))
+        return ", ".join(parts) if parts else str(addr)
+    return str(addr)
+
+
 def _mask_address(addr: dict | str | None) -> str:
-    """Mask address — show only state and zip."""
+    """Mask address — show only state/county and postcode/zip."""
     if addr is None:
         return ""
     if isinstance(addr, str):
         return "***"
-    parts: list[str] = []
-    if addr.get("state"):
-        parts.append(str(addr["state"]))
-    if addr.get("zip"):
-        parts.append(str(addr["zip"]))
-    return ", ".join(parts) if parts else "***"
+    if isinstance(addr, dict):
+        parts: list[str] = []
+        for key in ("state", "county", "postcode", "zip"):
+            val = addr.get(key)
+            if val:
+                parts.append(str(val))
+        return ", ".join(parts) if parts else "***"
+    return "***"
 
 
 def _mask_gov_id(value: str | None) -> str:
@@ -132,6 +160,9 @@ def _format_value(field: str, value: Any) -> str:
             return _mask_phone(value)
         if field == "canonical_address":
             return _mask_address(value)
+    # Format addresses as readable strings even when masking is off
+    if field in ("canonical_address", "raw_address") and isinstance(value, dict):
+        return format_address(value)
     if isinstance(value, (list, dict)):
         return json.dumps(value, separators=(",", ":"))
     if isinstance(value, UUID):
@@ -234,6 +265,12 @@ def _apply_mask(value: Any, col: ExportColumn) -> str:
     """Apply masking strategy to a value for CSV output."""
     if value is None:
         return ""
+
+    # Format addresses and phones before masking
+    if col.mask_strategy == "address" or col.source_field in ("canonical_address", "raw_address"):
+        value = format_address(value)
+    if isinstance(value, dict) and col.source_field in ("canonical_phone",):
+        value = str(value.get("raw", value)) if "raw" in value else str(value)
 
     from app.core.settings import get_settings
     masking_on = get_settings().pii_masking_enabled

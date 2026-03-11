@@ -41,7 +41,8 @@ from app.structure.masking import mask_text_for_llm
 logger = logging.getLogger(__name__)
 
 _MAX_PAGE_TEXT_CHARS = 4000
-_MAX_MULTI_PAGE_CHARS = 12000  # 3x single-page budget for multi-page
+_MAX_MULTI_PAGE_CHARS_BASE = 12000  # base budget for multi-page
+_MAX_MULTI_PAGE_CHARS_PER_PAGE = 3000  # additional budget per extra page
 
 
 class LLMDocumentUnderstanding:
@@ -106,22 +107,38 @@ class LLMDocumentUnderstanding:
         self,
         protocol_name: str,
         protocol_config: dict | None,
+        total_pages: int = 0,
     ) -> int:
         """Determine how many pages the LLM should read.
 
         Priority: protocol_config override → PROTOCOL_LLM_CONFIG default → 3.
+
+        For large documents (>20 pages), auto-scales to ensure the LLM sees
+        at least 2 template instances.  E.g. a 450-page doc with default 3
+        pages → reads 6 pages so the LLM can detect a 3-page repeating template.
         """
+        # Start with protocol default
+        base_key = protocol_name.lower().replace("-", "_").replace(" ", "_")
+        if base_key in PROTOCOL_LLM_CONFIG:
+            base_pages = int(PROTOCOL_LLM_CONFIG[base_key]["llm_pages_to_read"])
+        else:
+            base_pages = DEFAULT_LLM_PAGES_TO_READ
+
+        # Override with explicit config if valid
         if protocol_config and "llm_pages_to_read" in protocol_config:
             try:
-                return max(1, int(protocol_config["llm_pages_to_read"]))
+                base_pages = max(1, int(protocol_config["llm_pages_to_read"]))
             except (TypeError, ValueError):
-                pass
+                pass  # keep protocol default
 
-        base = protocol_name.lower().replace("-", "_").replace(" ", "_")
-        if base in PROTOCOL_LLM_CONFIG:
-            return int(PROTOCOL_LLM_CONFIG[base]["llm_pages_to_read"])
+        # Auto-scale for large documents: read 2x pages so the LLM can see
+        # at least 2 complete template instances (e.g. 3-page template → 6 pages)
+        if total_pages > 20 and base_pages < 6:
+            base_pages = max(base_pages, 6)
+        if total_pages > 100 and base_pages < 9:
+            base_pages = max(base_pages, 9)
 
-        return DEFAULT_LLM_PAGES_TO_READ
+        return min(base_pages, 15)  # hard cap
 
     def _do_understand(
         self,
@@ -138,7 +155,7 @@ class LLMDocumentUnderstanding:
         protocol_config: dict | None,
     ) -> DocumentSchema:
         """Internal logic — may raise."""
-        pages_to_read = self._resolve_pages_to_read(protocol_name, protocol_config)
+        pages_to_read = self._resolve_pages_to_read(protocol_name, protocol_config, total_pages)
         use_multi_page = pages_to_read > 1 and total_pages > 1
 
         if use_multi_page:
@@ -202,6 +219,9 @@ class LLMDocumentUnderstanding:
         Groups blocks by page, includes up to ``pages_to_read`` pages starting
         from the onset page, with per-page headers.
         """
+        # Scale char budget based on pages_to_read
+        char_budget = _MAX_MULTI_PAGE_CHARS_BASE + max(0, pages_to_read - 3) * _MAX_MULTI_PAGE_CHARS_PER_PAGE
+
         # Collect distinct pages in order
         page_order: list[int | str] = []
         page_blocks: dict[int | str, list[ExtractedBlock]] = defaultdict(list)
@@ -229,16 +249,16 @@ class LLMDocumentUnderstanding:
 
             for block in page_blocks[page]:
                 masked = mask_text_for_llm(block.text)
-                if total_chars + len(masked) + 1 > _MAX_MULTI_PAGE_CHARS:
-                    remaining = _MAX_MULTI_PAGE_CHARS - total_chars
+                if total_chars + len(masked) + 1 > char_budget:
+                    remaining = char_budget - total_chars
                     if remaining > 10:
                         parts.append(masked[:remaining])
-                    total_chars = _MAX_MULTI_PAGE_CHARS
+                    total_chars = char_budget
                     break
                 parts.append(masked)
                 total_chars += len(masked) + 1
 
-            if total_chars >= _MAX_MULTI_PAGE_CHARS:
+            if total_chars >= char_budget:
                 break
 
         return "\n".join(parts)

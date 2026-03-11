@@ -794,12 +794,23 @@ def extract_generator(
                 # Template-aware extraction: group cross-page detections
                 if schema is not None and schema.template and schema.template.pages_per_instance >= 2:
                     doc_pages = set(b.page_or_sheet for b in blocks)
-                    records = extract_with_template(detections, schema, str(doc.id), len(doc_pages))
+                    total_pg = len(doc_pages)
+                    records = extract_with_template(detections, schema, str(doc.id), total_pg)
                     all_records.extend(records)
+                    logger.info(
+                        "Template extraction for %s: %d pages, %d-page template → %d composite records (from %d detections)",
+                        doc.file_name, total_pg, schema.template.pages_per_instance, len(records), len(detections),
+                    )
                 else:
                     for det in detections:
                         rec = detection_to_pii_record(det, str(doc.id))
                         all_records.append(rec)
+                    if schema is not None:
+                        logger.info(
+                            "No template for %s (%d pages, %d detections): schema.template=%s",
+                            doc.file_name, len(set(b.page_or_sheet for b in blocks)),
+                            len(detections), schema.template,
+                        )
             except Exception as e:
                 logger.warning("Detection failed for doc %s: %s", doc.file_name, type(e).__name__)
 

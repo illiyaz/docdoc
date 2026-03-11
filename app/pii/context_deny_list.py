@@ -85,6 +85,40 @@ FINANCIAL_TERM_DENY_LIST = frozenset({
     "withdrawal", "deposit", "balance", "credit", "debit",
 })
 
+# ---------------------------------------------------------------------------
+# Organization suffix detection (Fix 2)
+# ---------------------------------------------------------------------------
+
+ORGANIZATION_SUFFIXES = frozenset({
+    "limited", "ltd", "inc", "incorporated",
+    "corp", "corporation", "llc", "llp", "plc",
+    "gmbh", "ag", "sa", "sarl", "srl", "bv", "nv", "pty",
+    "co", "company", "group", "holdings", "partners",
+    "associates", "consultants", "consulting", "services",
+    "solutions", "systems", "technologies", "enterprises",
+})
+
+
+def is_likely_organization(text: str) -> bool:
+    """Check if detected PERSON text is actually an organization.
+
+    Returns True if the text ends with a known org suffix or matches
+    common firm-name patterns like "X & Y LLP".
+    """
+    if not text:
+        return False
+    words = text.lower().strip().split()
+    if not words:
+        return False
+    # Check last word (strip trailing period)
+    if words[-1].rstrip(".") in ORGANIZATION_SUFFIXES:
+        return True
+    # "Foo & Bar" pattern common in firms (3+ words with & as penultimate)
+    if len(words) >= 3 and words[-2] == "&":
+        return True
+    return False
+
+
 # Title patterns for cross-type suppression
 _TITLE_PATTERN = re.compile(
     r"^(?:mr|mrs|ms|miss|dr|prof|rev|sir|dame|lord|lady)\b",
@@ -200,6 +234,9 @@ def is_likely_false_positive(
     if entity_type == "PERSON":
         if text_lower in FINANCIAL_TERM_DENY_LIST:
             return True, f"financial_term: '{detected_text}' is a financial term, not a person"
+        # 0b. PERSON: organization suffix check
+        if is_likely_organization(detected_text):
+            return True, f"organization_name: '{detected_text}' ends with corporate suffix"
 
     if entity_type not in _FP_PRONE_ENTITY_TYPES:
         return False, ""
@@ -342,8 +379,11 @@ def cross_type_suppression(
             text_lower = det_text.strip().lower()
             keep_person = False
 
+            # Organization suffix → always suppress PERSON (even with title)
+            if has_org and is_likely_organization(det_text):
+                keep_person = False
             # Has title → keep PERSON
-            if _TITLE_PATTERN.match(det_text.strip()):
+            elif _TITLE_PATTERN.match(det_text.strip()):
                 keep_person = True
             # Contains digits → suppress PERSON
             elif any(c.isdigit() for c in det_text):

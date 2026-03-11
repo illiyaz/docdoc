@@ -335,7 +335,7 @@ These are detailed in [docs/SCHEMA.md](docs/SCHEMA.md). Summary:
 | 17. Cross-Page Template Linking + FP Cleanup + Auto-Export | PENDING | Handle multi-page documents where one individual's PII spans pages. LLM reads N pages (configurable per protocol) to detect repeating templates (e.g., 3 pages per person in pension statements). DocumentTemplate dataclass groups pages into per-individual record sets. build_composite_record() merges cross-page detections into single rich PIIRecord. Financial term deny-list ("Lump Sum" ≠ PERSON). Cross-type suppression (same text as PERSON+LOCATION → heuristic pick). Auto-CSV-export on pipeline completion. |
 | 18. Auditor-Ready CSV Export with Lineage | COMPLETE | Three export schemas: auditor (15 cols, default), minimal (3 cols), full (raw values, INVESTIGATION only). One row per individual with separate columns (name, address, DOB, gov ID, email, phone). Source document + page range for audit lineage. Government ID type column + masking (NE7****2D). Pipe-delimited pii_types_list. Migration 0010 adds 5 lineage columns to NotificationSubject (19 tables). PIIRecord extended with page_range + entity_types_found. Deduplicator populates lineage. Preview endpoint + inline preview in Exports tab. Schema dropdown (Auditor/Minimal). |
 
-**1943 tests passing after Steps 1–18.**
+**1979 tests passing after Steps 1–18 + critical fixes.**
 
 See [docs/PLAN.md](docs/PLAN.md) for active steps and [docs/PLAN_COMPLETED.md](docs/PLAN_COMPLETED.md) for completed reference.
 
