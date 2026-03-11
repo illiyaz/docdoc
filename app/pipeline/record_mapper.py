@@ -101,6 +101,8 @@ def detection_to_pii_record(
         raw_government_id=raw_government_id,
         source_document_id=doc_id,
         page_or_sheet=page,
+        page_range=str(int(page) + 1) if isinstance(page, (int, float)) else str(page),
+        entity_types_found=(et,),
     )
 
 
@@ -181,12 +183,27 @@ def build_composite_record(
     # Use highest-confidence PERSON detection as normalized_value, or first detection
     normalized = raw_name or _extract_text(detections[0])
 
-    # Determine page range
+    # Determine page range (1-indexed for human readability)
     pages = sorted(set(
         d.block.page_or_sheet for d in detections
         if hasattr(d, "block") and d.block
     ))
     page = pages[0] if pages else 0
+
+    # Build 1-indexed page range string
+    if pages:
+        pages_1 = sorted(set(int(p) + 1 for p in pages))
+        if len(pages_1) == 1:
+            page_range_str = str(pages_1[0])
+        else:
+            page_range_str = f"{pages_1[0]}-{pages_1[-1]}"
+    else:
+        page_range_str = "1"
+
+    # Collect all entity types found across detections
+    all_entity_types = tuple(sorted(set(
+        d.entity_type for d in detections if d.entity_type
+    )))
 
     return PIIRecord(
         record_id=str(uuid4()),
@@ -200,6 +217,8 @@ def build_composite_record(
         raw_government_id=raw_government_id,
         source_document_id=doc_id,
         page_or_sheet=page,
+        page_range=page_range_str,
+        entity_types_found=all_entity_types,
     )
 
 

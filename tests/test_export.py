@@ -455,7 +455,7 @@ class TestCSVExporter:
         path = Path(job.file_path)
         assert path.exists()
         content = path.read_text(encoding="utf-8")
-        assert "canonical_name" in content  # header present
+        assert "name" in content  # header present (auditor schema uses "name")
 
     def test_no_raw_email_in_file(self, db_session, tmp_path):
         project = _make_project(db_session)
@@ -509,11 +509,18 @@ class TestCSVExporter:
         content = Path(job.file_path).read_text(encoding="utf-8")
         reader = csv.reader(io.StringIO(content))
         header = next(reader)
-        assert header == DEFAULT_EXPORT_FIELDS
+        # Step 18: default schema is now "auditor" (15 cols)
+        assert len(header) == 15
+        assert header[0] == "individual_id"
         remaining = list(reader)
         assert remaining == []
 
     def test_with_protocol_config_fields(self, db_session, tmp_path):
+        """Protocol config export_fields no longer control columns; auditor schema is used.
+
+        Step 18 changed the exporter to schema-driven. Protocol config fields
+        are ignored — the export_schema parameter controls columns instead.
+        """
         project = _make_project(db_session)
         pc = _make_protocol_config(
             db_session,
@@ -532,7 +539,9 @@ class TestCSVExporter:
         content = Path(job.file_path).read_text(encoding="utf-8")
         reader = csv.reader(io.StringIO(content))
         header = next(reader)
-        assert header == ["canonical_name", "review_status"]
+        # Step 18: always uses auditor schema (15 cols) by default
+        assert len(header) == 15
+        assert header[0] == "individual_id"
 
     def test_confidence_threshold_filter(self, db_session, tmp_path):
         project = _make_project(db_session)
@@ -680,7 +689,7 @@ class TestExportAPI:
         resp = client.get(f"/api/projects/{project.id}/exports/{export_id}/download")
         assert resp.status_code == 200
         assert "text/csv" in resp.headers["content-type"]
-        assert "canonical_name" in resp.text
+        assert "name" in resp.text  # auditor schema header
         assert "Download Test" in resp.text
 
     def test_download_no_raw_email(self, db_session, client):
@@ -715,12 +724,13 @@ class TestExportAPI:
         assert resp.status_code == 200
         assert resp.json()["protocol_config_id"] == str(pc.id)
 
-        # Download and verify columns
+        # Download and verify — Step 18: always auditor schema (15 cols)
         export_id = resp.json()["id"]
         dl = client.get(f"/api/projects/{project.id}/exports/{export_id}/download")
         reader = csv.reader(io.StringIO(dl.text))
         header = next(reader)
-        assert header == ["canonical_name", "review_status"]
+        assert len(header) == 15
+        assert header[0] == "individual_id"
 
     def test_create_with_filters(self, db_session, client):
         project = _make_project(db_session)

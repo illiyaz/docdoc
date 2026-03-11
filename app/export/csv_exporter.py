@@ -1,10 +1,14 @@
 """CSV export for NotificationSubjects.
 
-Takes a project_id and optional configuration (export_fields from a protocol
-config, confidence threshold, entity type filters) and writes a CSV file
-containing canonical/normalized/masked data.  Never exports raw PII.
+Step 18 rewrite: schema-driven auditor-ready export with lineage columns.
 
-Pure logic is separated from ORM so it can be unit-tested without a database.
+Three export schemas:
+- ``auditor`` (default): 15 columns, one row per individual, gov ID masked
+- ``minimal``: 3 columns (name, notification_required, review_status)
+- ``full``: auditor + raw fields (INVESTIGATION mode only)
+
+Backward-compatible: old ``resolve_export_fields`` and ``DEFAULT_EXPORT_FIELDS``
+are preserved for existing callers.
 """
 from __future__ import annotations
 
@@ -22,11 +26,12 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.models import ExportJob, NotificationSubject, ProtocolConfig
+from app.export.export_schema import EXPORT_SCHEMAS, ExportColumn
 
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Constants
+# Legacy constants (backward compat for existing callers / tests)
 # ---------------------------------------------------------------------------
 
 #: Default columns when no export_fields are configured.
@@ -55,7 +60,7 @@ ALLOWED_EXPORT_FIELDS: frozenset[str] = frozenset({
 
 
 # ---------------------------------------------------------------------------
-# Pure helpers
+# Pure masking helpers
 # ---------------------------------------------------------------------------
 
 
@@ -76,16 +81,36 @@ def _mask_phone(phone: str | None) -> str:
     return "***"
 
 
-def _mask_address(addr: dict | None) -> str:
+def _mask_address(addr: dict | str | None) -> str:
     """Mask address — show only state and zip."""
     if addr is None:
         return ""
+    if isinstance(addr, str):
+        return "***"
     parts: list[str] = []
     if addr.get("state"):
         parts.append(str(addr["state"]))
     if addr.get("zip"):
         parts.append(str(addr["zip"]))
     return ", ".join(parts) if parts else "***"
+
+
+def _mask_gov_id(value: str | None) -> str:
+    """Mask a government ID — show first 3 and last 2 chars.
+
+    Examples:
+        "NE724362D" → "NE7****2D"
+        "AB1"       → "***"
+        ""          → "***"
+    """
+    if not value or len(value) < 5:
+        return "***"
+    return value[:3] + "*" * (len(value) - 5) + value[-2:]
+
+
+# ---------------------------------------------------------------------------
+# Legacy format_value (used by old build_csv_content path)
+# ---------------------------------------------------------------------------
 
 
 def _format_value(field: str, value: Any) -> str:
@@ -136,6 +161,11 @@ def resolve_export_fields(
     return list(DEFAULT_EXPORT_FIELDS)
 
 
+# ---------------------------------------------------------------------------
+# SubjectRow — extended with lineage fields (Step 18)
+# ---------------------------------------------------------------------------
+
+
 @dataclass
 class SubjectRow:
     """Lightweight projection of a NotificationSubject for export."""
@@ -150,9 +180,23 @@ class SubjectRow:
     merge_confidence: float | None
     notification_required: bool
     review_status: str
+    # Step 18 lineage fields
+    individual_id: int = 0
+    source_document_name: str | None = None
+    source_page_range: str | None = None
+    government_id_type: str | None = None
+    extraction_confidence: float | None = None
+    pii_types_list: str | None = None
+    date_of_birth: str | None = None
+    government_id: str | None = None
+    # Full schema raw fields (INVESTIGATION only)
+    raw_name: str | None = None
+    raw_email: str | None = None
+    raw_phone: str | None = None
+    raw_address: str | None = None
 
     @classmethod
-    def from_orm(cls, ns: NotificationSubject) -> SubjectRow:
+    def from_orm(cls, ns: NotificationSubject, *, individual_id: int = 0) -> SubjectRow:
         return cls(
             subject_id=str(ns.subject_id),
             canonical_name=ns.canonical_name,
@@ -164,12 +208,73 @@ class SubjectRow:
             merge_confidence=ns.merge_confidence,
             notification_required=ns.notification_required,
             review_status=ns.review_status,
+            individual_id=individual_id,
+            source_document_name=ns.source_document_name,
+            source_page_range=ns.source_page_range,
+            government_id_type=ns.government_id_type,
+            extraction_confidence=ns.extraction_confidence,
+            pii_types_list=ns.pii_types_list,
         )
 
     def get(self, field: str) -> Any:
         return getattr(self, field, None)
 
 
+# ---------------------------------------------------------------------------
+# Schema-driven CSV building (Step 18)
+# ---------------------------------------------------------------------------
+
+
+def _get_field_value(row: SubjectRow, col: ExportColumn) -> Any:
+    """Retrieve the value for a column from a SubjectRow."""
+    return getattr(row, col.source_field, None)
+
+
+def _apply_mask(value: Any, col: ExportColumn) -> str:
+    """Apply masking strategy to a value for CSV output."""
+    if value is None:
+        return ""
+
+    from app.core.settings import get_settings
+    masking_on = get_settings().pii_masking_enabled
+
+    if masking_on and col.mask_strategy:
+        if col.mask_strategy == "email":
+            return _mask_email(value)
+        if col.mask_strategy == "phone":
+            return _mask_phone(value)
+        if col.mask_strategy == "address":
+            return _mask_address(value)
+        if col.mask_strategy == "gov_id":
+            return _mask_gov_id(value)
+
+    if isinstance(value, (list, dict)):
+        return json.dumps(value, separators=(",", ":"))
+    if isinstance(value, UUID):
+        return str(value)
+    if isinstance(value, bool):
+        return str(value)
+    if isinstance(value, float):
+        return f"{value:.4f}"
+    return str(value)
+
+
+def build_csv_content_v2(
+    rows: list[SubjectRow],
+    columns: list[ExportColumn],
+) -> str:
+    """Build schema-driven CSV content.  Pure function — no DB or IO."""
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow([c.name for c in columns])
+    for row in rows:
+        writer.writerow([
+            _apply_mask(_get_field_value(row, c), c) for c in columns
+        ])
+    return buf.getvalue()
+
+
+# Legacy build_csv_content — kept for backward compat
 def build_csv_content(
     rows: list[SubjectRow],
     fields: list[str],
@@ -200,8 +305,7 @@ class CSVExporter:
         export_job = exporter.run(
             project_id=uuid,
             output_dir=Path("/tmp/exports"),
-            protocol_config_id=optional_uuid,
-            filters=optional_dict,
+            export_schema="auditor",
         )
     """
 
@@ -215,8 +319,25 @@ class CSVExporter:
         *,
         protocol_config_id: UUID | None = None,
         filters: dict | None = None,
+        export_schema: str = "auditor",
     ) -> ExportJob:
         """Execute the export and return the completed ExportJob record."""
+        from app.core.settings import get_settings
+        settings = get_settings()
+
+        # Validate schema
+        if export_schema not in EXPORT_SCHEMAS:
+            raise ValueError(f"Unknown export schema: {export_schema!r}. Valid: {sorted(EXPORT_SCHEMAS)}")
+
+        # Reject "full" in STRICT mode (pii_masking_enabled = True)
+        if export_schema == "full" and settings.pii_masking_enabled:
+            raise ValueError(
+                "Export schema 'full' is not available in STRICT mode "
+                "(pii_masking_enabled=True). Use 'auditor' or 'minimal'."
+            )
+
+        columns = EXPORT_SCHEMAS[export_schema]
+
         # 1. Create the ExportJob record (pending).
         export_job = ExportJob(
             project_id=project_id,
@@ -229,16 +350,11 @@ class CSVExporter:
         self._db.flush()
 
         try:
-            # 2. Resolve export fields.
-            protocol_config: ProtocolConfig | None = None
-            if protocol_config_id is not None:
-                protocol_config = self._db.get(ProtocolConfig, protocol_config_id)
-
-            fields = resolve_export_fields(protocol_config)
-
-            # 3. Query subjects.
-            stmt = select(NotificationSubject).where(
-                NotificationSubject.project_id == project_id,
+            # 2. Query subjects ordered by canonical_name.
+            stmt = (
+                select(NotificationSubject)
+                .where(NotificationSubject.project_id == project_id)
+                .order_by(NotificationSubject.canonical_name)
             )
 
             # Apply optional filters.
@@ -252,10 +368,6 @@ class CSVExporter:
                     stmt = stmt.where(
                         NotificationSubject.review_status == filters["review_status"],
                     )
-                if "entity_types" in filters:
-                    # JSON array containment is DB-specific; for simplicity
-                    # we filter in Python after fetching.
-                    pass
 
             subjects = self._db.execute(stmt).scalars().all()
 
@@ -267,10 +379,14 @@ class CSVExporter:
                     if s.pii_types_found and wanted.intersection(s.pii_types_found)
                 ]
 
-            rows = [SubjectRow.from_orm(s) for s in subjects]
+            # 3. Build SubjectRows with auto-incrementing individual_id
+            rows = [
+                SubjectRow.from_orm(s, individual_id=i)
+                for i, s in enumerate(subjects, 1)
+            ]
 
             # 4. Build CSV content.
-            csv_content = build_csv_content(rows, fields)
+            csv_content = build_csv_content_v2(rows, columns)
 
             # 5. Write to file.
             output_dir.mkdir(parents=True, exist_ok=True)

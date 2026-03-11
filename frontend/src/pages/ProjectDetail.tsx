@@ -31,6 +31,7 @@ import {
   Ban,
   ChevronLeft,
   ChevronRight,
+  Eye,
 } from "lucide-react"
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -44,6 +45,7 @@ import {
   createExport,
   createProtocolConfig,
   getExportDownloadUrl,
+  getExportPreview,
   uploadFiles,
   submitJobStreaming,
   getBaseProtocols,
@@ -3171,6 +3173,7 @@ function ExportsTab({ projectId }: { projectId: string }) {
   const queryClient = useQueryClient()
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [selectedSchema, setSelectedSchema] = useState<string>("auditor")
 
   const { data: exports, isLoading } = useQuery({
     queryKey: ["exports", projectId],
@@ -3182,7 +3185,7 @@ function ExportsTab({ projectId }: { projectId: string }) {
     setCreating(true)
     setError(null)
     try {
-      await createExport(projectId, {})
+      await createExport(projectId, { export_schema: selectedSchema })
       queryClient.invalidateQueries({ queryKey: ["exports", projectId] })
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create export")
@@ -3195,18 +3198,28 @@ function ExportsTab({ projectId }: { projectId: string }) {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold">CSV Exports</h3>
-        <button
-          onClick={handleCreateExport}
-          disabled={creating}
-          className="rounded-md bg-primary text-primary-foreground px-3 py-1.5 text-xs font-medium flex items-center gap-1 disabled:opacity-50"
-        >
-          {creating ? (
-            <Loader2 className="h-3 w-3 animate-spin" />
-          ) : (
-            <Plus className="h-3 w-3" />
-          )}
-          New Export
-        </button>
+        <div className="flex items-center gap-2">
+          <select
+            value={selectedSchema}
+            onChange={(e) => setSelectedSchema(e.target.value)}
+            className="rounded-md border px-2 py-1.5 text-xs bg-background"
+          >
+            <option value="auditor">Auditor (15 cols)</option>
+            <option value="minimal">Minimal (3 cols)</option>
+          </select>
+          <button
+            onClick={handleCreateExport}
+            disabled={creating}
+            className="rounded-md bg-primary text-primary-foreground px-3 py-1.5 text-xs font-medium flex items-center gap-1 disabled:opacity-50"
+          >
+            {creating ? (
+              <Loader2 className="h-3 w-3 animate-spin" />
+            ) : (
+              <Plus className="h-3 w-3" />
+            )}
+            New Export
+          </button>
+        </div>
       </div>
 
       {error && (
@@ -3238,6 +3251,10 @@ function ExportsTab({ projectId }: { projectId: string }) {
 }
 
 function ExportJobCard({ job, projectId }: { job: ExportJobSummary; projectId: string }) {
+  const [showPreview, setShowPreview] = useState(false)
+  const [preview, setPreview] = useState<{ columns: string[]; rows: Record<string, string>[] } | null>(null)
+  const [loadingPreview, setLoadingPreview] = useState(false)
+
   const statusStyle =
     job.status === "completed"
       ? "bg-green-100 text-green-800 border-green-300"
@@ -3249,38 +3266,103 @@ function ExportJobCard({ job, projectId }: { job: ExportJobSummary; projectId: s
     ? formatDistanceToNow(parseISO(job.created_at), { addSuffix: true })
     : null
 
+  async function handlePreview() {
+    if (showPreview) {
+      setShowPreview(false)
+      return
+    }
+    setLoadingPreview(true)
+    try {
+      const data = await getExportPreview(projectId, job.id, 5)
+      setPreview({ columns: data.columns, rows: data.rows })
+      setShowPreview(true)
+    } catch {
+      // silently fail
+    } finally {
+      setLoadingPreview(false)
+    }
+  }
+
+  function truncate(v: string, max = 30) {
+    return v.length > max ? v.slice(0, max) + "\u2026" : v
+  }
+
   return (
-    <div className="rounded-md border px-4 py-3 flex items-center justify-between">
-      <div className="flex items-center gap-3">
-        {job.status === "completed" ? (
-          <CheckCircle className="h-4 w-4 text-green-600" />
-        ) : (
-          <Download className="h-4 w-4 text-muted-foreground" />
-        )}
-        <div>
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-medium font-mono">
-              {job.id.slice(0, 8)}...
-            </span>
-            <Badge variant="outline" className={`${statusStyle} text-xs`}>
-              {job.status}
-            </Badge>
-          </div>
-          <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
-            {job.row_count != null && <span>{job.row_count} rows</span>}
-            {createdAgo && <span>{createdAgo}</span>}
+    <div className="rounded-md border">
+      <div className="px-4 py-3 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          {job.status === "completed" ? (
+            <CheckCircle className="h-4 w-4 text-green-600" />
+          ) : (
+            <Download className="h-4 w-4 text-muted-foreground" />
+          )}
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium font-mono">
+                {job.id.slice(0, 8)}...
+              </span>
+              <Badge variant="outline" className={`${statusStyle} text-xs`}>
+                {job.status}
+              </Badge>
+            </div>
+            <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
+              {job.row_count != null && <span>{job.row_count} rows</span>}
+              {createdAgo && <span>{createdAgo}</span>}
+            </div>
           </div>
         </div>
+        <div className="flex items-center gap-2">
+          {job.status === "completed" && (
+            <>
+              <button
+                onClick={handlePreview}
+                disabled={loadingPreview}
+                className="rounded-md border px-3 py-1.5 text-xs font-medium hover:bg-accent flex items-center gap-1 disabled:opacity-50"
+              >
+                {loadingPreview ? (
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                ) : (
+                  <Eye className="h-3 w-3" />
+                )}
+                {showPreview ? "Hide" : "Preview"}
+              </button>
+              <a
+                href={getExportDownloadUrl(projectId, job.id)}
+                className="rounded-md border px-3 py-1.5 text-xs font-medium hover:bg-accent flex items-center gap-1"
+                download
+              >
+                <Download className="h-3 w-3" />
+                Download
+              </a>
+            </>
+          )}
+        </div>
       </div>
-      {job.status === "completed" && (
-        <a
-          href={getExportDownloadUrl(projectId, job.id)}
-          className="rounded-md border px-3 py-1.5 text-xs font-medium hover:bg-accent flex items-center gap-1"
-          download
-        >
-          <Download className="h-3 w-3" />
-          Download
-        </a>
+      {showPreview && preview && (
+        <div className="border-t px-4 py-3 overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="border-b">
+                {preview.columns.map((col) => (
+                  <th key={col} className="text-left py-1 px-2 font-medium text-muted-foreground whitespace-nowrap">
+                    {col}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {preview.rows.map((row, i) => (
+                <tr key={i} className="border-b last:border-b-0">
+                  {preview.columns.map((col) => (
+                    <td key={col} className="py-1 px-2 whitespace-nowrap" title={row[col] ?? ""}>
+                      {truncate(row[col] ?? "", 30)}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   )

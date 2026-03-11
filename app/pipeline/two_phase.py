@@ -888,6 +888,7 @@ def extract_generator(
                 export_job = exporter.run(
                     project_id=run.project_id,
                     output_dir=export_dir,
+                    export_schema="auditor",
                 )
                 export_count = export_job.row_count or 0
                 yield _sse({

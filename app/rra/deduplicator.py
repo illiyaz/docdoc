@@ -17,8 +17,9 @@ from uuid import uuid4
 
 from sqlalchemy.orm import Session
 
-from app.db.models import NotificationSubject
+from app.db.models import Document, NotificationSubject
 from app.normalization.name_normalizer import normalize_name
+from app.pipeline.record_mapper import _GOV_ID_FIELD_TYPES
 from app.rra.entity_resolver import PIIRecord, ResolvedGroup
 
 
@@ -130,6 +131,48 @@ class Deduplicator:
             "HUMAN_REVIEW" if group.needs_human_review else "AI_PENDING"
         )
 
+        # --- Lineage fields (Step 18) ---
+        # pii_types_list: pipe-delimited from entity_types_found across all records
+        all_entity_types: set[str] = set()
+        for r in records:
+            all_entity_types.update(r.entity_types_found)
+            # Also include the record's own entity_type
+            if r.entity_type:
+                all_entity_types.add(r.entity_type)
+        pii_types_list_str = "|".join(sorted(all_entity_types)) if all_entity_types else None
+
+        # source_page_range: union of page_range values
+        page_ranges = [r.page_range for r in records if r.page_range]
+        source_page_range = ", ".join(sorted(set(page_ranges))) if page_ranges else None
+
+        # government_id_type: entity type of the record that has raw_government_id
+        government_id_type: str | None = None
+        for r in records:
+            if r.raw_government_id:
+                if r.entity_type.upper() in _GOV_ID_FIELD_TYPES:
+                    government_id_type = r.entity_type
+                else:
+                    government_id_type = "GOVERNMENT_ID"
+                break
+
+        # extraction_confidence: use group merge_confidence as best proxy
+        extraction_confidence = group.merge_confidence
+
+        # source_document_name: look up Document by source_document_id
+        source_document_name: str | None = None
+        for r in records:
+            if r.source_document_id:
+                try:
+                    from uuid import UUID as _UUID
+                    doc = self.db.get(Document, _UUID(r.source_document_id))
+                    if doc is not None:
+                        source_document_name = doc.file_name
+                        break
+                except (ValueError, Exception):
+                    # source_document_id may be a file path (non-UUID) in full pipeline mode
+                    source_document_name = r.source_document_id.rsplit("/", 1)[-1] if "/" in r.source_document_id else r.source_document_id
+                    break
+
         return NotificationSubject(
             subject_id=uuid4(),
             canonical_name=canonical_name,
@@ -141,6 +184,11 @@ class Deduplicator:
             merge_confidence=group.merge_confidence,
             notification_required=False,
             review_status=review_status,
+            source_document_name=source_document_name,
+            source_page_range=source_page_range,
+            government_id_type=government_id_type,
+            extraction_confidence=extraction_confidence,
+            pii_types_list=pii_types_list_str,
         )
 
     def _find_existing(self, ns: NotificationSubject) -> NotificationSubject | None:

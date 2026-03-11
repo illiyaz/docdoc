@@ -199,6 +199,18 @@ def test_notification_subject_columns_exist():
     assert "review_status" in ns_columns
     assert ns_columns["review_status"]["nullable"] is False
 
+    # Step 18: lineage columns for auditor-ready export
+    assert "source_document_name" in ns_columns
+    assert ns_columns["source_document_name"]["nullable"] is True
+    assert "source_page_range" in ns_columns
+    assert ns_columns["source_page_range"]["nullable"] is True
+    assert "government_id_type" in ns_columns
+    assert ns_columns["government_id_type"]["nullable"] is True
+    assert "extraction_confidence" in ns_columns
+    assert ns_columns["extraction_confidence"]["nullable"] is True
+    assert "pii_types_list" in ns_columns
+    assert ns_columns["pii_types_list"]["nullable"] is True
+
     # Audit timestamp
     assert "created_at" in ns_columns
     assert ns_columns["created_at"]["nullable"] is False

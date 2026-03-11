@@ -4,14 +4,17 @@ POST   /projects/{id}/exports               -- trigger CSV export
 GET    /projects/{id}/exports               -- list export jobs
 GET    /projects/{id}/exports/{eid}         -- get export job detail
 GET    /projects/{id}/exports/{eid}/download -- download the CSV file
+GET    /projects/{id}/exports/{eid}/preview  -- preview first N rows as JSON
 """
 from __future__ import annotations
 
+import csv
+import io
 import logging
 from pathlib import Path
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -37,6 +40,7 @@ _DEFAULT_EXPORT_DIR = Path("/tmp/docdoc_exports")
 class CreateExportBody(BaseModel):
     protocol_config_id: str | None = None
     filters: dict | None = None
+    export_schema: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -60,13 +64,20 @@ def create_export(
 
     output_dir = _DEFAULT_EXPORT_DIR / str(project_id)
 
-    exporter = CSVExporter(db)
-    export_job = exporter.run(
-        project_id=project_id,
-        output_dir=output_dir,
-        protocol_config_id=pc_id,
-        filters=body.filters,
-    )
+    schema_name = body.export_schema or "auditor"
+
+    try:
+        exporter = CSVExporter(db)
+        export_job = exporter.run(
+            project_id=project_id,
+            output_dir=output_dir,
+            protocol_config_id=pc_id,
+            filters=body.filters,
+            export_schema=schema_name,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
     return _export_job_dict(export_job)
 
 
@@ -93,6 +104,44 @@ def get_export(
 ):
     job = _get_or_404(db, project_id, export_id)
     return _export_job_dict(job)
+
+
+@router.get("/{export_id}/preview", summary="Preview first N rows of an export as JSON")
+def preview_export(
+    project_id: UUID,
+    export_id: UUID,
+    rows: int = Query(5, ge=1, le=100, description="Number of rows to preview"),
+    db: Session = Depends(get_db),
+):
+    """Read the CSV file and return the first *rows* data rows as JSON."""
+    job = _get_or_404(db, project_id, export_id)
+
+    if job.status != "completed":
+        raise HTTPException(status_code=400, detail="Export is not yet completed")
+
+    if not job.file_path:
+        raise HTTPException(status_code=404, detail="Export file path not set")
+
+    path = Path(job.file_path)
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="Export file not found on disk")
+
+    content = path.read_text(encoding="utf-8")
+    reader = csv.DictReader(io.StringIO(content))
+
+    result: list[dict[str, str]] = []
+    for i, row in enumerate(reader):
+        if i >= rows:
+            break
+        result.append(dict(row))
+
+    return {
+        "export_id": str(export_id),
+        "columns": reader.fieldnames or [],
+        "rows": result,
+        "total_rows": job.row_count or 0,
+        "preview_count": len(result),
+    }
 
 
 @router.get("/{export_id}/download", summary="Download the exported CSV file")

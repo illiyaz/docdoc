@@ -81,6 +81,8 @@ class PIIRecord:
     source_document_id: str = ""
     page_or_sheet: str | int = 0
     entity_role: str | None = None
+    page_range: str = ""
+    entity_types_found: tuple[str, ...] = ()
 
 
 # ---------------------------------------------------------------------------

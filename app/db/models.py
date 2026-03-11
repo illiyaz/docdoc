@@ -323,6 +323,12 @@ class NotificationSubject(Base):
         default="AI_PENDING",
         server_default=sql_text("'AI_PENDING'"),
     )
+    # Step 18: lineage columns for auditor-ready export
+    source_document_name: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    source_page_range: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    government_id_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    extraction_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    pii_types_list: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

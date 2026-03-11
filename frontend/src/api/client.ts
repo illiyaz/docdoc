@@ -472,6 +472,15 @@ export interface ExportJobSummary {
 export interface CreateExportBody {
   protocol_config_id?: string | null
   filters?: Record<string, unknown> | null
+  export_schema?: string | null
+}
+
+export interface ExportPreviewResponse {
+  export_id: string
+  columns: string[]
+  rows: Record<string, string>[]
+  total_rows: number
+  preview_count: number
 }
 
 export function createProject(body: CreateProjectBody): Promise<ProjectSummary> {
@@ -564,6 +573,14 @@ export function getExport(projectId: string, exportId: string): Promise<ExportJo
 
 export function getExportDownloadUrl(projectId: string, exportId: string): string {
   return `${BASE_URL}/projects/${projectId}/exports/${exportId}/download`
+}
+
+export function getExportPreview(
+  projectId: string,
+  exportId: string,
+  rows = 5,
+): Promise<ExportPreviewResponse> {
+  return api(`/projects/${projectId}/exports/${exportId}/preview?rows=${rows}`)
 }
 
 // ---------------------------------------------------------------------------
