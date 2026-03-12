@@ -26,13 +26,14 @@ from sqlalchemy.orm import Session
 from app.core.policies import StorageMode, StoragePolicyConfig
 from app.core.security import SecurityService
 from app.core.settings import get_settings
-from app.db.models import Document, DocumentAnalysisReview, IngestionRun
+from app.db.models import Document, DocumentAnalysisReview, IngestionRun, NotificationSubject
 from app.db.repositories import ExtractionRepository
 from app.pipeline.auto_approve import should_auto_approve
 from app.pipeline.record_mapper import (
     detection_to_pii_record,
     extract_with_template,
 )
+from app.core.constants import DEFAULT_EXTRACTION_BATCH_SIZE, PROTOCOL_LLM_CONFIG
 from app.pipeline.content_onset import (
     filter_sample_blocks,
     find_content_onset_from_blocks,
@@ -406,6 +407,10 @@ def analyze_generator(
                     if doc.structure_analysis and isinstance(doc.structure_analysis, dict):
                         heuristic_doc_type = doc.structure_analysis.get("document_type", "unknown")
 
+                    # Compute total_pages for multi-page template detection
+                    all_blocks = doc_blocks_cache.get(doc.id, [])
+                    total_pages = len(set(b.page_or_sheet for b in all_blocks)) if all_blocks else 0
+
                     schema = doc_understanding.understand(
                         sample_blocks,
                         heuristic_doc_type=heuristic_doc_type,
@@ -414,6 +419,9 @@ def analyze_generator(
                         structure_class=doc.structure_class or "",
                         onset_page=onset_page,
                         document_id=str(doc.id),
+                        total_pages=total_pages,
+                        protocol_name=body.protocol_id,
+                        protocol_config=protocol_config,
                     )
 
                     doc_schemas[doc.id] = schema
@@ -448,6 +456,134 @@ def analyze_generator(
                 "suppressed": schema_filter_suppressed,
             },
         })
+
+        # --- Stage 4b: Extraction Preview (LLM template docs only) ---
+        doc_previews: dict[UUID, dict] = {}
+        preview_count = 0
+
+        template_docs = [
+            doc for doc in doc_records
+            if doc.id in doc_schemas
+            and doc_schemas[doc.id] is not None
+            and getattr(doc_schemas[doc.id], "template", None) is not None
+            and doc_schemas[doc.id].template.pages_per_instance >= 2
+        ]
+
+        if template_docs and settings.llm_assist_enabled:
+            yield _sse({
+                "stage": "extraction_preview", "status": "running",
+                "message": f"Previewing LLM extraction for {len(template_docs)} template document(s)...",
+                "detail": {"total": len(template_docs), "current": 0},
+            })
+
+            try:
+                from app.llm.client import OllamaClient
+                from app.structure.llm_template_extractor import LLMTemplateExtractor
+
+                llm_client = OllamaClient()
+                extractor = LLMTemplateExtractor(llm_client, batch_size=1)
+
+                for idx, doc in enumerate(template_docs, 1):
+                    yield _sse({
+                        "stage": "extraction_preview", "status": "running",
+                        "message": f"Previewing extraction for document {idx}/{len(template_docs)}...",
+                        "detail": {"total": len(template_docs), "current": idx},
+                    })
+
+                    schema = doc_schemas[doc.id]
+                    template = schema.template
+                    blocks = doc_blocks_cache.get(doc.id, [])
+
+                    # Build page_texts from blocks
+                    page_texts: dict[int, str] = {}
+                    for b in blocks:
+                        pg = b.page_or_sheet
+                        if pg not in page_texts:
+                            page_texts[pg] = b.text
+                        else:
+                            page_texts[pg] += "\n" + b.text
+
+                    total_pages = len(set(b.page_or_sheet for b in blocks))
+                    if template.instance_marker:
+                        instances = template.find_instance_boundaries(page_texts)
+                    else:
+                        instances = template.get_instance_pages(total_pages)
+
+                    if not instances:
+                        continue
+
+                    # Extract ONLY the first instance as preview
+                    first_instance = instances[0]
+                    try:
+                        preview_records = extractor.extract_all_instances(
+                            schema,
+                            page_texts,
+                            str(doc.id),
+                            total_pages=len(first_instance),  # limit to first instance
+                        )
+                    except Exception:
+                        logger.warning(
+                            "Extraction preview failed for %s",
+                            doc.file_name, exc_info=True,
+                        )
+                        preview_records = []
+
+                    # Build preview dict
+                    fields_found: dict[str, str] = {}
+                    if preview_records:
+                        rec = preview_records[0]
+                        if rec.raw_name:
+                            fields_found["PERSON"] = rec.raw_name
+                        if rec.raw_email:
+                            fields_found["EMAIL"] = rec.raw_email
+                        if rec.raw_phone:
+                            fields_found["PHONE"] = rec.raw_phone
+                        if rec.raw_dob:
+                            fields_found["DATE_OF_BIRTH"] = rec.raw_dob
+                        if rec.raw_address:
+                            addr = rec.raw_address
+                            fields_found["LOCATION"] = addr.get("raw", str(addr)) if isinstance(addr, dict) else str(addr)
+                        if rec.raw_government_id:
+                            fields_found["GOVERNMENT_ID"] = rec.raw_government_id
+
+                    # Determine expected fields from schema
+                    expected_fields = set()
+                    if template.page_roles:
+                        for role in template.page_roles:
+                            expected_fields.update(role.pii_fields_expected)
+                    # Add ALWAYS_EXTRACT_IF_PRESENT
+                    from app.llm.extraction_prompts import ALWAYS_EXTRACT_IF_PRESENT
+                    expected_fields.update(ALWAYS_EXTRACT_IF_PRESENT)
+
+                    fields_missing = sorted(expected_fields - set(fields_found.keys()))
+
+                    pages_1 = sorted(int(p) + 1 for p in first_instance)
+                    page_range_str = f"{pages_1[0]}-{pages_1[-1]}" if len(pages_1) > 1 else str(pages_1[0])
+
+                    preview = {
+                        "preview_instance": 0,
+                        "pages": page_range_str,
+                        "fields_found": fields_found,
+                        "fields_missing": fields_missing,
+                        "total_instances_estimate": len(instances),
+                        "extraction_method": "llm_template",
+                        "pages_per_instance": template.pages_per_instance,
+                    }
+                    doc_previews[doc.id] = preview
+                    preview_count += 1
+
+                    logger.info(
+                        "Extraction preview for %s: %d fields found, %d missing, %d instances",
+                        doc.file_name, len(fields_found), len(fields_missing), len(instances),
+                    )
+            except Exception as e:
+                logger.warning("Extraction preview stage failed: %s", type(e).__name__)
+
+            yield _sse({
+                "stage": "extraction_preview", "status": "complete",
+                "message": f"Previewed extraction for {preview_count} document(s)",
+                "detail": {"previewed": preview_count},
+            })
 
         # --- Stage 5: Entity Analysis (LLM) ---
         yield _sse({
@@ -540,6 +676,7 @@ def analyze_generator(
                     sum(confidences) / len(confidences) if confidences else None
                 ),
                 sample_confidence_min=min(confidences) if confidences else None,
+                extraction_preview=doc_previews.get(doc.id),
             )
             db.add(review)
 
@@ -756,9 +893,8 @@ def extract_generator(
 
                 reader = get_reader(doc.source_path)
                 blocks = reader.read()
-                detections = engine.analyze(blocks, target_entity_types=doc_targets)
 
-                # Apply SchemaFilter if LLM is available
+                # Get DocumentSchema via LLM understanding (if available)
                 schema = None
                 if doc_understanding_cls is not None and schema_filter_cls is not None:
                     try:
@@ -767,7 +903,6 @@ def extract_generator(
                         if doc.structure_analysis and isinstance(doc.structure_analysis, dict):
                             heuristic_doc_type = doc.structure_analysis.get("document_type", "unknown")
 
-                        # Compute total pages for multi-page understanding
                         doc_pages = set(b.page_or_sheet for b in blocks)
                         total_pages = len(doc_pages)
 
@@ -784,33 +919,99 @@ def extract_generator(
                             protocol_name=protocol_id,
                             protocol_config=protocol_config,
                         )
-                        if schema is not None:
+                    except Exception:
+                        pass
+
+                # 3-path extraction (Step 19 — exclusive, no dual records):
+                #   Path A: template + LLM → LLMTemplateExtractor (ONLY these records)
+                #   Path B: template + no LLM → Presidio composite
+                #   Path C: non-template → Presidio per-detection records
+                is_template = (
+                    schema is not None
+                    and schema.template
+                    and schema.template.pages_per_instance >= 2
+                )
+
+                if is_template:
+                    doc_pages = set(b.page_or_sheet for b in blocks)
+                    total_pg = len(doc_pages)
+
+                    records: list[PIIRecord] = []
+                    extraction_path = "B"
+
+                    # Path A: LLM extraction — skip Presidio entirely
+                    if settings.llm_assist_enabled:
+                        try:
+                            from app.llm.client import OllamaClient
+                            from app.structure.llm_template_extractor import LLMTemplateExtractor
+
+                            batch_size = DEFAULT_EXTRACTION_BATCH_SIZE
+                            base_key = protocol_id.lower().replace("-", "_").replace(" ", "_")
+                            if base_key in PROTOCOL_LLM_CONFIG:
+                                batch_size = int(PROTOCOL_LLM_CONFIG[base_key].get("extraction_batch_size", batch_size))
+
+                            page_texts: dict[int, str] = {}
+                            for b in blocks:
+                                pg = b.page_or_sheet
+                                if pg not in page_texts:
+                                    page_texts[pg] = ""
+                                page_texts[pg] += b.text + "\n"
+
+                            client = OllamaClient(db_session=db)
+                            extractor = LLMTemplateExtractor(client, batch_size=batch_size)
+                            llm_records = extractor.extract_all_instances(
+                                schema, page_texts, str(doc.id), total_pg,
+                            )
+
+                            if llm_records:
+                                records = llm_records
+                                extraction_path = "A"
+                                logger.info(
+                                    "Path A (LLM) for %s: %d pages, %d-page template → %d records",
+                                    doc.file_name, total_pg, schema.template.pages_per_instance, len(records),
+                                )
+                        except Exception:
+                            logger.warning(
+                                "Path A (LLM) failed for %s, falling back to Path B",
+                                doc.file_name, exc_info=True,
+                            )
+
+                    # Path B fallback: need Presidio detections for composite
+                    if not records:
+                        detections = engine.analyze(blocks, target_entity_types=doc_targets)
+                        if schema is not None and schema_filter_cls is not None:
+                            try:
+                                sf = schema_filter_cls(schema)
+                                result = sf.filter_detections(detections)
+                                detections = result.kept
+                            except Exception:
+                                pass
+                        records = extract_with_template(detections, schema, str(doc.id), total_pg)
+                        logger.info(
+                            "Path B (Presidio composite) for %s: %d pages → %d records (from %d detections)",
+                            doc.file_name, total_pg, len(records), len(detections),
+                        )
+
+                    all_records.extend(records)
+
+                    yield _sse({
+                        "stage": "detection", "status": "running",
+                        "message": f"Extracted {len(records)} record(s) from {doc.file_name} (Path {extraction_path})",
+                        "detail": {"extraction_path": extraction_path, "records": len(records)},
+                    })
+                else:
+                    # Path C: non-template — run Presidio, create per-detection records
+                    detections = engine.analyze(blocks, target_entity_types=doc_targets)
+                    if schema is not None and schema_filter_cls is not None:
+                        try:
                             sf = schema_filter_cls(schema)
                             result = sf.filter_detections(detections)
                             detections = result.kept
-                    except Exception:
-                        pass  # best-effort; use unfiltered detections
-
-                # Template-aware extraction: group cross-page detections
-                if schema is not None and schema.template and schema.template.pages_per_instance >= 2:
-                    doc_pages = set(b.page_or_sheet for b in blocks)
-                    total_pg = len(doc_pages)
-                    records = extract_with_template(detections, schema, str(doc.id), total_pg)
-                    all_records.extend(records)
-                    logger.info(
-                        "Template extraction for %s: %d pages, %d-page template → %d composite records (from %d detections)",
-                        doc.file_name, total_pg, schema.template.pages_per_instance, len(records), len(detections),
-                    )
-                else:
+                        except Exception:
+                            pass
                     for det in detections:
                         rec = detection_to_pii_record(det, str(doc.id))
                         all_records.append(rec)
-                    if schema is not None:
-                        logger.info(
-                            "No template for %s (%d pages, %d detections): schema.template=%s",
-                            doc.file_name, len(set(b.page_or_sheet for b in blocks)),
-                            len(detections), schema.template,
-                        )
             except Exception as e:
                 logger.warning("Detection failed for doc %s: %s", doc.file_name, type(e).__name__)
 
@@ -835,6 +1036,15 @@ def extract_generator(
 
         # --- Stage 3: Deduplication ---
         yield _sse({"stage": "deduplication", "status": "running", "message": "Building notification subjects..."})
+
+        # Clean previous subjects for this project (each run is a clean slate)
+        if run.project_id is not None:
+            old_count = db.query(NotificationSubject).filter(
+                NotificationSubject.project_id == run.project_id,
+            ).delete()
+            db.flush()
+            if old_count:
+                logger.info("Cleared %d old notification subjects for project %s", old_count, run.project_id)
 
         from app.rra.deduplicator import Deduplicator
 

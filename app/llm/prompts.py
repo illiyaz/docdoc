@@ -293,6 +293,7 @@ UNDERSTAND_MULTI_PAGE_DOCUMENT = (
     '    "template_name": "descriptive name for the repeating form",\n'
     '    "pages_per_instance": 3,\n'
     '    "total_instances_estimate": 2,\n'
+    '    "instance_marker": "exact heading text that appears on the FIRST page of each individual, e.g. SUMMARY OF DETAILS IN RESPECT OF",\n'
     '    "page_roles": [\n'
     '      {{\n'
     '        "page_offset": 0,\n'

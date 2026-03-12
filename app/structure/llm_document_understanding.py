@@ -40,6 +40,62 @@ from app.structure.masking import mask_text_for_llm
 
 logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# Defensive parsing helpers
+# ---------------------------------------------------------------------------
+
+
+def _safe_parse_list(raw, parser_func, fallback_func=None):
+    """Safely parse a list that may contain dicts, strings, or junk.
+
+    *parser_func* handles dict items.  *fallback_func* (optional) handles
+    string items.  Any item that raises is silently skipped.
+    """
+    if not isinstance(raw, list):
+        return []
+    results = []
+    for item in raw:
+        try:
+            if isinstance(item, dict):
+                results.append(parser_func(item))
+            elif isinstance(item, str) and fallback_func is not None:
+                results.append(fallback_func(item))
+            # else: skip non-dict non-string items
+        except (KeyError, TypeError, ValueError, AttributeError):
+            continue
+    return results
+
+
+def _parse_table(t: dict) -> TableSchema:
+    """Parse a single table dict into a TableSchema."""
+    raw_cols = t.get("columns", [])
+    columns: list[TableColumn] = []
+    if isinstance(raw_cols, list):
+        for c in raw_cols:
+            if isinstance(c, dict):
+                try:
+                    columns.append(TableColumn(
+                        header=str(c.get("header", "")),
+                        semantic_type=str(c.get("semantic_type", "")),
+                        contains_pii=bool(c.get("contains_pii", False)),
+                        pii_type=c.get("pii_type"),
+                    ))
+                except (TypeError, ValueError):
+                    continue
+            elif isinstance(c, str):
+                columns.append(TableColumn(
+                    header=c, semantic_type="unknown",
+                    contains_pii=False, pii_type=None,
+                ))
+    return TableSchema(
+        columns=columns,
+        row_count_estimate=int(t.get("row_count_estimate", 0)),
+        table_context=str(t.get("table_context", "")),
+        table_location=t.get("table_location"),
+        has_pii_columns=bool(t.get("has_pii_columns", False)),
+    )
+
+
 _MAX_PAGE_TEXT_CHARS = 4000
 _MAX_MULTI_PAGE_CHARS_BASE = 12000  # base budget for multi-page
 _MAX_MULTI_PAGE_CHARS_PER_PAGE = 3000  # additional budget per extra page
@@ -264,7 +320,12 @@ class LLMDocumentUnderstanding:
         return "\n".join(parts)
 
     def _parse_response(self, response_text: str) -> DocumentSchema:
-        """Parse LLM JSON response into a DocumentSchema."""
+        """Parse LLM JSON response into a DocumentSchema.
+
+        Defensively handles all possible LLM response formats: strings where
+        dicts are expected, missing keys, unexpected types, etc.  A partial
+        schema (with whatever could be parsed) is always returned — never None.
+        """
         cleaned = response_text.strip()
         if cleaned.startswith("```"):
             lines = cleaned.split("\n")
@@ -273,86 +334,113 @@ class LLMDocumentUnderstanding:
 
         data = json.loads(cleaned)
 
-        # Parse field_map
-        field_map: list[FieldContext] = []
-        for f in data.get("field_map", []):
-            try:
-                field_map.append(FieldContext(
-                    label=str(f.get("label", "")),
-                    value_example=str(f.get("value_example", "")),
-                    semantic_type=str(f.get("semantic_type", "")),
-                    is_pii=bool(f.get("is_pii", False)),
-                    presidio_override=f.get("presidio_override"),
-                    suppress_types=list(f.get("suppress_types", [])),
-                ))
-            except (TypeError, ValueError):
-                continue
+        # Parse field_map — each entry may be dict or bare string
+        field_map = _safe_parse_list(
+            data.get("field_map", []),
+            parser_func=lambda f: FieldContext(
+                label=str(f.get("label", "")),
+                value_example=str(f.get("value_example", "")),
+                semantic_type=str(f.get("semantic_type", "")),
+                is_pii=bool(f.get("is_pii", False)),
+                presidio_override=f.get("presidio_override"),
+                suppress_types=list(f.get("suppress_types", [])),
+            ),
+            fallback_func=lambda s: FieldContext(
+                label=s, value_example="", semantic_type="unknown",
+                is_pii=False, presidio_override=None, suppress_types=[],
+            ),
+        )
 
-        # Parse people
-        people: list[PersonContext] = []
-        for p in data.get("people", []):
-            try:
-                people.append(PersonContext(
-                    name=str(p.get("name", "")),
-                    role=str(p.get("role", "unknown")),
-                    context=str(p.get("context", "")),
-                    is_pii_subject=bool(p.get("is_pii_subject", False)),
-                ))
-            except (TypeError, ValueError):
-                continue
+        # Parse people — each entry may be dict or bare string
+        people = _safe_parse_list(
+            data.get("people", []),
+            parser_func=lambda p: PersonContext(
+                name=str(p.get("name", "")),
+                role=str(p.get("role", "unknown")),
+                context=str(p.get("context", "")),
+                is_pii_subject=bool(p.get("is_pii_subject", False)),
+            ),
+            fallback_func=lambda s: PersonContext(
+                name=s, role="unknown", context="", is_pii_subject=False,
+            ),
+        )
 
-        # Parse date_contexts
-        date_contexts: list[DateContext] = []
-        for d in data.get("date_contexts", []):
-            try:
-                date_contexts.append(DateContext(
-                    value=str(d.get("value", "")),
-                    semantic_type=str(d.get("semantic_type", "")),
-                    is_pii=bool(d.get("is_pii", False)),
-                ))
-            except (TypeError, ValueError):
-                continue
+        # Parse date_contexts — each entry may be dict or bare string
+        date_contexts = _safe_parse_list(
+            data.get("date_contexts", []),
+            parser_func=lambda d: DateContext(
+                value=str(d.get("value", "")),
+                semantic_type=str(d.get("semantic_type", "")),
+                is_pii=bool(d.get("is_pii", False)),
+            ),
+            fallback_func=lambda s: DateContext(
+                value=s, semantic_type="unknown", is_pii=False,
+            ),
+        )
 
-        # Parse tables
-        tables: list[TableSchema] = []
-        for t in data.get("tables", []):
-            try:
-                columns: list[TableColumn] = []
-                for c in t.get("columns", []):
-                    columns.append(TableColumn(
-                        header=str(c.get("header", "")),
-                        semantic_type=str(c.get("semantic_type", "")),
-                        contains_pii=bool(c.get("contains_pii", False)),
-                        pii_type=c.get("pii_type"),
-                    ))
-                tables.append(TableSchema(
-                    columns=columns,
-                    row_count_estimate=int(t.get("row_count_estimate", 0)),
-                    table_context=str(t.get("table_context", "")),
-                    table_location=t.get("table_location"),
-                    has_pii_columns=bool(t.get("has_pii_columns", False)),
-                ))
-            except (TypeError, ValueError):
-                continue
+        # Parse tables — each entry may be dict or bare string (skip strings)
+        tables = _safe_parse_list(
+            data.get("tables", []),
+            parser_func=lambda t: _parse_table(t),
+        )
+
+        # Parse organizations — may be list of strings, dicts, or junk
+        raw_orgs = data.get("organizations", [])
+        organizations: list[str] = []
+        if isinstance(raw_orgs, list):
+            for o in raw_orgs:
+                if isinstance(o, str):
+                    organizations.append(o)
+                elif isinstance(o, dict):
+                    organizations.append(str(o.get("name", o.get("organization", str(o)))))
+                # else: skip
+
+        # Parse suppression_hints — may be list of strings or dicts
+        raw_hints = data.get("suppression_hints", [])
+        suppression_hints: list[str] = []
+        if isinstance(raw_hints, list):
+            for h in raw_hints:
+                if isinstance(h, str):
+                    suppression_hints.append(h)
+                elif isinstance(h, dict):
+                    suppression_hints.append(str(h.get("hint", h.get("type", str(h)))))
 
         confidence = float(data.get("schema_confidence", 0.5))
         confidence = max(0.0, min(1.0, confidence))
 
-        # Parse template (Step 17)
+        # Parse template separately — even if other fields had issues
         template = DocumentSchema._parse_template(data.get("template"))
 
-        return DocumentSchema(
-            document_type=str(data.get("document_type", "unknown")),
-            document_subtype=data.get("document_subtype"),
-            issuing_entity=data.get("issuing_entity"),
-            field_map=field_map,
-            people=people,
-            organizations=list(data.get("organizations", [])),
-            date_contexts=date_contexts,
-            tables=tables,
-            suppression_hints=list(data.get("suppression_hints", [])),
-            extraction_notes=str(data.get("extraction_notes", "")),
-            schema_confidence=confidence,
-            detected_by="llm",
-            template=template,
-        )
+        try:
+            return DocumentSchema(
+                document_type=str(data.get("document_type", "unknown")),
+                document_subtype=data.get("document_subtype"),
+                issuing_entity=data.get("issuing_entity"),
+                field_map=field_map,
+                people=people,
+                organizations=organizations,
+                date_contexts=date_contexts,
+                tables=tables,
+                suppression_hints=suppression_hints,
+                extraction_notes=str(data.get("extraction_notes", "")),
+                schema_confidence=confidence,
+                detected_by="llm",
+                template=template,
+            )
+        except Exception as e:
+            logger.warning("Partial schema parse failure: %s", e)
+            return DocumentSchema(
+                document_type=str(data.get("document_type", "unknown")),
+                document_subtype=None,
+                issuing_entity=data.get("issuing_entity"),
+                field_map=[],
+                people=[],
+                organizations=organizations,
+                date_contexts=[],
+                tables=[],
+                suppression_hints=suppression_hints,
+                extraction_notes=str(data.get("extraction_notes", "")),
+                schema_confidence=0.5,
+                detected_by="llm",
+                template=template,
+            )

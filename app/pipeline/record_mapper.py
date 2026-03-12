@@ -16,6 +16,7 @@ Step 17 additions:
 """
 from __future__ import annotations
 
+import re
 from collections import defaultdict
 from uuid import uuid4
 
@@ -53,6 +54,9 @@ _GOV_ID_FIELD_TYPES = _GOV_ID_TYPES | frozenset({
     "NATIONAL_ID", "TAX_ID",
 })
 
+# UK NI number pattern: 2 letters, 6 digits, 1 letter (e.g. NH828286D)
+_NI_NUMBER_RE = re.compile(r"\b([A-Z]{2}\d{6}[A-Z])\b")
+
 
 def detection_to_pii_record(
     det: DetectionResult,
@@ -77,6 +81,13 @@ def detection_to_pii_record(
 
     if et in _PERSON_TYPES:
         raw_name = detected_text
+        # Split embedded UK NI number: "Blunt NH828286D" → name + gov ID
+        ni_match = _NI_NUMBER_RE.search(detected_text)
+        if ni_match:
+            raw_government_id = ni_match.group(1)
+            cleaned_name = detected_text[:ni_match.start()].strip()
+            if cleaned_name:
+                raw_name = cleaned_name
     elif et in _EMAIL_TYPES:
         raw_email = detected_text
     elif et in _PHONE_TYPES:

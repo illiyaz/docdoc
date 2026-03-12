@@ -1528,6 +1528,59 @@ function AnalysisReviewPanel({ jobId, onExtractionComplete }: { jobId: string; o
             </div>
           )}
 
+          {/* LLM Extraction Preview (Step 19b) */}
+          {doc.extraction_preview && (
+            <div className="bg-indigo-50 border border-indigo-200 rounded p-2 space-y-1.5">
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-medium text-indigo-800">
+                  LLM Extraction Preview
+                </p>
+                <span className="text-[10px] bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded">
+                  {doc.extraction_preview.extraction_method}
+                </span>
+              </div>
+              <p className="text-[10px] text-indigo-600">
+                Instance 1 of ~{doc.extraction_preview.total_instances_estimate}
+                {" "}(pages {doc.extraction_preview.pages}, {doc.extraction_preview.pages_per_instance} pages each)
+              </p>
+
+              {/* Fields found */}
+              {Object.keys(doc.extraction_preview.fields_found).length > 0 && (
+                <div className="space-y-0.5">
+                  <p className="text-[10px] font-medium text-indigo-700 uppercase tracking-wide">Fields Found:</p>
+                  <div className="flex flex-wrap gap-1">
+                    {Object.entries(doc.extraction_preview.fields_found).map(([field, value]) => (
+                      <span key={field} className="inline-flex items-center gap-1 text-xs bg-green-50 border border-green-200 rounded px-1.5 py-0.5">
+                        <span className="font-medium text-green-800">{field}</span>
+                        <span className="text-green-600 max-w-[120px] truncate" title={value}>{value}</span>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Fields missing */}
+              {doc.extraction_preview.fields_missing.length > 0 && (
+                <div className="space-y-0.5">
+                  <p className="text-[10px] font-medium text-indigo-700 uppercase tracking-wide">Not Found:</p>
+                  <div className="flex flex-wrap gap-1">
+                    {doc.extraction_preview.fields_missing.map((field) => (
+                      <span key={field} className="text-xs bg-gray-100 text-gray-500 border border-gray-200 rounded px-1.5 py-0.5">
+                        {field}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {Object.keys(doc.extraction_preview.fields_found).length === 0 && (
+                <p className="text-xs text-red-600 font-medium">
+                  No fields extracted — LLM extraction may not work for this document
+                </p>
+              )}
+            </div>
+          )}
+
           {/* Detection Controls — type toggles + individual detections */}
           {doc.sample_extractions.length > 0 && doc.review_status === "pending_review" && (
             <div className="bg-muted/50 rounded p-2 space-y-2">

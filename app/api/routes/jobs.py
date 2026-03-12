@@ -425,9 +425,8 @@ def _pipeline_generator(
             })
             reader = get_reader(doc_info["source_path"])
             blocks = reader.read()
-            detections = engine.analyze(blocks)
 
-            # LLM Document Understanding + Schema Filter + Template extraction
+            # Get DocumentSchema via LLM understanding (if available)
             schema = None
             if doc_understanding_cls is not None and schema_filter_cls is not None:
                 try:
@@ -439,18 +438,68 @@ def _pipeline_generator(
                         file_type=doc_info.get("file_type", ""),
                         total_pages=len(doc_pages),
                     )
-                    if schema is not None:
-                        sf = schema_filter_cls(schema)
-                        result = sf.filter_detections(detections)
-                        detections = result.kept
                 except Exception:
                     pass
 
-            if schema is not None and schema.template and schema.template.pages_per_instance >= 2:
+            # 3-path extraction (Step 19 — exclusive, no dual records)
+            is_template = (
+                schema is not None
+                and schema.template
+                and schema.template.pages_per_instance >= 2
+            )
+
+            if is_template:
                 doc_pages = set(b.page_or_sheet for b in blocks)
-                records = extract_with_template(detections, schema, doc_info["source_path"], len(doc_pages))
+                total_pg = len(doc_pages)
+
+                records = []
+                # Path A: LLM extraction — skip Presidio entirely
+                if schema_filter_cls is not None:
+                    try:
+                        from app.llm.client import OllamaClient
+                        from app.structure.llm_template_extractor import LLMTemplateExtractor
+                        from app.core.constants import DEFAULT_EXTRACTION_BATCH_SIZE
+
+                        page_texts: dict[int, str] = {}
+                        for b in blocks:
+                            pg = b.page_or_sheet
+                            if pg not in page_texts:
+                                page_texts[pg] = ""
+                            page_texts[pg] += b.text + "\n"
+
+                        client = OllamaClient(db_session=db)
+                        extractor = LLMTemplateExtractor(client, batch_size=DEFAULT_EXTRACTION_BATCH_SIZE)
+                        llm_records = extractor.extract_all_instances(
+                            schema, page_texts, doc_info["source_path"], total_pg,
+                        )
+                        if llm_records:
+                            records = llm_records
+                    except Exception:
+                        pass
+
+                # Path B fallback: need Presidio for composite
+                if not records:
+                    detections = engine.analyze(blocks)
+                    if schema is not None and schema_filter_cls is not None:
+                        try:
+                            sf = schema_filter_cls(schema)
+                            result = sf.filter_detections(detections)
+                            detections = result.kept
+                        except Exception:
+                            pass
+                    records = extract_with_template(detections, schema, doc_info["source_path"], total_pg)
+
                 all_records.extend(records)
             else:
+                # Path C: non-template — run Presidio per-detection
+                detections = engine.analyze(blocks)
+                if schema is not None and schema_filter_cls is not None:
+                    try:
+                        sf = schema_filter_cls(schema)
+                        result = sf.filter_detections(detections)
+                        detections = result.kept
+                    except Exception:
+                        pass
                 for det in detections:
                     rec = detection_to_pii_record(det, doc_info["source_path"])
                     all_records.append(rec)
@@ -472,6 +521,16 @@ def _pipeline_generator(
 
         # --- Stage 5: Deduplication ---
         yield _sse({"stage": "deduplication", "status": "running", "message": "Building notification subjects..."})
+
+        # Clean previous subjects for this project (each run is a clean slate)
+        if run.project_id is not None:
+            old_count = db.query(NotificationSubject).filter(
+                NotificationSubject.project_id == run.project_id,
+            ).delete()
+            db.flush()
+            if old_count:
+                logger.info("Cleared %d old notification subjects for project %s", old_count, run.project_id)
+
         dedup = Deduplicator(db)
         subjects = dedup.build_subjects(groups)
 

@@ -93,6 +93,7 @@ class DocumentTemplate:
     total_instances_estimate: int   # 2
     page_roles: list[PageRole] = field(default_factory=list)
     identity_page_offset: int = 0   # which page within template has the name
+    instance_marker: str = ""       # text heading marking start of each instance
 
     def get_instance_pages(self, total_pages: int) -> list[list[int]]:
         """Return page groupings per template instance.
@@ -102,6 +103,45 @@ class DocumentTemplate:
         instances: list[list[int]] = []
         for start in range(0, total_pages, self.pages_per_instance):
             end = min(start + self.pages_per_instance, total_pages)
+            instances.append(list(range(start, end)))
+        return instances
+
+    def find_instance_boundaries(
+        self,
+        page_texts: dict[int, str],
+    ) -> list[list[int]]:
+        """Find instance boundaries by scanning for the identity marker.
+
+        Instead of fixed-stride paging, looks for ``instance_marker`` on each
+        page.  Each occurrence marks the START of a new instance.  Pages
+        between consecutive markers form one instance.  Handles variable-
+        length instances (some individuals may have extra pages).
+
+        Falls back to ``get_instance_pages()`` if no marker is set or fewer
+        than 2 boundaries are found.
+        """
+        marker = (self.instance_marker or "").strip()
+        if not marker:
+            return self.get_instance_pages(len(page_texts))
+
+        marker_upper = marker.upper()
+        sorted_pages = sorted(page_texts.keys())
+        if not sorted_pages:
+            return []
+
+        boundaries: list[int] = []
+        for pg in sorted_pages:
+            text = page_texts.get(pg, "")
+            if marker_upper in text.upper():
+                boundaries.append(pg)
+
+        if len(boundaries) < 2:
+            return self.get_instance_pages(len(page_texts))
+
+        max_page = sorted_pages[-1]
+        instances: list[list[int]] = []
+        for i, start in enumerate(boundaries):
+            end = boundaries[i + 1] if i + 1 < len(boundaries) else max_page + 1
             instances.append(list(range(start, end)))
         return instances
 
@@ -195,6 +235,7 @@ class DocumentSchema:
                     "pages_per_instance": self.template.pages_per_instance,
                     "total_instances_estimate": self.template.total_instances_estimate,
                     "identity_page_offset": self.template.identity_page_offset,
+                    "instance_marker": self.template.instance_marker,
                     "page_roles": [
                         {
                             "page_offset": pr.page_offset,
@@ -273,25 +314,42 @@ class DocumentSchema:
 
     @staticmethod
     def _parse_template(tpl: dict | None) -> DocumentTemplate | None:
-        """Parse a template dict into a DocumentTemplate, or None."""
+        """Parse a template dict into a DocumentTemplate, or None.
+
+        Handles all possible LLM response formats defensively: page_roles
+        as dicts or strings, missing keys, unexpected types.
+        """
         if not tpl or not isinstance(tpl, dict):
             return None
         try:
-            page_roles = [
-                PageRole(
-                    page_offset=int(pr.get("page_offset", 0)),
-                    role=str(pr.get("role", "")),
-                    pii_fields_expected=list(pr.get("pii_fields_expected", [])),
-                    is_identity_page=bool(pr.get("is_identity_page", False)),
-                )
-                for pr in tpl.get("page_roles", [])
-            ]
+            raw_roles = tpl.get("page_roles") or []
+            page_roles: list[PageRole] = []
+            if isinstance(raw_roles, list):
+                for pr in raw_roles:
+                    if isinstance(pr, dict):
+                        try:
+                            page_roles.append(PageRole(
+                                page_offset=int(pr.get("page_offset") or 0),
+                                role=str(pr.get("role") or ""),
+                                pii_fields_expected=list(pr.get("pii_fields_expected") or []),
+                                is_identity_page=bool(pr.get("is_identity_page", False)),
+                            ))
+                        except (TypeError, ValueError):
+                            continue
+                    elif isinstance(pr, str):
+                        page_roles.append(PageRole(
+                            page_offset=len(page_roles),
+                            role=pr,
+                            pii_fields_expected=[],
+                            is_identity_page=False,
+                        ))
             return DocumentTemplate(
-                template_name=str(tpl.get("template_name", "")),
-                pages_per_instance=int(tpl.get("pages_per_instance", 1)),
-                total_instances_estimate=int(tpl.get("total_instances_estimate", 1)),
+                template_name=str(tpl.get("template_name") or ""),
+                pages_per_instance=int(tpl.get("pages_per_instance") or 1),
+                total_instances_estimate=int(tpl.get("total_instances_estimate") or 1),
                 page_roles=page_roles,
-                identity_page_offset=int(tpl.get("identity_page_offset", 0)),
+                identity_page_offset=int(tpl.get("identity_page_offset") or 0),
+                instance_marker=str(tpl.get("instance_marker") or ""),
             )
         except (TypeError, ValueError, KeyError):
             return None

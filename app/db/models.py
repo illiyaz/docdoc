@@ -329,6 +329,8 @@ class NotificationSubject(Base):
     government_id_type: Mapped[str | None] = mapped_column(String(64), nullable=True)
     extraction_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
     pii_types_list: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    canonical_dob: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    canonical_government_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -492,6 +494,7 @@ class DocumentAnalysisReview(Base):
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     selected_entity_types: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    extraction_preview: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     detection_decisions: Mapped[list[DetectionReviewDecision]] = relationship(back_populates="analysis_review")
 

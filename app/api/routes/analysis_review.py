@@ -131,6 +131,8 @@ def get_analysis_results(job_id: str, db: Session = Depends(get_db)):
             "extraction_guidance": ea.get("extraction_guidance"),
             # Document schema from LLM Document Understanding (Phase 14b/14c)
             "document_schema": doc_schema,
+            # LLM extraction preview (Step 19b)
+            "extraction_preview": review.extraction_preview if review else None,
         })
 
     return results

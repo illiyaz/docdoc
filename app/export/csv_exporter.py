@@ -245,6 +245,8 @@ class SubjectRow:
             government_id_type=ns.government_id_type,
             extraction_confidence=ns.extraction_confidence,
             pii_types_list=ns.pii_types_list,
+            date_of_birth=getattr(ns, "canonical_dob", None),
+            government_id=getattr(ns, "canonical_government_id", None),
         )
 
     def get(self, field: str) -> Any:

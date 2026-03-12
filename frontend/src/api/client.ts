@@ -824,6 +824,18 @@ export interface AnalysisReviewDetail {
   relationships: EntityRelationship[]
   estimated_unique_individuals: number | null
   extraction_guidance: string | null
+  // LLM extraction preview (Step 19b)
+  extraction_preview: ExtractionPreview | null
+}
+
+export interface ExtractionPreview {
+  preview_instance: number
+  pages: string
+  fields_found: Record<string, string>
+  fields_missing: string[]
+  total_instances_estimate: number
+  extraction_method: string
+  pages_per_instance: number
 }
 
 export async function getAnalysisResults(jobId: string): Promise<AnalysisReviewDetail[]> {

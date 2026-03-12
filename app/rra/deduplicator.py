@@ -155,6 +155,14 @@ class Deduplicator:
                     government_id_type = "GOVERNMENT_ID"
                 break
 
+        # canonical_dob: best DOB from records
+        dobs = [r.raw_dob for r in records if r.raw_dob]
+        canonical_dob = _best_value(dobs)
+
+        # canonical_government_id: best government ID from records
+        gov_ids = [r.raw_government_id for r in records if r.raw_government_id]
+        canonical_government_id = _best_value(gov_ids)
+
         # extraction_confidence: use group merge_confidence as best proxy
         extraction_confidence = group.merge_confidence
 
@@ -189,6 +197,8 @@ class Deduplicator:
             government_id_type=government_id_type,
             extraction_confidence=extraction_confidence,
             pii_types_list=pii_types_list_str,
+            canonical_dob=canonical_dob,
+            canonical_government_id=canonical_government_id,
         )
 
     def _find_existing(self, ns: NotificationSubject) -> NotificationSubject | None:

@@ -2077,3 +2077,837 @@ Step 17 Part 2: Financial term FP suppression, cross-type suppression, auto-expo
 7. Run pytest on all changed files. Fix failures up to 3 attempts.
    Update CLAUDE.md.
 ```
+
+---
+
+### Step 18 — Auditor-Ready CSV Export with Lineage (PENDING)
+
+**Goal:** Restructure the CSV export from a fragmented per-detection format to a clean per-individual format that auditors and law firms can actually use. Each row = one affected individual. PII types are columns, not row values. Every row includes source document, page range, and confidence for full audit lineage.
+
+**Current export (broken for auditors):**
+
+```csv
+canonical_name,canonical_email,canonical_phone,pii_types_found,merge_confidence,review_status
+,,,"[""LOCATION""]",1.0000,AI_PENDING
+Lump Sum,,,"[""PERSON""]",1.0000,AI_PENDING
+Buckman,,,"[""PERSON""]",1.0000,AI_PENDING
+```
+
+Problems:
+- One row per detection, not per individual
+- PII types as a JSON array in one column instead of separate columns
+- No source document or page reference
+- No address, DOB, or government ID columns
+- Includes false positives ("Lump Sum", "Buckman")
+- LOCATION rows have no name — useless standalone
+
+**Target export (what law firms need):**
+
+```csv
+individual_id,name,address,date_of_birth,government_id,government_id_type,email,phone,pii_types_found,source_document,source_pages,extraction_confidence,merge_confidence,review_status,notification_required
+1,K P Acheampong,"85 Waltings Gardens, Shoot Up Hill, London NW2 3UD",10-Aug-1959,NE724362D,NI_NUMBER,,,PERSON|LOCATION|DATE_OF_BIRTH|NI_NUMBER,pension_transfer.pdf,1-3,0.92,0.92,APPROVED,true
+2,M S Alcock,"3 Whitworth Road, Wellingborough, Northants NN8 1QQ",29-Aug-1960,WK393925C,NI_NUMBER,,,PERSON|LOCATION|DATE_OF_BIRTH|NI_NUMBER,pension_transfer.pdf,4-6,0.95,0.95,APPROVED,true
+```
+
+Properties:
+- One row per unique individual (NotificationSubject)
+- Separate columns for each PII type (name, address, DOB, gov ID, email, phone)
+- Government ID has both value and type columns (SSN vs NI_NUMBER vs Aadhaar)
+- Source document filename for lineage
+- Page range showing which pages this individual's data came from
+- Pipe-delimited PII types found (not JSON array)
+- Both extraction and merge confidence
+- Notification required flag (per protocol)
+
+---
+
+#### 18a. Export Schema Definition
+
+**File: `app/export/export_schema.py`** (new):
+
+```python
+from dataclasses import dataclass, field
+
+@dataclass
+class ExportColumn:
+    name: str               # column header
+    source_field: str       # where to get data from NotificationSubject/PIIRecord
+    mask_strategy: str      # "none", "mask_email", "mask_phone", "mask_gov_id", "mask_address"
+    required: bool          # must have value for row to be valid
+
+# Default export columns — auditor-friendly
+AUDITOR_EXPORT_COLUMNS = [
+    ExportColumn("individual_id",       "row_number",           "none",         True),
+    ExportColumn("name",                "canonical_name",       "none",         True),
+    ExportColumn("address",             "canonical_address",    "mask_address", False),
+    ExportColumn("date_of_birth",       "raw_dob",              "none",         False),
+    ExportColumn("government_id",       "raw_government_id",    "mask_gov_id",  False),
+    ExportColumn("government_id_type",  "government_id_type",   "none",         False),
+    ExportColumn("email",               "canonical_email",      "mask_email",   False),
+    ExportColumn("phone",               "canonical_phone",      "mask_phone",   False),
+    ExportColumn("pii_types_found",     "pii_types_found",      "none",         False),
+    ExportColumn("source_document",     "source_document_name", "none",         True),
+    ExportColumn("source_pages",        "source_page_range",    "none",         False),
+    ExportColumn("extraction_confidence","extraction_confidence","none",         False),
+    ExportColumn("merge_confidence",    "merge_confidence",     "none",         False),
+    ExportColumn("review_status",       "review_status",        "none",         True),
+    ExportColumn("notification_required","notification_required","none",         False),
+]
+
+# Minimal export — just names and notification status
+MINIMAL_EXPORT_COLUMNS = [
+    ExportColumn("name",                "canonical_name",       "none",         True),
+    ExportColumn("notification_required","notification_required","none",         False),
+    ExportColumn("review_status",       "review_status",        "none",         True),
+]
+
+# Full export — includes raw values (INVESTIGATION mode only)
+FULL_EXPORT_COLUMNS = AUDITOR_EXPORT_COLUMNS + [
+    ExportColumn("raw_name",            "raw_name",             "none",         False),
+    ExportColumn("raw_email",           "raw_email",            "none",         False),
+    ExportColumn("raw_phone",           "raw_phone",            "none",         False),
+    ExportColumn("raw_address",         "raw_address",          "none",         False),
+]
+
+EXPORT_SCHEMAS = {
+    "auditor": AUDITOR_EXPORT_COLUMNS,
+    "minimal": MINIMAL_EXPORT_COLUMNS,
+    "full": FULL_EXPORT_COLUMNS,      # only available in INVESTIGATION storage mode
+}
+```
+
+#### 18b. Lineage Tracking
+
+The lineage must trace each exported row back to its source. Two levels:
+
+**Level 1 — Document lineage** (which file):
+
+```python
+# Already available via NotificationSubject → source_document_id → Document.file_name
+# Need to populate source_document_name on the export row
+```
+
+**Level 2 — Page lineage** (which pages within the file):
+
+```python
+# For template-grouped records: stored in PIIRecord.page_range ("1-3")
+# For single-page records: stored in PIIRecord.page_or_sheet (1)
+# Need to propagate through to NotificationSubject
+```
+
+**File: `app/db/models.py`** — Extend NotificationSubject:
+
+```python
+# Add to NotificationSubject (or use existing columns if available)
+source_document_name = Column(VARCHAR(512), nullable=True)   # "pension_transfer.pdf"
+source_page_range = Column(VARCHAR(64), nullable=True)       # "1-3" or "1"
+government_id_type = Column(VARCHAR(64), nullable=True)      # "US_SSN", "NI_NUMBER", "AADHAAR"
+extraction_confidence = Column(Float, nullable=True)         # avg confidence across detections
+pii_types_list = Column(VARCHAR(1024), nullable=True)        # "PERSON|LOCATION|DATE_OF_BIRTH|NI_NUMBER"
+```
+
+**Migration 0010** for the new columns.
+
+**File: `app/rra/deduplicator.py`** — Update `build_subjects()`:
+
+When creating NotificationSubject from resolved PIIRecords, populate:
+- `source_document_name` from Document.file_name
+- `source_page_range` from PIIRecord.page_range or page_or_sheet
+- `government_id_type` from the entity_type of the raw_government_id detection
+- `extraction_confidence` from average confidence of constituent detections
+- `pii_types_list` from pipe-joined unique entity types
+
+#### 18c. Rewrite CSV Exporter
+
+**File: `app/export/csv_exporter.py`** — Major refactor:
+
+```python
+class CSVExporter:
+    def run(self, project_id, *, protocol_config_id=None, output_dir=None,
+            export_schema="auditor", storage_policy="strict"):
+        """
+        Export NotificationSubjects as auditor-ready CSV.
+        
+        export_schema: "auditor" (default), "minimal", "full"
+        "full" only available when storage_policy="investigation"
+        """
+        # Get export columns based on schema
+        columns = EXPORT_SCHEMAS[export_schema]
+        
+        # "full" schema requires INVESTIGATION mode
+        if export_schema == "full" and storage_policy != "investigation":
+            raise ValueError("Full export requires INVESTIGATION storage policy")
+        
+        # Query subjects with document join for lineage
+        subjects = (
+            db_session.query(NotificationSubject)
+            .filter(NotificationSubject.project_id == project_id)
+            .join(Document, ...)  # for source_document_name
+            .order_by(NotificationSubject.canonical_name)
+            .all()
+        )
+        
+        # Build rows
+        rows = []
+        for idx, subject in enumerate(subjects, 1):
+            row = {}
+            for col in columns:
+                value = self._get_field_value(subject, col, row_number=idx)
+                value = self._apply_mask(value, col.mask_strategy)
+                row[col.name] = value
+            rows.append(row)
+        
+        # Write CSV
+        content = self._build_csv(columns, rows)
+        ...
+    
+    def _get_field_value(self, subject, col, row_number=None):
+        """Map export column to actual data from subject."""
+        if col.source_field == "row_number":
+            return row_number
+        elif col.source_field == "pii_types_found":
+            return subject.pii_types_list or ""
+        elif col.source_field == "source_document_name":
+            return subject.source_document_name or ""
+        elif col.source_field == "source_page_range":
+            return subject.source_page_range or ""
+        # ... etc for each field
+    
+    def _apply_mask(self, value, strategy):
+        """Apply masking strategy based on storage policy."""
+        if strategy == "none" or value is None:
+            return value
+        elif strategy == "mask_email":
+            return _mask_email(value)
+        elif strategy == "mask_phone":
+            return _mask_phone(value)
+        elif strategy == "mask_gov_id":
+            return _mask_gov_id(value)  # "NE7****2D" — first 3 + last 2 visible
+        elif strategy == "mask_address":
+            return _mask_address(value)  # state/county + postcode only
+```
+
+**New masking function for government IDs:**
+
+```python
+def _mask_gov_id(value: str) -> str:
+    """Mask government ID: show first 3 and last 2 chars.
+    NE724362D → NE7****2D
+    285-07-5085 → 285-**-*085
+    """
+    if not value or len(value) < 5:
+        return "***"
+    return value[:3] + "*" * (len(value) - 5) + value[-2:]
+```
+
+#### 18d. Export Format Options
+
+The protocol config should control export format:
+
+```json
+{
+  "export_schema": "auditor",
+  "export_fields": ["name", "address", "government_id", "source_document"],
+  "mask_government_ids": true,
+  "include_lineage": true
+}
+```
+
+- `export_schema` selects the column set (auditor/minimal/full)
+- `export_fields` optionally limits which columns appear (subset of schema)
+- `mask_government_ids` controls whether gov IDs are masked (default true in STRICT)
+- `include_lineage` controls source_document and source_pages columns
+
+#### 18e. Frontend: Exports Tab Enhancement
+
+**File: `frontend/src/pages/ProjectDetail.tsx`** — ExportsTab:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ Exports                                                     │
+│                                                             │
+│ Latest Export                                                │
+│ ┌─────────────────────────────────────────────────────────┐ │
+│ │ 📄 export_c418511c.csv          Auto-generated          │ │
+│ │ 2 individuals • 8 PII fields • Auditor format           │ │
+│ │ Created: 2 minutes ago                                  │ │
+│ │                                                         │ │
+│ │ [⬇ Download CSV]  [👁 Preview]  [📊 Summary]            │ │
+│ └─────────────────────────────────────────────────────────┘ │
+│                                                             │
+│ Preview:                                                    │
+│ ┌─────────────────────────────────────────────────────────┐ │
+│ │ # │ Name           │ Address        │ DOB        │ Gov ID│ │
+│ │ 1 │ K P Acheampong │ ...London NW2  │ 10-Aug-1959│ NE7**│ │
+│ │ 2 │ M S Alcock     │ ...NN8 1QQ     │ 29-Aug-1960│ WK3**│ │
+│ └─────────────────────────────────────────────────────────┘ │
+│                                                             │
+│ Generate New Export                                         │
+│ Schema: [Auditor ▾]  Fields: [All ▾]  [Generate]           │
+│                                                             │
+│ Export History                                               │
+│ │ export_c418511c.csv  Auditor  2 rows  Auto  2 min ago   │ │
+│ │ export_1a976d0a.csv  Auditor  0 rows  Manual  4 hrs ago │ │
+└─────────────────────────────────────────────────────────────┘
+```
+
+Key features:
+- Latest export prominently displayed with download button
+- Preview table showing first 5 rows inline (no download needed)
+- Summary: individual count, PII field count, format
+- Schema selector for generating new exports
+- Export history with row counts and auto/manual badge
+- "Auto-generated" badge for exports created by pipeline completion
+
+#### 18f. Execution Prompt
+
+```
+@agent-general-purpose Read CLAUDE.md and docs/PLAN.md Step 18 for context.
+
+Step 18: Auditor-ready CSV export with lineage tracking.
+
+=== SCHEMA + MIGRATION ===
+
+1. Create app/export/export_schema.py:
+   - ExportColumn dataclass (name, source_field, mask_strategy, required)
+   - AUDITOR_EXPORT_COLUMNS: 15 columns (individual_id, name, address,
+     date_of_birth, government_id, government_id_type, email, phone,
+     pii_types_found, source_document, source_pages, extraction_confidence,
+     merge_confidence, review_status, notification_required)
+   - MINIMAL_EXPORT_COLUMNS: 3 columns (name, notification_required, review_status)
+   - FULL_EXPORT_COLUMNS: auditor + raw_* fields (INVESTIGATION mode only)
+   - EXPORT_SCHEMAS dict mapping "auditor"/"minimal"/"full" to column lists
+
+2. Extend NotificationSubject in app/db/models.py with new nullable columns:
+   source_document_name (VARCHAR 512), source_page_range (VARCHAR 64),
+   government_id_type (VARCHAR 64), extraction_confidence (Float),
+   pii_types_list (VARCHAR 1024).
+
+3. Create migration 0010 for the new NotificationSubject columns.
+
+=== LINEAGE POPULATION ===
+
+4. Update app/rra/deduplicator.py build_subjects():
+   When creating NotificationSubject from resolved PIIRecords, populate:
+   - source_document_name from Document.file_name (join via source_document_id)
+   - source_page_range from PIIRecord.page_range or str(page_or_sheet)
+   - government_id_type from entity_type of the raw_government_id detection
+   - extraction_confidence from average confidence of constituent detections
+   - pii_types_list from pipe-joined unique entity types (e.g., "PERSON|LOCATION|DATE_OF_BIRTH")
+
+5. Update app/pipeline/record_mapper.py build_composite_record():
+   Store page_range on the PIIRecord (e.g., "1-3" for template instances).
+   Store all entity types found as a list on the record.
+
+=== EXPORT REWRITE ===
+
+6. Rewrite app/export/csv_exporter.py:
+   - Accept export_schema parameter ("auditor" default, "minimal", "full")
+   - "full" schema raises error if storage_policy is not "investigation"
+   - Query NotificationSubjects with Document join for source_document_name
+   - Order by canonical_name
+   - Build rows using ExportColumn definitions from export_schema.py
+   - Apply masking per column strategy:
+     mask_email: "***@***.***"
+     mask_phone: "***-***-{last4}"
+     mask_gov_id: first 3 chars + asterisks + last 2 chars (NE724362D → NE7****2D)
+     mask_address: county/state + postcode only
+   - Add _mask_gov_id() function
+   - Write CSV with proper column headers
+   - individual_id is auto-incrementing row number, not a UUID
+
+7. Update auto-export in app/pipeline/two_phase.py:
+   Pass export_schema="auditor" to CSVExporter.run() for auto-generated exports.
+
+=== FRONTEND ===
+
+8. Update ExportsTab in frontend/src/pages/ProjectDetail.tsx:
+   - Latest export card: filename, row count, PII field count, format badge,
+     auto/manual badge, download button
+   - Preview table: first 5 rows inline with column headers
+     Truncate long values (address > 30 chars). Tooltip for full value.
+   - Generate New Export: schema dropdown (Auditor/Minimal/Full),
+     generate button. Full only shown if INVESTIGATION mode.
+   - Export history: table of past exports with row count, format, age
+
+9. Add export preview endpoint:
+   GET /projects/{id}/exports/{eid}/preview?rows=5
+   Returns first N rows as JSON (for inline preview without downloading).
+
+=== TESTS ===
+
+10. Create tests/test_export_v2.py:
+    - Auditor schema: 15 columns in correct order
+    - Row per individual: 2 subjects → 2 CSV rows
+    - Lineage: source_document_name populated from Document.file_name
+    - Lineage: source_page_range shows "1-3" for template-grouped record
+    - Government ID masking: "NE724362D" → "NE7****2D"
+    - Government ID type: "NI_NUMBER" column populated
+    - PII types: pipe-delimited, not JSON array
+    - Email/phone masking: same as existing
+    - Address masking: county + postcode only
+    - Minimal schema: only 3 columns
+    - Full schema: requires INVESTIGATION mode, raises otherwise
+    - Auto-export: pipeline completion creates auditor-format export
+    - Preview endpoint: returns first 5 rows as JSON
+    - Empty project: CSV has headers only, 0 rows
+
+11. Run pytest on ALL changed files. Fix failures up to 3 attempts.
+    Update CLAUDE.md.
+```
+
+---
+
+### Step 19 — Schema-Driven LLM Extraction for Template Documents (PENDING)
+
+**Goal:** For repeating template documents (pension statements, payroll, HR forms), use the LLM as the primary extractor instead of Presidio. The LLM reads each template instance's pages and extracts structured fields directly — because it can understand "Date of Birth: 10-Aug-1959" in context, which Presidio cannot. The extraction prompt is generated from the DocumentSchema, not hardcoded. Presidio remains the primary extractor for non-template documents.
+
+**Why this is needed:**
+
+Presidio fundamentally cannot extract:
+- UK dates: "10-Aug-1959" → no DATE_OF_BIRTH recognizer for DD-MMM-YYYY
+- UK NI numbers: "NE724362D" → no recognizer exists (pattern: 2 letters + 6 digits + 1 letter)
+- Full structured addresses: "85 Waltings Gardens, Shoot Up Hill, London NW2 3UD" → only "London" detected as LOCATION
+- DOB from labeled fields: "2.3 Date of Birth: 10-Aug-1959" → Presidio sees a date but doesn't know it's a DOB
+
+The LLM reads the page and understands that "2.3 Date of Birth:" is a label and "10-Aug-1959" is the value. No regex pattern needed.
+
+**Architecture — schema-driven, not hardcoded:**
+
+```
+DocumentSchema (from Step 14b, already exists)
+      │
+      ▼
+Prompt Generator (NEW — builds prompt from schema)
+      │
+      ├── Template documents → LLM extracts per-instance → Presidio validates
+      │
+      └── Non-template documents → Presidio extracts per-page → Schema filters
+```
+
+The extraction prompt is GENERATED from `schema.template.page_roles[].pii_fields_expected`. Different document types produce different schemas, which produce different prompts. Zero hardcoding.
+
+---
+
+#### 19a. LLM Extraction Prompt Generator
+
+**File: `app/llm/extraction_prompts.py`** (new):
+
+```python
+def build_extraction_prompt(
+    page_texts: list[str],        # text from each page in this template instance
+    page_roles: list[PageRole],   # from DocumentSchema.template
+    instance_index: int,          # which instance (0-based)
+    document_type: str,           # from DocumentSchema
+) -> str:
+    """
+    Build an LLM extraction prompt from the DocumentSchema.
+    
+    The prompt tells the LLM:
+    1. What type of document this is
+    2. How many pages to read
+    3. What fields to extract (from page_roles.pii_fields_expected)
+    4. Expected format for each field type
+    
+    Returns a prompt string. NOT hardcoded to any document type.
+    """
+    # Collect all expected PII fields across all pages
+    all_fields = set()
+    for role in page_roles:
+        all_fields.update(role.pii_fields_expected)
+    
+    # Map entity types to human-readable extraction instructions
+    field_instructions = []
+    for field in sorted(all_fields):
+        instruction = ENTITY_EXTRACTION_GUIDE.get(field, f"Extract any {field} values")
+        field_instructions.append(f"- {field}: {instruction}")
+    
+    prompt = f"""You are extracting personal information from a {document_type}.
+This is instance {instance_index + 1}. Read the following pages and extract the requested fields.
+
+{chr(10).join(f'--- PAGE {i+1} ---{chr(10)}{text}{chr(10)}' for i, text in enumerate(page_texts))}
+
+Extract these fields and return ONLY a JSON object:
+{{
+{chr(10).join(f'  "{field}": "extracted value or null if not found"' for field in sorted(all_fields))}
+}}
+
+Field extraction guide:
+{chr(10).join(field_instructions)}
+
+RULES:
+- Extract the EXACT value as it appears in the document
+- If a field is not present on any page, set it to null
+- For addresses, include the COMPLETE address (street, area, city, postcode, country)
+- For dates, preserve the original format (10-Aug-1959, not 1959-08-10)
+- For names, include title if present (Mr, Mrs, Dr)
+- Do NOT guess or infer values that are not explicitly stated
+"""
+    return prompt
+
+
+# Entity type → extraction instruction mapping
+# This is the ONLY "configuration" — it tells the LLM what each field type looks like
+# It is NOT document-type-specific
+ENTITY_EXTRACTION_GUIDE = {
+    "PERSON": "Full name including title (Mr/Mrs/Dr) if present",
+    "LOCATION": "Complete address — street, area, city, county, postcode, country. Combine all address lines into one value.",
+    "DATE_OF_BIRTH": "Date of birth in original format. Look for labels like 'Date of Birth', 'DOB', 'Born'.",
+    "US_SSN": "Social Security Number (XXX-XX-XXXX format)",
+    "NI_NUMBER": "UK National Insurance Number (2 letters + 6 digits + 1 letter, e.g., NE724362D). Look for labels like 'National Insurance Number', 'NI No', 'NINO'.",
+    "NHS_NUMBER": "UK NHS Number (10 digits, usually formatted XXX XXX XXXX)",
+    "EMAIL_ADDRESS": "Email address",
+    "PHONE_NUMBER": "Phone number in any format",
+    "CREDIT_CARD": "Credit/debit card number",
+    "US_DRIVER_LICENSE": "Driver's license number",
+    "US_PASSPORT": "Passport number",
+    "AADHAAR": "Indian Aadhaar number (12 digits)",
+    "PAN_CARD": "Indian PAN (5 letters + 4 digits + 1 letter)",
+    "IBAN_CODE": "IBAN bank account number",
+    "US_BANK_NUMBER": "Bank account or routing number",
+    "MEDICAL_LICENSE": "Medical license or registration number",
+    "NPI_NUMBER": "National Provider Identifier (10 digits)",
+}
+```
+
+**Key: `ENTITY_EXTRACTION_GUIDE` is a generic mapping, not tied to any document type.** The same guide works for pension statements, medical records, HR files, insurance claims — because it describes entity types, not document layouts.
+
+#### 19b. LLM Template Extractor
+
+**File: `app/structure/llm_template_extractor.py`** (new):
+
+```python
+class LLMTemplateExtractor:
+    """
+    Extracts PII from template document instances using LLM.
+    
+    For each template instance (e.g., pages 1-3 for person 1, pages 4-6 for person 2):
+    1. Reads the page texts
+    2. Builds an extraction prompt from the DocumentSchema
+    3. Sends to LLM (Ollama)
+    4. Parses JSON response into a structured record
+    5. Validates extracted values against Presidio patterns (optional)
+    
+    Falls back gracefully: if LLM fails for an instance, returns None
+    and the pipeline falls back to Presidio for that instance.
+    """
+    
+    def __init__(self, ollama_client, db_session=None):
+        self.client = ollama_client
+        self.db_session = db_session
+    
+    def extract_all_instances(
+        self, 
+        doc,                      # Document ORM object
+        schema: DocumentSchema,   # with template populated
+        page_texts: dict[int, str],  # page_number → text
+    ) -> list[PIIRecord]:
+        """
+        Extract PII from all template instances in the document.
+        Returns one PIIRecord per instance with all fields populated.
+        """
+        template = schema.template
+        instances = template.get_instance_pages(doc.total_pages or len(page_texts))
+        
+        records = []
+        for idx, instance_pages in enumerate(instances):
+            # Get text for this instance's pages
+            texts = [page_texts.get(p, "") for p in instance_pages]
+            
+            # Build prompt from schema (NOT hardcoded)
+            prompt = build_extraction_prompt(
+                page_texts=texts,
+                page_roles=template.page_roles,
+                instance_index=idx,
+                document_type=schema.document_type,
+            )
+            
+            # Call LLM
+            try:
+                response = self.client.generate(
+                    prompt=prompt,
+                    system="You extract personal information from documents. Respond ONLY with valid JSON.",
+                    use_case="template_extraction",
+                    document_id=str(doc.id),
+                )
+                
+                # Parse response into PIIRecord
+                record = self._parse_extraction(response, doc, instance_pages)
+                if record:
+                    records.append(record)
+                    
+            except Exception as e:
+                # LLM failed for this instance — log and continue
+                # Pipeline will fall back to Presidio for this instance
+                logger.warning(f"LLM extraction failed for instance {idx}: {e}")
+                continue
+        
+        return records
+    
+    def _parse_extraction(self, response_text, doc, instance_pages) -> PIIRecord | None:
+        """Parse LLM JSON response into a PIIRecord."""
+        try:
+            data = json.loads(response_text)
+        except json.JSONDecodeError:
+            return None
+        
+        rec = PIIRecord(
+            record_id=str(uuid4()),
+            source_document_id=str(doc.id),
+            page_range=f"{instance_pages[0]+1}-{instance_pages[-1]+1}",
+        )
+        
+        # Map extracted fields to PIIRecord.raw_* fields
+        # This mapping uses entity type names, NOT document-specific field names
+        FIELD_TO_RAW = {
+            "PERSON": "raw_name",
+            "LOCATION": "raw_address",
+            "DATE_OF_BIRTH": "raw_dob",
+            "EMAIL_ADDRESS": "raw_email",
+            "PHONE_NUMBER": "raw_phone",
+            "US_SSN": "raw_government_id",
+            "NI_NUMBER": "raw_government_id",
+            "AADHAAR": "raw_government_id",
+            "US_DRIVER_LICENSE": "raw_government_id",
+            "US_PASSPORT": "raw_government_id",
+            "PAN_CARD": "raw_government_id",
+        }
+        
+        GOV_ID_TYPES = {"US_SSN", "NI_NUMBER", "AADHAAR", "US_DRIVER_LICENSE", "US_PASSPORT", "PAN_CARD"}
+        
+        pii_types = []
+        for entity_type, value in data.items():
+            if value is None or value == "" or value == "null":
+                continue
+            
+            raw_field = FIELD_TO_RAW.get(entity_type)
+            if raw_field:
+                setattr(rec, raw_field, str(value))
+                pii_types.append(entity_type)
+                
+                # Track government ID type
+                if entity_type in GOV_ID_TYPES:
+                    rec.government_id_type = entity_type
+        
+        # Set entity type to PERSON if name was found
+        if rec.raw_name:
+            rec.entity_type = "PERSON"
+        
+        rec.pii_types_found = pii_types
+        
+        # Only return if at least a name was extracted
+        return rec if rec.raw_name else None
+    
+    def validate_with_presidio(self, record: PIIRecord, engine) -> PIIRecord:
+        """
+        Optional: validate LLM-extracted values against Presidio patterns.
+        If Presidio confirms the pattern matches, boost confidence.
+        If Presidio rejects, flag for review.
+        """
+        # Validate government ID format
+        if record.raw_government_id:
+            results = engine.analyze(record.raw_government_id)
+            if results:
+                record.government_id_validated = True
+            else:
+                record.government_id_validated = False  # LLM extracted something Presidio doesn't recognize
+        
+        return record
+```
+
+#### 19c. Pipeline Integration
+
+**File: `app/pipeline/two_phase.py`** — Update `extract_generator()`:
+
+```python
+# In extract_generator, replace the current extraction logic:
+
+if schema and schema.template and schema.template.pages_per_instance > 1:
+    # TEMPLATE MODE: LLM extracts structured fields directly
+    if llm_enabled and ollama_client:
+        extractor = LLMTemplateExtractor(ollama_client, db_session)
+        pii_records = extractor.extract_all_instances(doc, schema, page_texts)
+        
+        if not pii_records:
+            # LLM failed — fall back to Presidio + composite records
+            pii_records = extract_with_template(doc, schema, detections_by_page)
+    else:
+        # No LLM — use Presidio + composite records (existing fallback)
+        pii_records = extract_with_template(doc, schema, detections_by_page)
+else:
+    # NON-TEMPLATE: Presidio extracts per-page (existing flow)
+    pii_records = [detection_to_pii_record(det, doc_id) for det in all_detections]
+
+# Pass to EntityResolver — same either way
+subjects = resolver.resolve(pii_records)
+```
+
+**Three extraction paths, automatic selection:**
+
+| Document type | LLM available? | Extraction method |
+|---|---|---|
+| Template (repeating form) | Yes | LLM reads each instance → structured JSON → PIIRecord |
+| Template (repeating form) | No | Presidio + composite records (Step 17 fallback) |
+| Non-template (mixed/free-text) | Yes or No | Presidio per-page + schema filter (existing) |
+
+#### 19d. Handling Large Documents Efficiently
+
+A 450-page pension doc with 3 pages per template = 150 LLM calls. This needs optimization:
+
+**Batching:** Send 3-5 instances per LLM call instead of 1:
+
+```
+"Extract information for 3 individuals from the following pages:
+
+--- INDIVIDUAL 1 (pages 1-3) ---
+[page texts]
+
+--- INDIVIDUAL 2 (pages 4-6) ---
+[page texts]
+
+--- INDIVIDUAL 3 (pages 7-9) ---
+[page texts]
+
+Return a JSON ARRAY with one object per individual:
+[
+  {"PERSON": "...", "LOCATION": "...", "DATE_OF_BIRTH": "...", ...},
+  {"PERSON": "...", "LOCATION": "...", "DATE_OF_BIRTH": "...", ...},
+  {"PERSON": "...", "LOCATION": "...", "DATE_OF_BIRTH": "...", ...}
+]
+```
+
+This reduces 150 LLM calls to ~50 (batches of 3). Configurable via `extraction_batch_size` in protocol config.
+
+**Progress reporting:** Emit SSE progress events per batch:
+
+```
+{"stage": "extraction", "status": "progress", "message": "Extracted 15/150 individuals (10%)"}
+```
+
+**Memory management:** Process batches sequentially, don't load all 450 pages into memory. Use `_forget_page()` after each batch.
+
+#### 19e. What this produces for the pension document
+
+```
+LLM reads pages 1-3 → extracts:
+{
+  "PERSON": "Mr K P Acheampong",
+  "LOCATION": "85 Waltings Gardens, Shoot Up Hill, London NW2 3UD",
+  "DATE_OF_BIRTH": "10-Aug-1959",
+  "NI_NUMBER": "NE724362D"
+}
+
+LLM reads pages 4-6 → extracts:
+{
+  "PERSON": "Mr M S Alcock",
+  "LOCATION": "3 Whitworth Road, Wellingborough, Northants NN8 1QQ",
+  "DATE_OF_BIRTH": "29-Aug-1960",
+  "NI_NUMBER": "WK393925C"
+}
+
+→ 2 PIIRecords with ALL fields populated
+→ 2 NotificationSubjects
+→ CSV:
+
+individual_id | name              | address                                           | date_of_birth | government_id | gov_id_type | source_document      | source_pages
+1             | Mr K P Acheampong | 85 Waltings Gardens, Shoot Up Hill, London NW2 3UD | 10-Aug-1959   | NE7****2D     | NI_NUMBER   | pension_transfer.pdf | 1-3
+2             | Mr M S Alcock     | 3 Whitworth Road, Wellingborough, Northants NN8 1QQ| 29-Aug-1960   | WK3****5C     | NI_NUMBER   | pension_transfer.pdf | 4-6
+```
+
+#### 19f. Execution Prompt
+
+```
+@agent-general-purpose Read CLAUDE.md and docs/PLAN.md Step 19 for context.
+
+Step 19: Schema-driven LLM extraction for template documents.
+
+=== PROMPT GENERATOR ===
+
+1. Create app/llm/extraction_prompts.py:
+   - ENTITY_EXTRACTION_GUIDE dict: maps entity type names to human-readable
+     extraction instructions (PERSON → "Full name including title",
+     LOCATION → "Complete address", DATE_OF_BIRTH → "Date of birth in
+     original format", NI_NUMBER → "UK National Insurance Number format",
+     etc.). Cover all entity types in PROTOCOL_DEFAULT_ENTITIES.
+   - build_extraction_prompt(page_texts, page_roles, instance_index,
+     document_type) → str. Generates extraction prompt FROM the schema's
+     pii_fields_expected. NOT hardcoded to any document type.
+
+=== LLM TEMPLATE EXTRACTOR ===
+
+2. Create app/structure/llm_template_extractor.py:
+   - LLMTemplateExtractor class
+   - extract_all_instances(doc, schema, page_texts) → list[PIIRecord]
+     For each template instance: build prompt from schema → call LLM →
+     parse JSON → create PIIRecord with raw_* fields populated.
+   - _parse_extraction(response_text, doc, instance_pages) → PIIRecord
+     Maps entity type keys in JSON to PIIRecord.raw_* fields.
+     Sets government_id_type for gov ID detections.
+     Returns None if no name extracted (skip instance).
+   - Support batching: extract_batch_size parameter (default 3).
+     Send multiple instances per LLM call, parse JSON array response.
+   - Graceful fallback: if LLM fails for an instance, log warning,
+     skip that instance (pipeline falls back to Presidio composite).
+
+=== PIPELINE INTEGRATION ===
+
+3. Update app/pipeline/two_phase.py extract_generator():
+   Three-path extraction based on document type + LLM availability:
+   
+   Path A (template + LLM available):
+     LLMTemplateExtractor.extract_all_instances()
+     Fallback to Path B if LLM returns empty results
+   
+   Path B (template + no LLM):
+     extract_with_template() — existing Presidio + composite records
+   
+   Path C (non-template):
+     Existing per-detection record_mapper flow
+   
+   Selection logic:
+   if schema.template and schema.template.pages_per_instance > 1:
+       if llm_enabled:
+           records = llm_extractor.extract_all_instances(...)
+           if not records:
+               records = extract_with_template(...)  # fallback
+       else:
+           records = extract_with_template(...)
+   else:
+       records = [detection_to_pii_record(det, doc_id) for det in detections]
+
+4. Add extraction progress SSE events:
+   Emit progress every batch: "Extracted 15/150 individuals (10%)"
+   
+5. Add extraction_batch_size to PROTOCOL_LLM_CONFIG defaults (default: 3).
+   Also accept from protocol_configs.config_json (user override).
+
+=== VALIDATION ===
+
+6. Optional Presidio validation: after LLM extracts, run extracted values
+   through Presidio to confirm patterns match. If Presidio confirms
+   NI_NUMBER pattern on "NE724362D", boost confidence. If Presidio
+   rejects, flag for manual review. Add validate_with_presidio() method.
+
+=== TESTS ===
+
+7. Create tests/test_llm_extraction.py:
+   - build_extraction_prompt: generates from schema, not hardcoded
+   - build_extraction_prompt: different schemas produce different prompts
+   - build_extraction_prompt: pension schema includes NI_NUMBER, DOB
+   - build_extraction_prompt: US medical schema includes US_SSN, not NI_NUMBER
+   - _parse_extraction: JSON with all fields → PIIRecord fully populated
+   - _parse_extraction: JSON with nulls → only non-null fields set
+   - _parse_extraction: invalid JSON → returns None (graceful)
+   - _parse_extraction: no PERSON in response → returns None
+   - _parse_extraction: government_id_type set correctly (NI_NUMBER, US_SSN)
+   - extract_all_instances: 6 pages, 3 per template → 2 PIIRecords
+   - Batch mode: 3 instances per call → JSON array parsed correctly
+   - Fallback: LLM fails → returns empty list (caller falls back to Presidio)
+   - Pipeline integration: template + LLM → uses LLMTemplateExtractor
+   - Pipeline integration: template + no LLM → uses extract_with_template
+   - Pipeline integration: non-template → uses per-detection records
+   - ENTITY_EXTRACTION_GUIDE covers all types in PROTOCOL_DEFAULT_ENTITIES
+
+8. Run pytest on all changed files. Fix failures up to 3 attempts.
+   Update CLAUDE.md.
+```

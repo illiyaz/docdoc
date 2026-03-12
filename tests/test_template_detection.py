@@ -101,6 +101,69 @@ class TestDocumentTemplate:
         result = tpl.get_instance_pages(0)
         assert result == []
 
+    def test_find_instance_boundaries_basic(self):
+        """Marker-based boundary detection finds correct variable-length instances."""
+        tpl = DocumentTemplate(
+            template_name="pension", pages_per_instance=3,
+            total_instances_estimate=3,
+            instance_marker="SUMMARY OF DETAILS IN RESPECT OF",
+        )
+        page_texts = {
+            0: "STATEMENT\n1. SUMMARY OF DETAILS IN RESPECT OF:\nMr A Smith",
+            1: "2. MEMBER DETAILS\nMr A Smith",
+            2: "3. BENEFITS",
+            3: "STATEMENT\n1. SUMMARY OF DETAILS IN RESPECT OF:\nMrs B Jones",
+            4: "2. MEMBER DETAILS\nMrs B Jones",
+            5: "3. BENEFITS",
+            6: "4. EXTRA PAGE FOR MRS B JONES",  # variable length
+            7: "STATEMENT\n1. SUMMARY OF DETAILS IN RESPECT OF:\nMr C Brown",
+            8: "2. MEMBER DETAILS\nMr C Brown",
+        }
+        instances = tpl.find_instance_boundaries(page_texts)
+        assert len(instances) == 3
+        assert instances[0] == [0, 1, 2]    # Mr A Smith: 3 pages
+        assert instances[1] == [3, 4, 5, 6]  # Mrs B Jones: 4 pages (variable!)
+        assert instances[2] == [7, 8]         # Mr C Brown: 2 pages (end of doc)
+
+    def test_find_instance_boundaries_no_marker(self):
+        """Without a marker, falls back to get_instance_pages()."""
+        tpl = DocumentTemplate(
+            template_name="pension", pages_per_instance=3,
+            total_instances_estimate=2,
+        )
+        page_texts = {0: "page 0", 1: "page 1", 2: "page 2", 3: "page 3", 4: "page 4", 5: "page 5"}
+        instances = tpl.find_instance_boundaries(page_texts)
+        assert instances == [[0, 1, 2], [3, 4, 5]]
+
+    def test_find_instance_boundaries_marker_not_found(self):
+        """Marker set but not found in any page — falls back to fixed stride."""
+        tpl = DocumentTemplate(
+            template_name="pension", pages_per_instance=3,
+            total_instances_estimate=2,
+            instance_marker="NONEXISTENT MARKER",
+        )
+        page_texts = {0: "page 0", 1: "page 1", 2: "page 2", 3: "page 3", 4: "page 4", 5: "page 5"}
+        instances = tpl.find_instance_boundaries(page_texts)
+        assert instances == [[0, 1, 2], [3, 4, 5]]
+
+    def test_find_instance_boundaries_case_insensitive(self):
+        """Marker search is case-insensitive."""
+        tpl = DocumentTemplate(
+            template_name="t", pages_per_instance=2,
+            total_instances_estimate=2,
+            instance_marker="NEW RECORD",
+        )
+        page_texts = {
+            0: "new record\nPerson A",
+            1: "details A",
+            2: "New Record\nPerson B",
+            3: "details B",
+        }
+        instances = tpl.find_instance_boundaries(page_texts)
+        assert len(instances) == 2
+        assert instances[0] == [0, 1]
+        assert instances[1] == [2, 3]
+
     def test_page_role_creation(self):
         pr = PageRole(
             page_offset=1,
@@ -187,18 +250,47 @@ class TestSchemaTemplateRoundTrip:
         schema = DocumentSchema.from_dict(d)
         assert schema.template is None
 
+    def test_from_dict_with_null_fields(self):
+        """LLM may return null for optional template fields — should not crash."""
+        d = {
+            "document_type": "financial_statement",
+            "template": {
+                "template_name": "pension",
+                "pages_per_instance": 3,
+                "total_instances_estimate": None,  # LLM returned null
+                "identity_page_offset": None,
+                "page_roles": [
+                    {
+                        "page_offset": 0,
+                        "role": "summary",
+                        "pii_fields_expected": None,
+                        "is_identity_page": True,
+                    },
+                ],
+            },
+        }
+        schema = DocumentSchema.from_dict(d)
+        assert schema.template is not None
+        assert schema.template.pages_per_instance == 3
+        assert schema.template.total_instances_estimate == 1  # default
+        assert schema.template.identity_page_offset == 0  # default
+        assert schema.template.page_roles[0].pii_fields_expected == []
+
     def test_roundtrip(self):
         tpl = DocumentTemplate(
             template_name="pension", pages_per_instance=3,
             total_instances_estimate=2,
             page_roles=[PageRole(0, "summary", ["PERSON"], True)],
+            instance_marker="IN RESPECT OF:",
         )
         schema = _make_schema(template=tpl)
         d = schema.to_dict()
+        assert d["template"]["instance_marker"] == "IN RESPECT OF:"
         schema2 = DocumentSchema.from_dict(d)
         assert schema2.template is not None
         assert schema2.template.template_name == schema.template.template_name
         assert schema2.template.pages_per_instance == schema.template.pages_per_instance
+        assert schema2.template.instance_marker == "IN RESPECT OF:"
 
 
 # ---------------------------------------------------------------------------

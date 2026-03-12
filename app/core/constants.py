@@ -306,38 +306,47 @@ PROTOCOL_LLM_CONFIG: dict[str, dict[str, int | bool]] = {
     "hipaa": {
         "llm_pages_to_read": 5,
         "expect_multi_page_records": True,
+        "extraction_batch_size": 3,
     },
     "gdpr": {
         "llm_pages_to_read": 3,
         "expect_multi_page_records": True,
+        "extraction_batch_size": 3,
     },
     "ccpa": {
         "llm_pages_to_read": 3,
         "expect_multi_page_records": True,
+        "extraction_batch_size": 3,
     },
     "hitech": {
         "llm_pages_to_read": 5,
         "expect_multi_page_records": True,
+        "extraction_batch_size": 3,
     },
     "ferpa": {
         "llm_pages_to_read": 4,
         "expect_multi_page_records": True,
+        "extraction_batch_size": 3,
     },
     "state_breach_generic": {
         "llm_pages_to_read": 3,
         "expect_multi_page_records": True,
+        "extraction_batch_size": 3,
     },
     "bipa": {
         "llm_pages_to_read": 2,
         "expect_multi_page_records": False,
+        "extraction_batch_size": 1,
     },
     "dpdpa": {
         "llm_pages_to_read": 3,
         "expect_multi_page_records": True,
+        "extraction_batch_size": 3,
     },
 }
 
 DEFAULT_LLM_PAGES_TO_READ = 3
+DEFAULT_EXTRACTION_BATCH_SIZE = 3
 
 
 # ---------------------------------------------------------------------------

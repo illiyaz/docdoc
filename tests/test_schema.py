@@ -210,6 +210,10 @@ def test_notification_subject_columns_exist():
     assert ns_columns["extraction_confidence"]["nullable"] is True
     assert "pii_types_list" in ns_columns
     assert ns_columns["pii_types_list"]["nullable"] is True
+    assert "canonical_dob" in ns_columns
+    assert ns_columns["canonical_dob"]["nullable"] is True
+    assert "canonical_government_id" in ns_columns
+    assert ns_columns["canonical_government_id"]["nullable"] is True
 
     # Audit timestamp
     assert "created_at" in ns_columns
@@ -506,6 +510,10 @@ def test_document_analysis_review_columns_exist():
     assert cols["reviewed_at"]["nullable"] is True
     assert "created_at" in cols
     assert cols["created_at"]["nullable"] is False
+
+    # Extraction preview (Step 19b)
+    assert "extraction_preview" in cols
+    assert cols["extraction_preview"]["nullable"] is True
 
 
 def test_two_phase_columns_on_existing_tables():
