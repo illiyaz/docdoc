@@ -42,7 +42,7 @@ class TestVisionSettings:
     def test_default_vision_model(self):
         get_settings.cache_clear()
         s = get_settings()
-        assert s.ollama_vision_model == "llama3.2-vision:11b-instruct-fp16"
+        assert s.ollama_vision_model == "llama3.2-vision:latest"
         assert s.use_vision_extraction is True
         assert s.vision_page_dpi == 150
 
@@ -113,7 +113,7 @@ class TestOllamaClientVision:
         mock_resp.json.return_value = {
             "models": [
                 {"name": "qwen2.5:7b"},
-                {"name": "llama3.2-vision:11b-instruct-fp16"},
+                {"name": "llama3.2-vision:latest"},
             ]
         }
         mock_get.return_value = mock_resp

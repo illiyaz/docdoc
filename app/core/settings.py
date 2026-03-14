@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     ollama_url: str = Field(default="http://localhost:11434", alias="OLLAMA_URL")
     ollama_model: str = Field(default="qwen2.5:7b", alias="OLLAMA_MODEL")
     ollama_timeout_s: int = Field(default=60, alias="OLLAMA_TIMEOUT_S")
-    ollama_vision_model: str = Field(default="llama3.2-vision:11b-instruct-fp16", alias="OLLAMA_VISION_MODEL")
+    ollama_vision_model: str = Field(default="llama3.2-vision:latest", alias="OLLAMA_VISION_MODEL")
     use_vision_extraction: bool = Field(default=True, alias="USE_VISION_EXTRACTION")
     vision_page_dpi: int = Field(default=150, alias="VISION_PAGE_DPI")
 

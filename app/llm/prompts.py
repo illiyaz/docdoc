@@ -240,7 +240,9 @@ UNDERSTAND_DOCUMENT = (
     '  ],\n'
     '  "suppression_hints": ["free text hints about values that look like PII but are not"],\n'
     '  "extraction_notes": "brief note about what PII to expect and how it is organized",\n'
-    '  "schema_confidence": 0.85\n'
+    '  "schema_confidence": 0.85,\n'
+    '  "is_tabular": false,\n'
+    '  "records_per_page_estimate": 1\n'
     '}}\n'
     "\n"
     "IMPORTANT:\n"
@@ -257,6 +259,9 @@ UNDERSTAND_DOCUMENT = (
     "columns. Payroll/HR tables (name, SSN, DOB, salary) have MULTIPLE PII columns.\n"
     "- A table column containing amounts, reference numbers, descriptions, or status "
     "values is NOT a PII column even if Presidio would match patterns in the data.\n"
+    "- Set is_tabular=true if this document is a TABLE or LIST with MULTIPLE "
+    "individuals per page (e.g., student roster, employee list, patient log). "
+    "Set records_per_page_estimate to the approximate number of people per page.\n"
     "\n"
     "Respond ONLY with valid JSON.  No additional text."
 )
@@ -281,7 +286,11 @@ UNDERSTAND_MULTI_PAGE_DOCUMENT = (
     "   - Which page within the template has the person's name\n"
     "   - What PII fields appear on each page\n"
     "\n"
-    "2. For each page, identify fields and their types.\n"
+    "2. Is this a TABULAR document with MULTIPLE individuals per page\n"
+    "   (e.g., student roster, employee list, patient log)?\n"
+    "   If yes, set is_tabular=true and records_per_page_estimate.\n"
+    "\n"
+    "3. For each page, identify fields and their types.\n"
     "\n"
     "Respond ONLY with JSON:\n"
     '{{\n'
@@ -310,7 +319,9 @@ UNDERSTAND_MULTI_PAGE_DOCUMENT = (
     '  "tables": [],\n'
     '  "suppression_hints": [],\n'
     '  "extraction_notes": "brief notes",\n'
-    '  "schema_confidence": 0.85\n'
+    '  "schema_confidence": 0.85,\n'
+    '  "is_tabular": false,\n'
+    '  "records_per_page_estimate": 1\n'
     '}}\n'
     "\n"
     "IMPORTANT:\n"

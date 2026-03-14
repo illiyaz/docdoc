@@ -172,6 +172,9 @@ class DocumentSchema:
 
     template: DocumentTemplate | None = None  # repeating multi-page template
 
+    is_tabular: bool = False                    # True if table/list with multiple individuals per page
+    records_per_page_estimate: int = 1          # estimated individuals per page (>1 for tabular)
+
     def to_dict(self) -> dict:
         """Serialize to a JSON-compatible dict."""
         return {
@@ -249,6 +252,8 @@ class DocumentSchema:
                 if self.template is not None
                 else None
             ),
+            "is_tabular": self.is_tabular,
+            "records_per_page_estimate": self.records_per_page_estimate,
         }
 
     @classmethod
@@ -310,6 +315,8 @@ class DocumentSchema:
             schema_confidence=data.get("schema_confidence", 0.0),
             detected_by=data.get("detected_by", "unknown"),
             template=cls._parse_template(data.get("template")),
+            is_tabular=bool(data.get("is_tabular", False)),
+            records_per_page_estimate=int(data.get("records_per_page_estimate", 1)),
         )
 
     @staticmethod

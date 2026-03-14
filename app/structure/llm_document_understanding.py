@@ -411,6 +411,10 @@ class LLMDocumentUnderstanding:
         # Parse template separately — even if other fields had issues
         template = DocumentSchema._parse_template(data.get("template"))
 
+        # Parse tabular detection
+        is_tabular = bool(data.get("is_tabular", False))
+        records_per_page_estimate = max(1, int(data.get("records_per_page_estimate", 1)))
+
         try:
             return DocumentSchema(
                 document_type=str(data.get("document_type", "unknown")),
@@ -426,6 +430,8 @@ class LLMDocumentUnderstanding:
                 schema_confidence=confidence,
                 detected_by="llm",
                 template=template,
+                is_tabular=is_tabular,
+                records_per_page_estimate=records_per_page_estimate,
             )
         except Exception as e:
             logger.warning("Partial schema parse failure: %s", e)
@@ -443,4 +449,6 @@ class LLMDocumentUnderstanding:
                 schema_confidence=0.5,
                 detected_by="llm",
                 template=template,
+                is_tabular=is_tabular,
+                records_per_page_estimate=records_per_page_estimate,
             )

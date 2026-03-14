@@ -2911,3 +2911,825 @@ Step 19: Schema-driven LLM extraction for template documents.
 8. Run pytest on all changed files. Fix failures up to 3 attempts.
    Update CLAUDE.md.
 ```
+
+---
+
+### Step 20 — Vision-First Extraction Architecture (PENDING)
+
+**Goal:** Replace the fragile text extraction pipeline (PyMuPDF → OCR → Presidio → LLM filter → schema filter) with a simpler vision-first approach: render PDF pages as images → send to vision-language model → get structured extraction directly. This eliminates the root cause of every major bug we've fought: text extraction losing document structure.
+
+**Why vision-first for ALL documents, not just scanned:**
+
+Every major extraction failure traces back to text extraction losing layout:
+
+| Bug | Text extraction cause | Vision eliminates it |
+|---|---|---|
+| "Blunt NH828286D" concatenated | PyMuPDF flattens table rows | Model sees separate columns |
+| NI number undetected | No Presidio recognizer | Model reads "National Insurance Number: NE724362D" |
+| DOB not extracted | DD-MMM-YYYY not in Presidio | Model reads "Date of Birth: 10-Aug-1959" |
+| Partial address ("London" only) | Multi-line address lost | Model sees full address block |
+| "Lump Sum" as PERSON | spaCy misclassification | Model sees it in financial table |
+| Dollar amounts as phone numbers | Flattened numbers look like phones | Model sees currency column |
+
+Vision models see the actual page — labels next to values, table structure, section boundaries. Whether the PDF is born digital or scanned makes no difference to the model.
+
+**Architecture simplification:**
+
+```
+BEFORE (complex, fragile — 6 processing layers):
+  PDF → PyMuPDF text → OCR (scanned) → Presidio patterns → 
+  LLM schema filter → LLM template extractor (text) → 
+  defensive parsing → record mapper → entity resolver → CSV
+
+AFTER (simple — 3 processing layers):
+  PDF → render page image → vision model extracts fields →
+  pattern validation → entity resolver → CSV
+```
+
+Presidio shifts from "primary extractor" to "pattern validator." All existing deny-lists, schema filters, and detection tuning become validation layers, not extraction layers.
+
+---
+
+#### 20a. Vision Extraction Client
+
+**File: `app/llm/client.py`** — Extend OllamaClient:
+
+```python
+class OllamaClient:
+    def __init__(self, ...):
+        ...
+        self.vision_model = settings.ollama_vision_model  # "qwen2.5vl:32b"
+    
+    def generate_with_images(self, prompt: str, images: list[str], *,
+                              use_case: str, document_id: str = None,
+                              model_override: str = None) -> str:
+        """
+        Send prompt + page images to a vision-language model.
+        
+        images: list of base64-encoded PNG images
+        Uses the vision model (not the text model).
+        Ollama API: POST /api/generate {"model": "qwen2.5vl:32b", "prompt": "...", "images": [...]}
+        """
+        model = model_override or self.vision_model
+        
+        if not self._settings.llm_assist_enabled:
+            raise LLMDisabledError("LLM assist is disabled")
+        
+        payload = {
+            "model": model,
+            "prompt": prompt,
+            "images": images,
+            "stream": False,
+        }
+        
+        start = time.monotonic()
+        response = self._client.post(
+            f"{self.base_url}/api/generate",
+            json=payload,
+            timeout=self.timeout_s * 2,  # vision calls take longer
+        )
+        self._last_latency_ms = int((time.monotonic() - start) * 1000)
+        
+        result = response.json()
+        response_text = result.get("response", "")
+        
+        # Audit log
+        if self.db_session:
+            log_llm_call(
+                self.db_session,
+                document_id=document_id,
+                use_case=use_case,
+                model=model,
+                prompt_text=f"[vision: {len(images)} images] {prompt[:500]}",
+                response_text=response_text,
+                latency_ms=self._last_latency_ms,
+            )
+        
+        return response_text
+    
+    def is_vision_available(self) -> bool:
+        """Check if the vision model is loaded and available."""
+        try:
+            resp = self._client.get(f"{self.base_url}/api/tags")
+            models = [m["name"] for m in resp.json().get("models", [])]
+            return any(self.vision_model.split(":")[0] in m for m in models)
+        except Exception:
+            return False
+```
+
+**New settings in `app/core/settings.py`:**
+
+```python
+ollama_vision_model: str = Field(default="qwen2.5vl:32b", alias="OLLAMA_VISION_MODEL")
+use_vision_extraction: bool = Field(default=True, alias="USE_VISION_EXTRACTION")
+vision_page_dpi: int = Field(default=150, alias="VISION_PAGE_DPI")
+```
+
+#### 20b. Page Image Renderer
+
+**File: `app/pdf/renderer.py`** (new):
+
+```python
+import fitz  # PyMuPDF
+import base64
+
+def render_page_to_image(doc_path: str, page_number: int, dpi: int = 150) -> str:
+    """
+    Render a single PDF page as a base64-encoded PNG image.
+    
+    150 DPI is sufficient for text recognition while keeping image size
+    manageable (~200-400KB per page).
+    
+    Memory-safe: opens doc, renders one page, closes immediately.
+    """
+    doc = fitz.open(doc_path)
+    try:
+        page = doc[page_number]
+        mat = fitz.Matrix(dpi / 72, dpi / 72)  # scale factor
+        pix = page.get_pixmap(matrix=mat)
+        img_bytes = pix.tobytes("png")
+        return base64.b64encode(img_bytes).decode("ascii")
+    finally:
+        doc.close()
+
+def render_pages_to_images(doc_path: str, page_numbers: list[int], dpi: int = 150) -> list[str]:
+    """
+    Render multiple PDF pages as base64-encoded PNG images.
+    Memory-safe: forgets each page after rendering.
+    """
+    doc = fitz.open(doc_path)
+    images = []
+    try:
+        for page_num in page_numbers:
+            if page_num >= doc.page_count:
+                continue
+            page = doc[page_num]
+            mat = fitz.Matrix(dpi / 72, dpi / 72)
+            pix = page.get_pixmap(matrix=mat)
+            img_bytes = pix.tobytes("png")
+            images.append(base64.b64encode(img_bytes).decode("ascii"))
+            doc._forget_page(page)  # release memory
+        return images
+    finally:
+        doc.close()
+```
+
+#### 20c. Vision Document Extractor
+
+**File: `app/structure/vision_extractor.py`** (new):
+
+This replaces `llm_template_extractor.py` as the primary extraction path.
+
+```python
+class VisionDocumentExtractor:
+    """
+    Extracts PII from documents using vision-language models.
+    
+    Primary extraction path for ALL document types:
+    - Template documents: extract from key pages of each instance
+    - Non-template documents: extract from each page sequentially
+    
+    Falls back to text-based extraction if vision model unavailable.
+    """
+    
+    def __init__(self, ollama_client, settings, db_session=None):
+        self.client = ollama_client
+        self.settings = settings
+        self.db_session = db_session
+    
+    # --- Template documents ---
+    
+    def extract_template_instances(
+        self,
+        doc,                        # Document ORM object with file_path
+        schema: DocumentSchema,     # with template populated
+        instance_boundaries: list[list[int]],  # [[0,1,2], [3,4,5], ...]
+    ) -> list[PIIRecord]:
+        """
+        Extract PII from all template instances using vision.
+        
+        For each instance, renders the KEY PAGE (member details page)
+        as an image and sends to vision model. One image per individual,
+        not all 3 pages — because the member details page has everything.
+        
+        Supports batching: sends multiple instance images in one call.
+        """
+        records = []
+        batch_size = self.settings.get("extraction_batch_size", 3)
+        
+        # Identify which page within the template has the most PII
+        key_page_offset = self._find_key_page_offset(schema.template)
+        
+        for batch_start in range(0, len(instance_boundaries), batch_size):
+            batch = instance_boundaries[batch_start:batch_start + batch_size]
+            
+            # Render key page for each instance in batch
+            batch_images = []
+            batch_pages = []
+            for instance_pages in batch:
+                key_page = instance_pages[min(key_page_offset, len(instance_pages) - 1)]
+                image = render_page_to_image(
+                    doc.file_path, key_page, dpi=self.settings.vision_page_dpi
+                )
+                batch_images.append(image)
+                batch_pages.append(instance_pages)
+            
+            # Build prompt
+            prompt = self._build_batch_prompt(schema, len(batch_images))
+            
+            # Send to vision model
+            try:
+                response = self.client.generate_with_images(
+                    prompt=prompt,
+                    images=batch_images,
+                    use_case="vision_template_extraction",
+                    document_id=str(doc.id),
+                )
+                
+                batch_records = self._parse_batch_response(response, doc, batch_pages)
+                records.extend(batch_records)
+                
+            except Exception as e:
+                logger.warning(f"Vision extraction failed for batch: {e}")
+                continue
+            
+            # Progress reporting
+            progress = min(batch_start + batch_size, len(instance_boundaries))
+            yield_progress(f"Extracted {progress}/{len(instance_boundaries)} individuals")
+        
+        # Deduplicate within results
+        records = self._deduplicate(records)
+        return records
+    
+    # --- Non-template documents ---
+    
+    def extract_pages(
+        self,
+        doc,
+        page_numbers: list[int],
+        schema: DocumentSchema | None = None,
+    ) -> list[PIIRecord]:
+        """
+        Extract PII from individual pages using vision.
+        For non-template documents (letters, mixed content).
+        
+        Each page is rendered and sent to vision model.
+        Results are aggregated into PIIRecords.
+        """
+        all_records = []
+        batch_size = self.settings.get("extraction_batch_size", 5)
+        
+        for batch_start in range(0, len(page_numbers), batch_size):
+            batch_page_nums = page_numbers[batch_start:batch_start + batch_size]
+            images = render_pages_to_images(
+                doc.file_path, batch_page_nums, dpi=self.settings.vision_page_dpi
+            )
+            
+            prompt = self._build_page_extraction_prompt(schema, len(images))
+            
+            try:
+                response = self.client.generate_with_images(
+                    prompt=prompt,
+                    images=images,
+                    use_case="vision_page_extraction",
+                    document_id=str(doc.id),
+                )
+                
+                records = self._parse_page_response(response, doc, batch_page_nums)
+                all_records.extend(records)
+                
+            except Exception as e:
+                logger.warning(f"Vision page extraction failed: {e}")
+                continue
+        
+        return self._deduplicate(all_records)
+    
+    # --- Prompt builders ---
+    
+    def _build_batch_prompt(self, schema, num_images):
+        """Build prompt for batch template extraction."""
+        fields = set()
+        if schema.template:
+            for role in schema.template.page_roles:
+                fields.update(role.pii_fields_expected)
+        fields.update(ALWAYS_EXTRACT_IF_PRESENT)
+        
+        field_guide = "\n".join(
+            f"- {f}: {ENTITY_EXTRACTION_GUIDE.get(f, f'Extract {f}')}"
+            for f in sorted(fields)
+        )
+        
+        return f"""You are extracting personal information from {schema.document_type or 'a document'}.
+Each image is one person's record page. There are {num_images} images = {num_images} individuals.
+
+For EACH image, extract these fields:
+{field_guide}
+
+Return a JSON ARRAY with one object per image/individual:
+[
+  {{{', '.join(f'"{f}": "value or null"' for f in sorted(fields))}}},
+  ...
+]
+
+RULES:
+- Extract the EXACT value as it appears in the document
+- For addresses, include the COMPLETE address (every line: street, area, city, county, postcode, country)
+- For dates, preserve the original format (e.g., 10-Aug-1959)
+- For names, include title if present (Mr, Mrs, Dr, Miss)
+- For National Insurance Numbers, extract the full code (2 letters + 6 digits + 1 letter)
+- If a field is not visible on the page, set it to null
+- Do NOT guess or infer values not shown in the image
+- Return ONLY valid JSON, no other text"""
+    
+    def _build_page_extraction_prompt(self, schema, num_images):
+        """Build prompt for non-template page extraction."""
+        return f"""You are extracting personal information from document pages.
+There are {num_images} page images. Multiple individuals may appear on a single page.
+
+For each individual found, extract:
+- PERSON: full name with title
+- LOCATION: complete address
+- DATE_OF_BIRTH: date of birth
+- NI_NUMBER: National Insurance Number (UK) or US_SSN (US) or equivalent
+- EMAIL_ADDRESS: email
+- PHONE_NUMBER: phone number
+
+Return a JSON ARRAY with one object per individual found across all pages:
+[
+  {{"PERSON": "...", "LOCATION": "...", "DATE_OF_BIRTH": "...", ...}},
+  ...
+]
+
+RULES:
+- Same individual appearing on multiple pages = ONE entry (merge their data)
+- Organization names are NOT individuals (skip companies, schemes, institutions)
+- Financial terms (Lump Sum, Transfer Value, Pension) are NOT person names
+- Return ONLY valid JSON"""
+    
+    def _find_key_page_offset(self, template):
+        """Find which page in the template has the most PII fields."""
+        if not template or not template.page_roles:
+            return 1  # default: second page (member details)
+        
+        best_offset = 0
+        best_count = 0
+        for role in template.page_roles:
+            count = len(role.pii_fields_expected)
+            if count > best_count:
+                best_count = count
+                best_offset = role.page_offset
+        return best_offset
+    
+    def _deduplicate(self, records):
+        """Deduplicate records by normalized name."""
+        seen = {}
+        for rec in records:
+            if not rec.raw_name:
+                continue
+            key = " ".join(rec.raw_name.lower().strip().split())
+            if key not in seen:
+                seen[key] = rec
+            else:
+                # Merge: fill missing fields from duplicate
+                existing = seen[key]
+                if not existing.raw_address and rec.raw_address:
+                    existing.raw_address = rec.raw_address
+                if not existing.raw_dob and rec.raw_dob:
+                    existing.raw_dob = rec.raw_dob
+                if not existing.raw_government_id and rec.raw_government_id:
+                    existing.raw_government_id = rec.raw_government_id
+                    existing.government_id_type = rec.government_id_type
+                if not existing.raw_email and rec.raw_email:
+                    existing.raw_email = rec.raw_email
+                if not existing.raw_phone and rec.raw_phone:
+                    existing.raw_phone = rec.raw_phone
+        return list(seen.values())
+```
+
+#### 20d. Instance Boundary Detection (fixes the 51→149 gap)
+
+Instead of relying on `pages_per_instance` (which the LLM got wrong as 8 instead of 3), scan for section markers:
+
+**File: `app/pipeline/instance_detector.py`** (new):
+
+```python
+def find_instance_boundaries(
+    doc_path: str,
+    instance_marker: str | None = None,
+    fallback_markers: list[str] = None,
+) -> list[list[int]]:
+    """
+    Find where each template instance starts by scanning for repeating headers.
+    
+    Much more reliable than fixed pages_per_instance because it handles
+    variable-length instances (some people have 3 pages, others 4+).
+    
+    Args:
+        doc_path: path to PDF
+        instance_marker: specific text to look for (from DocumentSchema.template)
+        fallback_markers: generic markers to try if instance_marker not set
+    
+    Returns: [[0,1,2], [3,4,5], [6,7,8,9], ...] — pages per instance
+    """
+    import fitz
+    
+    if fallback_markers is None:
+        fallback_markers = [
+            "STATEMENT OF ENTITLEMENT",
+            "SUMMARY OF DETAILS IN RESPECT OF",
+            "MEMBER RECORD",
+            "EMPLOYEE RECORD",
+            "PATIENT RECORD",
+            "CLAIMANT DETAILS",
+            "INDIVIDUAL DETAILS",
+            "PERSONAL DETAILS",
+            "NOTIFICATION SUBJECT",
+        ]
+    
+    markers = [instance_marker] if instance_marker else fallback_markers
+    
+    doc = fitz.open(doc_path)
+    boundary_pages = []
+    
+    try:
+        for page_num in range(doc.page_count):
+            page = doc[page_num]
+            text = page.get_text()[:500].upper()
+            doc._forget_page(page)
+            
+            for marker in markers:
+                if marker.upper() in text:
+                    boundary_pages.append(page_num)
+                    break
+    finally:
+        doc.close()
+    
+    if not boundary_pages:
+        # No markers found — fall back to fixed page count
+        return None  # caller should use get_instance_pages()
+    
+    # Convert boundary pages to instance page ranges
+    instances = []
+    for i, start in enumerate(boundary_pages):
+        end = boundary_pages[i + 1] if i + 1 < len(boundary_pages) else doc.page_count
+        instances.append(list(range(start, end)))
+    
+    return instances
+```
+
+#### 20e. Updated Pipeline Integration
+
+**File: `app/pipeline/two_phase.py`** — Simplified extract_generator():
+
+```python
+# In extract_generator, replace the current 3-path extraction with:
+
+# Step 1: Determine instance boundaries
+if schema and schema.template:
+    # Try marker-based detection first (most reliable)
+    instance_marker = getattr(schema.template, 'instance_marker', None)
+    instances = find_instance_boundaries(doc.file_path, instance_marker)
+    
+    if not instances:
+        # Fall back to fixed page count
+        instances = schema.template.get_instance_pages(doc.total_pages)
+    
+    is_template = True
+else:
+    instances = None
+    is_template = False
+
+# Step 2: Extract using vision (primary) or text (fallback)
+vision_extractor = VisionDocumentExtractor(ollama_client, settings, db_session)
+
+if vision_extractor.client.is_vision_available() and settings.use_vision_extraction:
+    # VISION PATH (primary for all documents)
+    if is_template and instances:
+        pii_records = vision_extractor.extract_template_instances(doc, schema, instances)
+    else:
+        all_pages = list(range(doc.total_pages or 0))
+        pii_records = vision_extractor.extract_pages(doc, all_pages, schema)
+        
+elif settings.llm_assist_enabled:
+    # TEXT + LLM PATH (fallback when vision unavailable)
+    if is_template and instances:
+        text_extractor = LLMTemplateExtractor(ollama_client, db_session)
+        pii_records = text_extractor.extract_all_instances(doc, schema, page_texts)
+    else:
+        pii_records = [detection_to_pii_record(det, doc_id) for det in all_detections]
+        
+else:
+    # PRESIDIO-ONLY PATH (no LLM at all)
+    pii_records = [detection_to_pii_record(det, doc_id) for det in all_detections]
+
+# Step 3: Pattern validation on extracted records
+pii_records = validate_extracted_records(pii_records)
+
+# Step 4: Entity resolution (same for all paths)
+subjects = resolver.resolve(pii_records)
+```
+
+**Three paths, clear priority:**
+
+| Priority | Path | When used | Quality |
+|---|---|---|---|
+| 1 | Vision | Vision model available (default) | Highest |
+| 2 | Text + LLM | Vision unavailable, LLM available | Medium |
+| 3 | Presidio only | No LLM at all | Lowest |
+
+#### 20f. Pattern Validation (Presidio's new role)
+
+**File: `app/pii/pattern_validator.py`** (new):
+
+```python
+import re
+
+# Validation patterns for extracted values
+VALIDATION_PATTERNS = {
+    "NI_NUMBER": re.compile(r'^[A-Z]{2}\d{6}[A-Z]$'),
+    "US_SSN": re.compile(r'^\d{3}-\d{2}-\d{4}$'),
+    "AADHAAR": re.compile(r'^\d{12}$'),
+    "PAN_CARD": re.compile(r'^[A-Z]{5}\d{4}[A-Z]$'),
+    "EMAIL_ADDRESS": re.compile(r'^[^@]+@[^@]+\.[^@]+$'),
+    "UK_POSTCODE": re.compile(r'[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}', re.IGNORECASE),
+}
+
+DATE_PATTERNS = [
+    re.compile(r'\d{1,2}-[A-Za-z]{3}-\d{4}'),    # 10-Aug-1959
+    re.compile(r'\d{1,2}/\d{1,2}/\d{4}'),          # 10/08/1959
+    re.compile(r'\d{4}-\d{2}-\d{2}'),               # 1959-08-10
+    re.compile(r'\d{1,2}\s+[A-Za-z]+\s+\d{4}'),    # 10 August 1959
+]
+
+def validate_extracted_records(records: list[PIIRecord]) -> list[PIIRecord]:
+    """
+    Validate LLM-extracted values against known patterns.
+    Sets validation flags but does NOT remove records.
+    Invalid patterns are flagged for human review.
+    """
+    for rec in records:
+        rec.validation_flags = []
+        
+        # Validate government ID
+        if rec.raw_government_id and rec.government_id_type:
+            pattern = VALIDATION_PATTERNS.get(rec.government_id_type)
+            if pattern and not pattern.match(rec.raw_government_id.strip()):
+                rec.validation_flags.append(f"gov_id_format_mismatch: {rec.government_id_type}")
+        
+        # Validate DOB is a real date
+        if rec.raw_dob:
+            if not any(p.search(rec.raw_dob) for p in DATE_PATTERNS):
+                rec.validation_flags.append("dob_format_unrecognized")
+        
+        # Validate email
+        if rec.raw_email:
+            if not VALIDATION_PATTERNS["EMAIL_ADDRESS"].match(rec.raw_email):
+                rec.validation_flags.append("email_format_invalid")
+        
+        # Validate address has some structure (not just a single word)
+        if rec.raw_address:
+            if len(rec.raw_address.split()) < 3:
+                rec.validation_flags.append("address_too_short")
+        
+        # Validate name is not a financial term or organization
+        if rec.raw_name:
+            lower_name = rec.raw_name.lower().strip()
+            if lower_name in FINANCIAL_TERM_DENY_LIST:
+                rec.validation_flags.append("name_is_financial_term")
+                rec.raw_name = None  # suppress
+            elif is_likely_organization(rec.raw_name):
+                rec.validation_flags.append("name_is_organization")
+                rec.raw_name = None  # suppress
+    
+    # Remove records with no name (after validation suppressed it)
+    return [r for r in records if r.raw_name]
+```
+
+#### 20g. Model Configuration per Protocol
+
+**Update `app/core/constants.py`:**
+
+```python
+PROTOCOL_LLM_CONFIG = {
+    "hipaa": {
+        "llm_model": "qwen2.5:7b",
+        "vision_model": "qwen2.5vl:32b",
+        "extraction_batch_size": 3,
+        "llm_pages_to_read": 5,
+        "vision_page_dpi": 150,
+    },
+    "gdpr": {
+        "llm_model": "gemma3:27b",
+        "vision_model": "qwen2.5vl:32b",
+        "extraction_batch_size": 3,
+        "llm_pages_to_read": 3,
+        "vision_page_dpi": 150,
+    },
+    "state_breach": {
+        "llm_model": "qwen2.5:7b",
+        "vision_model": "qwen2.5vl:32b",
+        "extraction_batch_size": 5,
+        "llm_pages_to_read": 3,
+        "vision_page_dpi": 150,
+    },
+    # ... same pattern for all 8 protocols
+}
+```
+
+User can override any setting in `protocol_configs.config_json`:
+
+```json
+{
+    "vision_model": "llama3.2-vision:11b-instruct-fp16",
+    "extraction_batch_size": 5,
+    "vision_page_dpi": 200
+}
+```
+
+#### 20h. Expected Results
+
+**Pension document (CMG_Inc_0001352703.pdf, 453 pages, ~149 individuals):**
+
+```
+Instance detection: scans for "STATEMENT OF ENTITLEMENT" → finds 149 boundaries
+Vision extraction: 149 instances / 3 per batch = 50 batches
+Each batch: renders member details page → sends 3 images → gets 3 JSON objects
+Time estimate: 50 batches × 10s = ~8 minutes on M4 Max with qwen2.5vl:32b
+
+CSV output:
+- 149 rows (one per individual)
+- Each with: name, full address, DOB, NI number, source pages
+- Zero "Lump Sum", zero single-word names, zero duplicates
+- Pattern validation confirms NI number format, date format
+```
+
+**Washington CMD employment record (1 page):**
+
+```
+No template detected → single page extraction
+Vision: sends 1 image → gets 1 JSON object
+Time: ~10 seconds
+
+CSV output:
+- 1 row: Kristin B Aleshire, Hagerstown MD, SSN, phone
+```
+
+#### 20i. Execution Prompts (split into 2 runs)
+
+**Step 20 Part 1 — Vision extraction core + instance detection:**
+
+```
+@agent-general-purpose Read CLAUDE.md and docs/PLAN.md Step 20 for context.
+
+Step 20 Part 1: Vision-first extraction architecture.
+
+=== VISION CLIENT ===
+
+1. Add vision settings to app/core/settings.py:
+   ollama_vision_model (default "qwen2.5vl:32b")
+   use_vision_extraction (default True)
+   vision_page_dpi (default 150)
+
+2. Extend OllamaClient in app/llm/client.py:
+   - Add vision_model property from settings
+   - Add generate_with_images(prompt, images, use_case, document_id) method
+     Sends to Ollama /api/generate with {"model": vision_model, "images": [...]}
+     Timeout 2x normal (vision calls take longer)
+     Audit logged to llm_call_logs
+   - Add is_vision_available() method — checks /api/tags for vision model
+
+=== PAGE RENDERER ===
+
+3. Create app/pdf/renderer.py:
+   - render_page_to_image(doc_path, page_number, dpi) → base64 PNG string
+   - render_pages_to_images(doc_path, page_numbers, dpi) → list of base64 strings
+   - Memory-safe: uses fitz._forget_page() after each render
+
+=== INSTANCE BOUNDARY DETECTION ===
+
+4. Create app/pipeline/instance_detector.py:
+   - find_instance_boundaries(doc_path, instance_marker, fallback_markers) 
+     → list[list[int]] or None
+   - Scans all pages for repeating section headers
+   - fallback_markers: ["STATEMENT OF ENTITLEMENT", "SUMMARY OF DETAILS IN RESPECT OF",
+     "MEMBER RECORD", "EMPLOYEE RECORD", "PATIENT RECORD", "INDIVIDUAL DETAILS", etc.]
+   - Returns page ranges per instance: [[0,1,2], [3,4,5], ...]
+   - Returns None if no markers found (caller falls back to fixed pages_per_instance)
+
+=== VISION EXTRACTOR ===
+
+5. Create app/structure/vision_extractor.py:
+   - VisionDocumentExtractor class
+   - extract_template_instances(doc, schema, instance_boundaries) → list[PIIRecord]
+     For each instance: render key page as image → send to vision model →
+     parse JSON → create PIIRecord. Supports batching (3 instances per call).
+   - extract_pages(doc, page_numbers, schema) → list[PIIRecord]
+     For non-template docs: render pages → extract PII from each.
+   - _build_batch_prompt(schema, num_images) — generates extraction prompt
+     from schema and ENTITY_EXTRACTION_GUIDE. NOT hardcoded.
+   - _build_page_extraction_prompt(schema, num_images) — for non-template pages
+   - _find_key_page_offset(template) — finds page with most PII fields
+   - _deduplicate(records) — merge records with same name
+   - _parse_batch_response / _parse_page_response — JSON parsing with
+     DEFENSIVE handling (same patterns as Step 19c fix)
+
+=== PIPELINE INTEGRATION ===
+
+6. Update app/pipeline/two_phase.py extract_generator():
+   Three-path extraction with clear priority:
+   
+   Path 1 (Vision — primary):
+     if vision available and use_vision_extraction:
+       Detect instance boundaries (marker-based)
+       If template: vision_extractor.extract_template_instances()
+       If not template: vision_extractor.extract_pages()
+   
+   Path 2 (Text + LLM — fallback):
+     if llm_assist_enabled:
+       Existing LLMTemplateExtractor flow
+   
+   Path 3 (Presidio — last resort):
+     Per-detection record creation
+   
+   ALL three paths produce list[PIIRecord] → same EntityResolver flow.
+   
+   CRITICAL: paths are EXCLUSIVE. Only ONE runs. No dual records.
+
+=== TESTS ===
+
+7. Create tests/test_vision_extraction.py:
+   - render_page_to_image: returns base64 string
+   - generate_with_images: sends correct payload with images array
+   - is_vision_available: checks model list correctly
+   - find_instance_boundaries: pension doc → 149 boundaries
+   - find_instance_boundaries: no markers → returns None
+   - extract_template_instances: 3 images → 3 PIIRecords with all fields
+   - extract_pages: non-template → PIIRecords from each page
+   - _deduplicate: same name twice → merged record
+   - Pipeline: vision available → Path 1 taken, zero Presidio records
+   - Pipeline: vision unavailable → Path 2 (text LLM) taken
+   - Pipeline: no LLM → Path 3 (Presidio) taken
+
+8. Run pytest on all changed files. Fix failures up to 3 attempts.
+   Update CLAUDE.md.
+```
+
+**Step 20 Part 2 — Pattern validation + model config:**
+
+```
+@agent-general-purpose Read CLAUDE.md and docs/PLAN.md Step 20 for context.
+
+Step 20 Part 2: Pattern validation and per-protocol model configuration.
+
+=== PATTERN VALIDATOR ===
+
+1. Create app/pii/pattern_validator.py:
+   - VALIDATION_PATTERNS dict: regex patterns for NI_NUMBER, US_SSN,
+     AADHAAR, PAN_CARD, EMAIL_ADDRESS, UK_POSTCODE
+   - DATE_PATTERNS: list of date format regexes
+   - validate_extracted_records(records) → validated records
+     Checks each raw_* field against patterns. Sets validation_flags
+     list on each record. Suppresses names that are financial terms
+     or organizations (reuse FINANCIAL_TERM_DENY_LIST and
+     is_likely_organization from context_deny_list.py).
+     Removes records with no name after validation.
+
+2. Wire validate_extracted_records() into extract_generator():
+   After extraction (any path), before entity resolution:
+   pii_records = validate_extracted_records(pii_records)
+
+=== PER-PROTOCOL MODEL CONFIG ===
+
+3. Update PROTOCOL_LLM_CONFIG in app/core/constants.py:
+   Add vision_model and vision_page_dpi to each protocol config.
+   See PLAN.md Step 20g for values.
+
+4. Update protocol config resolution in extract_generator():
+   When selecting vision_model, check:
+   a) protocol_configs.config_json.vision_model (user override)
+   b) PROTOCOL_LLM_CONFIG[protocol].vision_model (protocol default)
+   c) settings.ollama_vision_model (global default)
+   Pass resolved model to VisionDocumentExtractor.
+
+5. Update .env.example and docker-compose.yml with new settings:
+   OLLAMA_VISION_MODEL=qwen2.5vl:32b
+   USE_VISION_EXTRACTION=true
+   VISION_PAGE_DPI=150
+
+=== TESTS ===
+
+6. Create tests/test_pattern_validator.py:
+   - Valid NI number: "NE724362D" → no flags
+   - Invalid NI number: "INVALID" → flag set
+   - Valid date: "10-Aug-1959" → no flags
+   - Invalid date: "not a date" → flag set  
+   - Financial term name: "Lump Sum" → suppressed (raw_name set to None)
+   - Organization name: "William M Mercer Limited" → suppressed
+   - Normal name: "Mr K P Acheampong" → no flags, kept
+   - Address too short: "London" → flag set (but NOT suppressed)
+   - Protocol model config: hipaa uses qwen2.5:7b, gdpr uses gemma3:27b
+   - User override: config_json vision_model takes precedence
+
+7. Run pytest on all changed files. Fix failures up to 3 attempts.
+   Update CLAUDE.md.
+```

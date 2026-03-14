@@ -304,15 +304,21 @@ class OllamaClient:
 
         return response_text
 
-    def is_vision_available(self) -> bool:
-        """Check if the configured vision model is loaded in Ollama."""
+    def is_vision_available(self, model_override: str | None = None) -> bool:
+        """Check if a vision model is loaded in Ollama.
+
+        Args:
+            model_override: specific model to check for (e.g. from protocol
+                config).  Falls back to ``settings.ollama_vision_model``.
+        """
         settings = get_settings()
+        vision_model = model_override or settings.ollama_vision_model
         try:
             resp = httpx.get(f"{self.base_url}/api/tags", timeout=5)
             if resp.status_code != 200:
                 return False
             models = [m.get("name", "") for m in resp.json().get("models", [])]
-            vision_base = settings.ollama_vision_model.split(":")[0]
+            vision_base = vision_model.split(":")[0]
             return any(vision_base in m for m in models)
         except Exception:
             return False

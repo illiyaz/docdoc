@@ -125,7 +125,9 @@ def build_extraction_prompt(
     return (
         f"You are extracting personal information from a {document_type}.\n"
         f"This is individual {instance_index + 1}. "
-        f"Read the following pages and extract the requested fields.\n\n"
+        f"These {len(page_texts)} pages are one complete record for a single individual.\n"
+        f"Extract ALL personal information found across ALL pages.\n"
+        f"Data may be spread across pages — check EVERY page.\n\n"
         + "\n\n".join(page_sections)
         + "\n\n"
         f"Extract these fields and return ONLY a JSON object:\n"
@@ -135,10 +137,87 @@ def build_extraction_prompt(
         + "\n\n"
         "RULES:\n"
         "- Extract the EXACT value as it appears in the document\n"
+        "- Return fields from ANY page — data is spread across pages\n"
         "- If a field is not present on any page, set it to null\n"
         "- For addresses, include the COMPLETE address "
         "(street, area, city, postcode, country)\n"
         "- For dates, preserve the original format (10-Aug-1959, not 1959-08-10)\n"
+        "- For names, include title if present (Mr, Mrs, Dr)\n"
+        "- Do NOT guess or infer values that are not explicitly stated\n"
+        "- IMPORTANT: Names must contain ONLY the person's name, "
+        "NOT reference numbers or IDs appended to it\n"
+    )
+
+
+def build_preview_extraction_prompt(
+    page_texts: list[str],
+    page_numbers_1indexed: list[int],
+    page_roles: list[PageRole],
+    document_type: str,
+) -> str:
+    """Build an extraction prompt for preview that returns per-field page numbers.
+
+    Unlike ``build_extraction_prompt``, the LLM is asked to report which page
+    each field was found on.  The response format is::
+
+        {"PERSON": {"value": "...", "page": 1}, "LOCATION": {"value": "...", "page": 2}}
+
+    Parameters
+    ----------
+    page_texts:
+        Text content of each page in the instance (ordered).
+    page_numbers_1indexed:
+        1-indexed page numbers for labeling pages in the prompt.
+    page_roles:
+        Page roles from the DocumentTemplate.
+    document_type:
+        Document type from the DocumentSchema.
+    """
+    all_fields: set[str] = set()
+    for role in page_roles:
+        all_fields.update(role.pii_fields_expected)
+    all_fields.update(ALWAYS_EXTRACT_IF_PRESENT)
+
+    sorted_fields = sorted(all_fields)
+
+    field_instructions: list[str] = []
+    for f in sorted_fields:
+        instruction = ENTITY_EXTRACTION_GUIDE.get(f, f"Extract any {f} values")
+        field_instructions.append(f"- {f}: {instruction}")
+
+    page_sections: list[str] = []
+    for i, text in enumerate(page_texts):
+        pg_label = page_numbers_1indexed[i] if i < len(page_numbers_1indexed) else i + 1
+        if text.strip():
+            page_sections.append(f"--- PAGE {pg_label} ---\n{text}")
+
+    json_fields = "\n".join(
+        f'  "{f}": {{"value": "extracted value or null", "page": page_number}}'
+        for f in sorted_fields
+    )
+
+    return (
+        f"You are extracting personal information from a {document_type}.\n"
+        f"This is ONE individual's complete record spread across "
+        f"{len(page_texts)} pages.\n"
+        f"You MUST check EVERY page — different fields appear on different pages.\n\n"
+        + "\n\n".join(page_sections)
+        + "\n\n"
+        f"Extract these fields and return ONLY a JSON object.\n"
+        f"For EACH field, report the page number where you found it:\n"
+        f"{{\n{json_fields}\n}}\n\n"
+        f"Field extraction guide:\n"
+        + "\n".join(field_instructions)
+        + "\n\n"
+        "RULES:\n"
+        "- Extract the EXACT value as it appears in the document\n"
+        "- Check ALL pages — names may be on one page, addresses on another\n"
+        "- The 'page' value MUST be the actual page number shown above "
+        "(e.g., PAGE 1 → page: 1)\n"
+        "- If a field is not present on any page, set value to null and page to null\n"
+        "- For addresses, include the COMPLETE address "
+        "(street, area, city, postcode, country)\n"
+        "- For dates, preserve the original format\n"
         "- For names, include title if present (Mr, Mrs, Dr)\n"
         "- Do NOT guess or infer values that are not explicitly stated\n"
         "- IMPORTANT: Names must contain ONLY the person's name, "

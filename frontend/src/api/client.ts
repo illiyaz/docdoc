@@ -831,11 +831,15 @@ export interface AnalysisReviewDetail {
 export interface ExtractionPreview {
   preview_instance: number
   pages: string
-  fields_found: Record<string, string>
+  fields_found: Record<string, { value: string; page: number }>
   fields_missing: string[]
+  pages_read: number[]
   total_instances_estimate: number
   extraction_method: string
   pages_per_instance: number
+  is_tabular?: boolean
+  records_per_page_estimate?: number
+  sample_rows?: Record<string, string>[]
 }
 
 export async function getAnalysisResults(jobId: string): Promise<AnalysisReviewDetail[]> {

@@ -82,6 +82,113 @@ def _sse(data: dict) -> str:
     return f"data: {json.dumps(data)}\n\n"
 
 
+# Mapping from LLM field names to canonical preview field names
+_PREVIEW_FIELD_MAP: dict[str, str] = {
+    "PERSON": "PERSON",
+    "LOCATION": "LOCATION",
+    "DATE_OF_BIRTH": "DATE_OF_BIRTH",
+    "DATE_OF_BIRTH_DMY": "DATE_OF_BIRTH",
+    "DATE_OF_BIRTH_MDY": "DATE_OF_BIRTH",
+    "DATE_OF_BIRTH_ISO": "DATE_OF_BIRTH",
+    "EMAIL_ADDRESS": "EMAIL",
+    "EMAIL": "EMAIL",
+    "PHONE_NUMBER": "PHONE",
+    "PHONE_US": "PHONE",
+    "PHONE_INTL": "PHONE",
+    "US_SSN": "GOVERNMENT_ID",
+    "NI_NUMBER": "GOVERNMENT_ID",
+    "AADHAAR": "GOVERNMENT_ID",
+    "US_DRIVER_LICENSE": "GOVERNMENT_ID",
+    "US_PASSPORT": "GOVERNMENT_ID",
+    "PAN_CARD": "GOVERNMENT_ID",
+    "NHS_NUMBER": "GOVERNMENT_ID",
+    "GOVERNMENT_ID": "GOVERNMENT_ID",
+    "IDENTIFICATION_NUMBER": "GOVERNMENT_ID",
+    "NATIONAL_INSURANCE_UK": "GOVERNMENT_ID",
+}
+
+
+def _parse_preview_response(
+    response_text: str,
+    valid_pages: list[int],
+) -> dict[str, dict]:
+    """Parse LLM preview response with per-field page numbers.
+
+    Expects JSON like::
+
+        {"PERSON": {"value": "John Smith", "page": 1}, ...}
+
+    Also handles flat format (value only, no page) as fallback::
+
+        {"PERSON": "John Smith", ...}
+
+    Returns a dict of canonical field name → ``{"value": str, "page": int}``.
+    """
+    cleaned = response_text.strip()
+    if cleaned.startswith("```"):
+        lines = cleaned.split("\n")
+        lines = [ln for ln in lines if not ln.strip().startswith("```")]
+        cleaned = "\n".join(lines).strip()
+
+    data: dict | None = None
+    try:
+        data = json.loads(cleaned)
+    except json.JSONDecodeError:
+        for start_char in ("{", "["):
+            idx = cleaned.find(start_char)
+            if idx >= 0:
+                try:
+                    data = json.loads(cleaned[idx:])
+                    break
+                except json.JSONDecodeError:
+                    continue
+
+    if data is None:
+        return {}
+
+    # Handle array response — take first element
+    if isinstance(data, list):
+        data = data[0] if data else {}
+    if not isinstance(data, dict):
+        return {}
+
+    default_page = valid_pages[0] if valid_pages else 1
+    fields_found: dict[str, dict] = {}
+
+    for raw_field, raw_val in data.items():
+        if raw_val is None or raw_val == "" or raw_val == "null":
+            continue
+
+        canonical = _PREVIEW_FIELD_MAP.get(raw_field, raw_field)
+
+        # Already have a value for this canonical field — skip duplicates
+        if canonical in fields_found:
+            continue
+
+        if isinstance(raw_val, dict):
+            value = raw_val.get("value")
+            page = raw_val.get("page")
+            if value is None or value == "" or value == "null":
+                continue
+            value_str = str(value).strip()
+            if not value_str:
+                continue
+            # Validate page number
+            if isinstance(page, (int, float)) and int(page) in valid_pages:
+                page_num = int(page)
+            else:
+                page_num = default_page
+            fields_found[canonical] = {"value": value_str, "page": page_num}
+        else:
+            # Flat format fallback
+            value_str = str(raw_val).strip()
+            if not value_str:
+                continue
+            fields_found[canonical] = {"value": value_str, "page": default_page}
+
+    return fields_found
+
+
 # ---------------------------------------------------------------------------
 # Phase 1: Analyze generator
 # ---------------------------------------------------------------------------
@@ -478,10 +585,8 @@ def analyze_generator(
 
             try:
                 from app.llm.client import OllamaClient
-                from app.structure.llm_template_extractor import LLMTemplateExtractor
 
                 llm_client = OllamaClient()
-                extractor = LLMTemplateExtractor(llm_client, batch_size=1)
 
                 for idx, doc in enumerate(template_docs, 1):
                     yield _sse({
@@ -494,7 +599,7 @@ def analyze_generator(
                     template = schema.template
                     blocks = doc_blocks_cache.get(doc.id, [])
 
-                    # Build page_texts from blocks
+                    # Build page_texts from ALL blocks (full document)
                     page_texts: dict[int, str] = {}
                     for b in blocks:
                         pg = b.page_or_sheet
@@ -503,74 +608,76 @@ def analyze_generator(
                         else:
                             page_texts[pg] += "\n" + b.text
 
-                    total_pages = len(set(b.page_or_sheet for b in blocks))
+                    # Always prefer marker-based boundaries for accurate count
                     if template.instance_marker:
                         instances = template.find_instance_boundaries(page_texts)
                     else:
+                        total_pages = len(set(b.page_or_sheet for b in blocks))
                         instances = template.get_instance_pages(total_pages)
 
                     if not instances:
                         continue
 
-                    # Extract ONLY the first instance as preview
+                    # Extract from ALL pages of instance 0 (not just identity page)
                     first_instance = instances[0]
-                    # Limit page_texts to just the first instance's pages
-                    # to prevent extract_all_instances from finding ALL
-                    # instances via marker scan (149 LLM calls!)
-                    preview_page_texts = {
-                        p: page_texts.get(p, "") for p in first_instance
-                    }
+                    pages_1indexed = sorted(int(p) + 1 for p in first_instance)
+                    instance_texts = [
+                        page_texts.get(p, "")[:3000] for p in first_instance
+                    ]
+
+                    if not any(t.strip() for t in instance_texts):
+                        continue
+
+                    # Build preview prompt that asks for per-field page numbers
+                    from app.llm.extraction_prompts import (
+                        ALWAYS_EXTRACT_IF_PRESENT,
+                        build_preview_extraction_prompt,
+                    )
+
+                    preview_prompt = build_preview_extraction_prompt(
+                        page_texts=instance_texts,
+                        page_numbers_1indexed=pages_1indexed,
+                        page_roles=template.page_roles,
+                        document_type=schema.document_type,
+                    )
+
                     try:
-                        preview_records = extractor.extract_all_instances(
-                            schema,
-                            preview_page_texts,
-                            str(doc.id),
-                            total_pages=len(first_instance),
+                        response = llm_client.generate(
+                            preview_prompt,
+                            system="You extract personal information from documents. "
+                            "Respond ONLY with valid JSON.",
+                            use_case="extraction_preview",
+                            document_id=str(doc.id),
                         )
+                        fields_found = _parse_preview_response(response, pages_1indexed)
                     except Exception:
                         logger.warning(
                             "Extraction preview failed for %s",
                             doc.file_name, exc_info=True,
                         )
-                        preview_records = []
-
-                    # Build preview dict
-                    fields_found: dict[str, str] = {}
-                    if preview_records:
-                        rec = preview_records[0]
-                        if rec.raw_name:
-                            fields_found["PERSON"] = rec.raw_name
-                        if rec.raw_email:
-                            fields_found["EMAIL"] = rec.raw_email
-                        if rec.raw_phone:
-                            fields_found["PHONE"] = rec.raw_phone
-                        if rec.raw_dob:
-                            fields_found["DATE_OF_BIRTH"] = rec.raw_dob
-                        if rec.raw_address:
-                            addr = rec.raw_address
-                            fields_found["LOCATION"] = addr.get("raw", str(addr)) if isinstance(addr, dict) else str(addr)
-                        if rec.raw_government_id:
-                            fields_found["GOVERNMENT_ID"] = rec.raw_government_id
+                        fields_found = {}
 
                     # Determine expected fields from schema
-                    expected_fields = set()
+                    expected_fields: set[str] = set()
                     if template.page_roles:
                         for role in template.page_roles:
                             expected_fields.update(role.pii_fields_expected)
-                    # Add ALWAYS_EXTRACT_IF_PRESENT
-                    from app.llm.extraction_prompts import ALWAYS_EXTRACT_IF_PRESENT
                     expected_fields.update(ALWAYS_EXTRACT_IF_PRESENT)
 
                     fields_missing = sorted(expected_fields - set(fields_found.keys()))
 
-                    pages_1 = sorted(int(p) + 1 for p in first_instance)
-                    page_range_str = f"{pages_1[0]}-{pages_1[-1]}" if len(pages_1) > 1 else str(pages_1[0])
+                    page_range_str = (
+                        f"{pages_1indexed[0]}-{pages_1indexed[-1]}"
+                        if len(pages_1indexed) > 1
+                        else str(pages_1indexed[0])
+                    )
 
                     preview = {
                         "preview_instance": 0,
                         "pages": page_range_str,
                         "fields_found": fields_found,
                         "fields_missing": fields_missing,
+                        "pages_read": pages_1indexed,
                         "total_instances_estimate": len(instances),
                         "extraction_method": "llm_template",
                         "pages_per_instance": template.pages_per_instance,
@@ -590,6 +697,98 @@ def analyze_generator(
                 "message": f"Previewed extraction for {preview_count} document(s)",
                 "detail": {"previewed": preview_count},
             })
+
+        # --- Stage 4c: Table Preview (tabular docs) ---
+        tabular_docs = [
+            doc for doc in doc_records
+            if doc.id in doc_schemas
+            and doc_schemas[doc.id] is not None
+            and getattr(doc_schemas[doc.id], "is_tabular", False)
+            and doc_schemas[doc.id].records_per_page_estimate > 1
+            and doc.id not in doc_previews  # don't double-preview
+        ]
+
+        if tabular_docs and settings.llm_assist_enabled:
+            try:
+                from app.llm.client import OllamaClient
+                from app.structure.llm_template_extractor import LLMTemplateExtractor
+
+                llm_client = OllamaClient()
+                table_extractor = LLMTemplateExtractor(llm_client, batch_size=1)
+
+                for doc in tabular_docs:
+                    schema = doc_schemas[doc.id]
+                    blocks = doc_blocks_cache.get(doc.id, [])
+
+                    # Build page_texts and extract from first page only
+                    page_texts_preview: dict[int, str] = {}
+                    for b in blocks:
+                        pg = b.page_or_sheet
+                        if pg not in page_texts_preview:
+                            page_texts_preview[pg] = b.text
+                        else:
+                            page_texts_preview[pg] += "\n" + b.text
+
+                    if not page_texts_preview:
+                        continue
+
+                    first_page = min(page_texts_preview.keys())
+                    preview_page_texts = {first_page: page_texts_preview[first_page]}
+
+                    try:
+                        sample_records = table_extractor.extract_table_pages(
+                            schema, preview_page_texts, str(doc.id),
+                        )
+                    except Exception:
+                        sample_records = []
+
+                    # Build tabular preview
+                    total_pages_tab = len(page_texts_preview)
+                    rpp = schema.records_per_page_estimate
+
+                    sample_rows: list[dict[str, str]] = []
+                    for rec in sample_records[:5]:
+                        row: dict[str, str] = {}
+                        if rec.raw_name:
+                            row["PERSON"] = rec.raw_name
+                        if rec.raw_address:
+                            addr = rec.raw_address
+                            row["LOCATION"] = addr.get("raw", str(addr)) if isinstance(addr, dict) else str(addr)
+                        if rec.raw_dob:
+                            row["DATE_OF_BIRTH"] = rec.raw_dob
+                        if rec.raw_government_id:
+                            row["GOVERNMENT_ID"] = rec.raw_government_id
+                        if rec.raw_email:
+                            row["EMAIL"] = rec.raw_email
+                        if row:
+                            sample_rows.append(row)
+
+                    preview = {
+                        "preview_instance": 0,
+                        "pages": str(first_page + 1),
+                        "fields_found": {
+                            k: {"value": v, "page": first_page + 1}
+                            for row in sample_rows[:1]
+                            for k, v in row.items()
+                        } if sample_rows else {},
+                        "fields_missing": [],
+                        "pages_read": [first_page + 1],
+                        "total_instances_estimate": rpp * total_pages_tab,
+                        "extraction_method": "llm_table",
+                        "pages_per_instance": 1,
+                        "is_tabular": True,
+                        "records_per_page_estimate": rpp,
+                        "sample_rows": sample_rows,
+                    }
+                    doc_previews[doc.id] = preview
+                    preview_count += 1
+
+                    logger.info(
+                        "Table preview for %s: %d sample rows, ~%d per page, %d pages",
+                        doc.file_name, len(sample_rows), rpp, total_pages_tab,
+                    )
+            except Exception:
+                logger.warning("Table preview stage failed", exc_info=True)
 
         # --- Stage 5: Entity Analysis (LLM) ---
         yield _sse({
@@ -707,7 +906,7 @@ def analyze_generator(
         # --- Mark run as analyzed ---
         run.status = "analyzed"
         run.analysis_completed_at = datetime.now(timezone.utc)
-        db.flush()
+        db.commit()
 
         # --- Complete ---
         yield _sse({
@@ -732,9 +931,9 @@ def analyze_generator(
             run.error_summary = str(type(exc).__name__)
             run.completed_at = datetime.now(timezone.utc)
             try:
-                db.flush()
+                db.commit()
             except Exception:
-                pass
+                db.rollback()
         yield _sse({"stage": "error", "message": f"Pipeline failed: {type(exc).__name__}"})
 
     finally:
@@ -841,9 +1040,9 @@ def extract_generator(
         yield _sse({"stage": "error", "message": "No approved documents found for extraction"})
         return
 
-    # Update run status
+    # Update run status — commit immediately so UI can see it
     run.status = "extracting"
-    db.flush()
+    db.commit()
 
     try:
         # --- Stage 1: Detection ---
@@ -928,14 +1127,21 @@ def extract_generator(
                     except Exception:
                         pass
 
-                # 3-path extraction (Step 20 — exclusive, clear priority):
-                #   Path 1: Vision model (primary for ALL documents)
+                # 4-path extraction (exclusive, clear priority):
+                #   Path A: Template extraction (1 person per N pages)
+                #   Path B: Table extraction (N people per page)  — NEW
+                #   Path 1: Vision model (primary for non-template/non-table)
                 #   Path 2: Text + LLM (fallback when vision unavailable)
                 #   Path 3: Presidio only (last resort, no LLM)
                 is_template = (
                     schema is not None
                     and schema.template
                     and schema.template.pages_per_instance >= 2
+                )
+                is_tabular = (
+                    schema is not None
+                    and schema.is_tabular
+                    and schema.records_per_page_estimate > 1
                 )
                 doc_pages = set(b.page_or_sheet for b in blocks)
                 total_pg = len(doc_pages)
@@ -999,7 +1205,7 @@ def extract_generator(
                         from app.structure.vision_extractor import VisionDocumentExtractor
 
                         client = OllamaClient(db_session=db)
-                        if client.is_vision_available():
+                        if client.is_vision_available(model_override=vision_model):
                             vision_ext = VisionDocumentExtractor(
                                 client,
                                 batch_size=batch_size,
@@ -1009,6 +1215,11 @@ def extract_generator(
                             if is_template and instances:
                                 records = vision_ext.extract_template_instances(
                                     doc.source_path, schema, instances, str(doc.id),
+                                )
+                            elif is_tabular:
+                                all_page_nums = sorted(doc_pages)
+                                records = vision_ext.extract_table_pages(
+                                    doc.source_path, all_page_nums, str(doc.id), schema,
                                 )
                             else:
                                 all_page_nums = sorted(doc_pages)
@@ -1027,7 +1238,38 @@ def extract_generator(
                             doc.file_name, exc_info=True,
                         )
 
-                # --- Path 2: Text + LLM (fallback) ---
+                # --- Path 2a: Text + LLM table extraction (tabular docs) ---
+                if not records and settings.llm_assist_enabled and is_tabular:
+                    try:
+                        from app.llm.client import OllamaClient
+                        from app.structure.llm_template_extractor import LLMTemplateExtractor
+
+                        page_texts_tab: dict[int, str] = {}
+                        for b in blocks:
+                            pg = b.page_or_sheet
+                            if pg not in page_texts_tab:
+                                page_texts_tab[pg] = ""
+                            page_texts_tab[pg] += b.text + "\n"
+
+                        client = OllamaClient(db_session=db)
+                        text_extractor = LLMTemplateExtractor(client, batch_size=batch_size)
+                        table_records = text_extractor.extract_table_pages(
+                            schema, page_texts_tab, str(doc.id),
+                        )
+                        if table_records:
+                            records = table_records
+                            extraction_path = "2-table"
+                            logger.info(
+                                "Path 2a (Text+LLM table) for %s: %d records",
+                                doc.file_name, len(records),
+                            )
+                    except Exception:
+                        logger.warning(
+                            "Path 2a (Text+LLM table) failed for %s",
+                            doc.file_name, exc_info=True,
+                        )
+
+                # --- Path 2b: Text + LLM template (fallback) ---
                 if not records and settings.llm_assist_enabled and is_template and instances:
                     try:
                         from app.llm.client import OllamaClient
@@ -1207,7 +1449,7 @@ def extract_generator(
         # --- Mark run as completed ---
         run.status = "completed"
         run.completed_at = datetime.now(timezone.utc)
-        db.flush()
+        db.commit()
 
         # --- Complete ---
         yield _sse({
@@ -1228,9 +1470,9 @@ def extract_generator(
             run.error_summary = str(type(exc).__name__)
             run.completed_at = datetime.now(timezone.utc)
             try:
-                db.flush()
+                db.commit()
             except Exception:
-                pass
+                db.rollback()
         yield _sse({"stage": "error", "message": f"Pipeline failed: {type(exc).__name__}"})
 
     finally:

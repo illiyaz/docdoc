@@ -1539,28 +1539,67 @@ function AnalysisReviewPanel({ jobId, onExtractionComplete }: { jobId: string; o
                   {doc.extraction_preview.extraction_method}
                 </span>
               </div>
-              <p className="text-[10px] text-indigo-600">
-                Instance 1 of ~{doc.extraction_preview.total_instances_estimate}
-                {" "}(pages {doc.extraction_preview.pages}, {doc.extraction_preview.pages_per_instance} pages each)
-              </p>
 
-              {/* Fields found */}
-              {Object.keys(doc.extraction_preview.fields_found).length > 0 && (
+              {/* Tabular vs template summary */}
+              {doc.extraction_preview.is_tabular ? (
+                <p className="text-[10px] text-indigo-600">
+                  Tabular document. ~{doc.extraction_preview.records_per_page_estimate ?? "?"} individuals/page,
+                  {" "}~{doc.extraction_preview.total_instances_estimate} total
+                </p>
+              ) : (
+                <p className="text-[10px] text-indigo-600">
+                  Instance 1 of ~{doc.extraction_preview.total_instances_estimate}
+                  {" "}(pages {doc.extraction_preview.pages}, {doc.extraction_preview.pages_per_instance} pages each)
+                </p>
+              )}
+
+              {/* Table sample rows */}
+              {doc.extraction_preview.sample_rows && doc.extraction_preview.sample_rows.length > 0 && (
+                <div className="space-y-0.5">
+                  <p className="text-[10px] font-medium text-indigo-700 uppercase tracking-wide">Sample from page {doc.extraction_preview.pages}:</p>
+                  <div className="space-y-0.5">
+                    {doc.extraction_preview.sample_rows.slice(0, 5).map((row, idx) => (
+                      <div key={idx} className="text-[10px] bg-white border border-indigo-100 rounded px-1.5 py-0.5 flex items-center gap-1 flex-wrap">
+                        <span className="text-green-600">&#10003;</span>
+                        {Object.entries(row).map(([, val], vi) => (
+                          <span key={vi} className="text-indigo-800">
+                            {vi > 0 && <span className="text-indigo-300 mx-0.5">|</span>}
+                            <span className="max-w-[100px] truncate inline-block align-bottom" title={val}>{val}</span>
+                          </span>
+                        ))}
+                      </div>
+                    ))}
+                    {(doc.extraction_preview.records_per_page_estimate ?? 0) > 5 && (
+                      <p className="text-[10px] text-indigo-400 italic">
+                        ... and ~{(doc.extraction_preview.records_per_page_estimate ?? 0) - 5} more on this page
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Fields found (non-tabular or tabular first row) */}
+              {!doc.extraction_preview.is_tabular && Object.keys(doc.extraction_preview.fields_found).length > 0 && (
                 <div className="space-y-0.5">
                   <p className="text-[10px] font-medium text-indigo-700 uppercase tracking-wide">Fields Found:</p>
                   <div className="flex flex-wrap gap-1">
-                    {Object.entries(doc.extraction_preview.fields_found).map(([field, value]) => (
-                      <span key={field} className="inline-flex items-center gap-1 text-xs bg-green-50 border border-green-200 rounded px-1.5 py-0.5">
-                        <span className="font-medium text-green-800">{field}</span>
-                        <span className="text-green-600 max-w-[120px] truncate" title={value}>{value}</span>
-                      </span>
-                    ))}
+                    {Object.entries(doc.extraction_preview.fields_found).map(([field, fieldData]) => {
+                      const value = typeof fieldData === "string" ? fieldData : fieldData.value
+                      const page = typeof fieldData === "object" && fieldData?.page ? fieldData.page : null
+                      return (
+                        <span key={field} className="inline-flex items-center gap-1 text-xs bg-green-50 border border-green-200 rounded px-1.5 py-0.5">
+                          <span className="font-medium text-green-800">{field}</span>
+                          <span className="text-green-600 max-w-[120px] truncate" title={value}>{value}</span>
+                          {page && <span className="text-green-400 text-[10px]">p{page}</span>}
+                        </span>
+                      )
+                    })}
                   </div>
                 </div>
               )}
 
               {/* Fields missing */}
-              {doc.extraction_preview.fields_missing.length > 0 && (
+              {!doc.extraction_preview.is_tabular && doc.extraction_preview.fields_missing.length > 0 && (
                 <div className="space-y-0.5">
                   <p className="text-[10px] font-medium text-indigo-700 uppercase tracking-wide">Not Found:</p>
                   <div className="flex flex-wrap gap-1">
@@ -1573,7 +1612,7 @@ function AnalysisReviewPanel({ jobId, onExtractionComplete }: { jobId: string; o
                 </div>
               )}
 
-              {Object.keys(doc.extraction_preview.fields_found).length === 0 && (
+              {Object.keys(doc.extraction_preview.fields_found).length === 0 && !doc.extraction_preview.sample_rows?.length && (
                 <p className="text-xs text-red-600 font-medium">
                   No fields extracted — LLM extraction may not work for this document
                 </p>
@@ -2054,7 +2093,12 @@ function JobsTab({
                           </button>
                           {isExpanded && (
                             <div className="border-t bg-muted/20 px-4 py-3">
-                              {job.status === "analyzed" ? (
+                              {job.status === "extracting" ? (
+                                <div className="flex items-center gap-2 text-sm text-muted-foreground py-2">
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                  <span>Extraction in progress — this may take several minutes for large documents...</span>
+                                </div>
+                              ) : job.status === "analyzed" ? (
                                 <AnalysisReviewPanel
                                   jobId={job.id}
                                   onExtractionComplete={() => {

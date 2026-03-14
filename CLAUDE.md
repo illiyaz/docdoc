@@ -340,9 +340,11 @@ These are detailed in [docs/SCHEMA.md](docs/SCHEMA.md). Summary:
 | 17. Cross-Page Template Linking + FP Cleanup + Auto-Export | COMPLETE | DocumentTemplate, PageRole, multi-page LLM reading, build_composite_record, financial term deny-list, cross-type suppression, auto-CSV-export. |
 | 18. Auditor-Ready CSV Export with Lineage | COMPLETE | Schema-driven CSV (auditor/minimal/full), +5 lineage columns on NotificationSubject (migration 0010), gov ID masking, preview endpoint. |
 | 19. Schema-Driven LLM Extraction for Templates | COMPLETE | LLMTemplateExtractor, ENTITY_EXTRACTION_GUIDE (17 types), ALWAYS_EXTRACT_IF_PRESENT, 3-path extraction (exclusive), cross-batch dedup, marker-based instance boundaries, 24 tests. |
-| 20. Vision-First Extraction Architecture | COMPLETE | Vision-language model as primary extractor. VisionDocumentExtractor, PDF page renderer, instance boundary detector, OllamaClient.generate_with_images. 3 priority paths: vision→text+LLM→Presidio (exclusive). Pattern validation (NI/SSN/date/email format checks, financial term + org name suppression). Per-protocol vision_model + vision_page_dpi config. 56 new tests. |
+| 20. Vision-First Extraction Architecture | COMPLETE | Vision-language model as primary extractor. VisionDocumentExtractor, PDF page renderer, instance boundary detector, OllamaClient.generate_with_images. extraction preview with per-field page numbers. 4 extraction strategies: template (1 person/N pages), table (N people/page), vision page, Presidio fallback. Pattern validation (NI/SSN/date/email format checks, financial term + org name suppression). Per-protocol vision_model + vision_page_dpi config. Table extraction: is_tabular + records_per_page_estimate on DocumentSchema, VisionDocumentExtractor.extract_table_pages(), LLMTemplateExtractor.extract_table_pages(), tabular preview with sample rows. 79 new tests. |
 
-**2103 tests passing after Steps 1–20.**
+**Bugfix: Extraction preview multi-page read** — Preview now reads ALL pages of instance 0 (not just identity page). `build_preview_extraction_prompt()` asks LLM for per-field page numbers (`{value, page}` format). `_parse_preview_response()` parses LLM output with canonical field mapping. Instance count uses `find_instance_boundaries()` when marker set. 11 net new tests.
+
+**2138 tests passing after Steps 1–20.**
 
 See [docs/PLAN.md](docs/PLAN.md) for active steps and [docs/PLAN_COMPLETED.md](docs/PLAN_COMPLETED.md) for completed reference.
 

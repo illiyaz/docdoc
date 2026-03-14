@@ -396,6 +396,129 @@ class LLMTemplateExtractor:
         )
 
     # ------------------------------------------------------------------
+    # Table extraction (multiple individuals per page)
+    # ------------------------------------------------------------------
+
+    def extract_table_pages(
+        self,
+        schema: DocumentSchema,
+        page_texts: dict[int, str],
+        doc_id: str,
+    ) -> list[PIIRecord]:
+        """Extract multiple individuals per page from tabular documents.
+
+        Text-based fallback for when vision is unavailable.
+        Each page may have many rows of data.
+        """
+        if not page_texts:
+            return []
+
+        all_records: list[PIIRecord] = []
+        sorted_pages = sorted(page_texts.keys())
+
+        for batch_start in range(0, len(sorted_pages), self.batch_size):
+            batch_pages = sorted_pages[batch_start:batch_start + self.batch_size]
+            texts = [
+                page_texts.get(p, "")[:_MAX_PAGE_CHARS]
+                for p in batch_pages
+            ]
+            if not any(t.strip() for t in texts):
+                continue
+
+            prompt = self._build_table_text_prompt(texts, schema)
+
+            try:
+                response = self.client.generate(
+                    prompt,
+                    system="You extract personal information from documents. "
+                    "Respond ONLY with valid JSON.",
+                    use_case="table_text_extraction",
+                    document_id=doc_id,
+                )
+                records = self._parse_table_text_response(response, doc_id, batch_pages)
+                all_records.extend(records)
+            except Exception:
+                logger.warning(
+                    "Text table extraction failed for pages %s of %s",
+                    batch_pages, doc_id, exc_info=True,
+                )
+                continue
+
+        return _deduplicate_records(all_records)
+
+    def _build_table_text_prompt(
+        self,
+        page_texts: list[str],
+        schema: DocumentSchema,
+    ) -> str:
+        """Build prompt for text-based table extraction."""
+        from app.llm.extraction_prompts import (
+            ALWAYS_EXTRACT_IF_PRESENT,
+            ENTITY_EXTRACTION_GUIDE,
+        )
+
+        fields = set(ALWAYS_EXTRACT_IF_PRESENT)
+        if schema.tables:
+            for table in schema.tables:
+                for col in table.columns:
+                    if col.contains_pii and col.pii_type:
+                        fields.add(col.pii_type)
+
+        field_guide = "\n".join(
+            f"- {f}: {ENTITY_EXTRACTION_GUIDE.get(f, f'Extract {f}')}"
+            for f in sorted(fields)
+        )
+
+        page_sections = []
+        for i, text in enumerate(page_texts):
+            if text.strip():
+                page_sections.append(f"--- PAGE {i + 1} ---\n{text}")
+
+        return (
+            f"You are extracting personal information from a {schema.document_type}.\n"
+            "This is a tabular document with MULTIPLE individuals per page.\n\n"
+            + "\n\n".join(page_sections)
+            + "\n\n"
+            f"For EACH individual/row found, extract:\n{field_guide}\n\n"
+            "Return a JSON ARRAY with one object per individual:\n"
+            '[\n  {"PERSON": "...", "LOCATION": "...", ...},\n  ...\n]\n\n'
+            "RULES:\n"
+            "- Extract EVERY individual/row visible on each page\n"
+            "- Column headers are NOT individuals — skip them\n"
+            "- If a value is empty, set to null\n"
+            "- For addresses, include the COMPLETE address\n"
+            "- Organization names are NOT individuals\n"
+            "- Return ONLY valid JSON array"
+        )
+
+    def _parse_table_text_response(
+        self,
+        response_text: str,
+        doc_id: str,
+        page_numbers: list[int],
+    ) -> list[PIIRecord]:
+        """Parse text table extraction response."""
+        data = _parse_json(response_text)
+        if data is None:
+            return []
+
+        if isinstance(data, dict):
+            data = [data]
+
+        if not isinstance(data, list):
+            return []
+
+        records: list[PIIRecord] = []
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            rec = self._data_to_record(item, doc_id, page_numbers)
+            if rec is not None:
+                records.append(rec)
+
+        return records
+
+    # ------------------------------------------------------------------
     # Validation
     # ------------------------------------------------------------------
 

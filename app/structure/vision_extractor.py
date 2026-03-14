@@ -186,6 +186,90 @@ class VisionDocumentExtractor:
         return _deduplicate_records(all_records)
 
     # ------------------------------------------------------------------
+    # Tabular documents (multiple individuals per page)
+    # ------------------------------------------------------------------
+
+    def extract_table_pages(
+        self,
+        doc_path: str,
+        page_numbers: list[int],
+        doc_id: str,
+        schema: DocumentSchema | None = None,
+    ) -> list[PIIRecord]:
+        """Extract multiple individuals from tabular pages using vision.
+
+        Each page may contain many rows of data (10-50 individuals).
+        Returns multiple PIIRecords per page.
+        """
+        if not page_numbers:
+            return []
+
+        all_records: list[PIIRecord] = []
+
+        for batch_start in range(0, len(page_numbers), self.batch_size):
+            batch_page_nums = page_numbers[batch_start:batch_start + self.batch_size]
+            try:
+                images = render_pages_to_images(doc_path, batch_page_nums, dpi=self.dpi)
+            except Exception:
+                logger.warning(
+                    "Failed to render table pages %s of %s",
+                    batch_page_nums, doc_id, exc_info=True,
+                )
+                continue
+
+            if not images:
+                continue
+
+            prompt = self._build_table_prompt(schema, len(images))
+
+            try:
+                response = self.client.generate_with_images(
+                    prompt=prompt,
+                    images=images,
+                    use_case="vision_table_extraction",
+                    document_id=doc_id,
+                    model_override=self.vision_model,
+                )
+                records = self._parse_table_response(response, doc_id, batch_page_nums)
+                all_records.extend(records)
+            except Exception:
+                logger.warning(
+                    "Vision table extraction failed for pages %s of %s",
+                    batch_page_nums, doc_id, exc_info=True,
+                )
+                continue
+
+        return _deduplicate_records(all_records)
+
+    def _parse_table_response(
+        self,
+        response_text: str,
+        doc_id: str,
+        page_numbers: list[int],
+    ) -> list[PIIRecord]:
+        """Parse table extraction response — expects JSON array of many records."""
+        data = _parse_json(response_text)
+        if data is None:
+            return []
+
+        if isinstance(data, dict):
+            data = [data]
+
+        if not isinstance(data, list):
+            return []
+
+        records: list[PIIRecord] = []
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            # All records from this batch share the batch's page numbers
+            rec = self._data_to_record(item, doc_id, page_numbers)
+            if rec is not None:
+                records.append(rec)
+
+        return records
+
+    # ------------------------------------------------------------------
     # Prompt builders
     # ------------------------------------------------------------------
 
@@ -223,6 +307,52 @@ class VisionDocumentExtractor:
             "- If a field is not visible on the page, set it to null\n"
             "- Do NOT guess or infer values not shown in the image\n"
             "- Return ONLY valid JSON, no other text"
+        )
+
+    def _build_table_prompt(
+        self,
+        schema: DocumentSchema | None,
+        num_images: int,
+    ) -> str:
+        """Build prompt for tabular documents with multiple records per page."""
+        # Collect fields from schema tables if available
+        extra_fields: list[str] = []
+        if schema and schema.tables:
+            for table in schema.tables:
+                for col in table.columns:
+                    if col.contains_pii and col.pii_type:
+                        extra_fields.append(col.pii_type)
+
+        field_set = set(ALWAYS_EXTRACT_IF_PRESENT)
+        field_set.update(extra_fields)
+
+        field_guide = "\n".join(
+            f"- {f}: {ENTITY_EXTRACTION_GUIDE.get(f, f'Extract {f}')}"
+            for f in sorted(field_set)
+        )
+
+        return (
+            "You are extracting personal information from a tabular document.\n"
+            f"Each image is one page that may contain MULTIPLE individuals in rows.\n"
+            f"There are {num_images} page image(s).\n\n"
+            f"For EACH individual/row found, extract:\n{field_guide}\n\n"
+            "Return a JSON ARRAY with one object per individual found across ALL pages:\n"
+            '[\n'
+            '  {"PERSON": "Alice Smith", "LOCATION": "123 Oak St", '
+            '"DATE_OF_BIRTH": "03/15/2001", ...},\n'
+            '  {"PERSON": "Bob Johnson", "LOCATION": "456 Elm Ave", '
+            '"DATE_OF_BIRTH": "07/22/2000", ...},\n'
+            '  ...\n'
+            ']\n\n'
+            "RULES:\n"
+            "- Extract EVERY row/individual visible on each page\n"
+            "- Column headers are NOT individuals — skip them\n"
+            "- If a row spans multiple lines, combine into one record\n"
+            "- If a value is empty or illegible, set it to null\n"
+            "- For addresses, include the COMPLETE address\n"
+            "- For names, include title if present (Mr, Mrs, Dr)\n"
+            "- Organization names are NOT individuals\n"
+            "- Return ONLY valid JSON array, no other text"
         )
 
     def _build_page_extraction_prompt(
