@@ -66,6 +66,20 @@ def get_analysis_results(job_id: str, db: Session = Depends(get_db)):
     if not run:
         raise HTTPException(404, "Job not found")
 
+    # Resolve dedup anchors and protocol name from config
+    config_snapshot = run.config_snapshot or {}
+    protocol_name = config_snapshot.get("protocol_id", "")
+    dedup_anchors: list[str] | None = None
+    protocol_config_id = config_snapshot.get("protocol_config_id")
+    if protocol_config_id:
+        try:
+            from app.db.models import ProtocolConfig
+            pc = db.get(ProtocolConfig, UUID(protocol_config_id))
+            if pc is not None and pc.config_json:
+                dedup_anchors = pc.config_json.get("dedup_anchors")
+        except Exception:
+            pass
+
     docs = db.query(Document).filter(Document.ingestion_run_id == run_uuid).all()
 
     results = []
@@ -135,7 +149,11 @@ def get_analysis_results(job_id: str, db: Session = Depends(get_db)):
             "extraction_preview": review.extraction_preview if review else None,
         })
 
-    return results
+    return {
+        "documents": results,
+        "dedup_anchors": dedup_anchors,
+        "protocol_name": protocol_name,
+    }
 
 
 # ---------------------------------------------------------------------------

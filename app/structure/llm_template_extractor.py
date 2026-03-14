@@ -14,11 +14,16 @@ document types produce different prompts.  Zero hardcoding.
 
 Batching: multiple instances per LLM call (default 3) to reduce call count.
 A 450-page doc with 3-page template = 150 instances → ~50 LLM calls.
+
+Reliability: failed batches are retried up to MAX_RETRIES times with
+exponential backoff (2s, 4s, 8s).  If a batch still fails, it is split
+into individual instances and each is retried separately.
 """
 from __future__ import annotations
 
 import json
 import logging
+import time
 from dataclasses import replace
 from uuid import uuid4
 
@@ -31,6 +36,14 @@ from app.rra.entity_resolver import PIIRecord
 from app.structure.document_schema import DocumentSchema
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Retry / reliability constants
+# ---------------------------------------------------------------------------
+
+MAX_RETRIES = 3
+RETRY_BACKOFF_SECONDS = [2, 4, 8]
+EXTRACTION_TIMEOUT_S = 120
 
 # ---------------------------------------------------------------------------
 # Entity type → PIIRecord field mapping
@@ -104,12 +117,20 @@ class LLMTemplateExtractor:
         page_texts: dict[int, str],
         doc_id: str,
         total_pages: int,
+        *,
+        active_anchors: list[str] | None = None,
     ) -> list[PIIRecord]:
         """Extract PII from all template instances in the document.
 
         Returns one PIIRecord per unique individual with all fields populated.
         Empty list if template is missing or all extractions fail.
-        Deduplicates across all batches (same name = same person).
+        Deduplicates across all batches using configurable anchors.
+
+        Parameters
+        ----------
+        active_anchors:
+            Dedup anchor names from protocol config (e.g. ``["ssn", "email"]``).
+            Passed through to ``_deduplicate_records``.
         """
         if not schema.template or schema.template.pages_per_instance < 2:
             return []
@@ -126,17 +147,25 @@ class LLMTemplateExtractor:
         else:
             instances = template.get_instance_pages(total_pages)
 
+        # Unload unused models to free VRAM before heavy extraction
+        _unload_unused_models(self.client)
+
         if self.batch_size > 1 and len(instances) > 1:
-            records = self._extract_batched(
+            records, retries, failures = self._extract_batched(
                 schema, template, instances, page_texts, doc_id,
             )
         else:
-            records = self._extract_sequential(
+            records, retries, failures = self._extract_sequential(
                 schema, template, instances, page_texts, doc_id,
             )
 
+        logger.info(
+            "Extracted %d/%d instances for %s, %d retries, %d permanent failures",
+            len(records), len(instances), doc_id, retries, failures,
+        )
+
         # Deduplicate across all batches
-        return _deduplicate_records(records)
+        return _deduplicate_records(records, active_anchors=active_anchors)
 
     def _extract_sequential(
         self,
@@ -145,9 +174,14 @@ class LLMTemplateExtractor:
         instances: list[list[int]],
         page_texts: dict[int, str],
         doc_id: str,
-    ) -> list[PIIRecord]:
-        """Extract one instance at a time."""
+    ) -> tuple[list[PIIRecord], int, int]:
+        """Extract one instance at a time.
+
+        Returns (records, total_retries, permanent_failures).
+        """
         records: list[PIIRecord] = []
+        total_retries = 0
+        permanent_failures = 0
 
         for idx, instance_pages in enumerate(instances):
             texts = [
@@ -164,24 +198,42 @@ class LLMTemplateExtractor:
                 document_type=schema.document_type,
             )
 
-            try:
-                response = self.client.generate(
-                    prompt,
-                    system="You extract personal information from documents. "
-                    "Respond ONLY with valid JSON.",
-                    use_case="template_extraction",
-                    document_id=doc_id,
-                )
-                record = self._parse_extraction(response, doc_id, instance_pages)
-                if record is not None:
-                    records.append(record)
-            except Exception:
-                logger.warning(
-                    "LLM extraction failed for instance %d of %s",
-                    idx, doc_id, exc_info=True,
-                )
+            record = None
+            for attempt in range(MAX_RETRIES):
+                try:
+                    response = self.client.generate(
+                        prompt,
+                        system="You extract personal information from documents. "
+                        "Respond ONLY with valid JSON.",
+                        use_case="template_extraction",
+                        document_id=doc_id,
+                    )
+                    record = self._parse_extraction(response, doc_id, instance_pages)
+                    if record is not None:
+                        break
+                    # Parsed OK but no person found — not a retry-able error
+                    break
+                except Exception:
+                    if attempt < MAX_RETRIES - 1:
+                        backoff = RETRY_BACKOFF_SECONDS[min(attempt, len(RETRY_BACKOFF_SECONDS) - 1)]
+                        logger.warning(
+                            "LLM extraction attempt %d/%d failed for instance %d of %s, "
+                            "retrying in %ds",
+                            attempt + 1, MAX_RETRIES, idx, doc_id, backoff,
+                        )
+                        total_retries += 1
+                        time.sleep(backoff)
+                    else:
+                        logger.warning(
+                            "LLM extraction permanently failed for instance %d of %s",
+                            idx, doc_id, exc_info=True,
+                        )
+                        permanent_failures += 1
 
-        return records
+            if record is not None:
+                records.append(record)
+
+        return records, total_retries, permanent_failures
 
     def _extract_batched(
         self,
@@ -190,9 +242,19 @@ class LLMTemplateExtractor:
         instances: list[list[int]],
         page_texts: dict[int, str],
         doc_id: str,
-    ) -> list[PIIRecord]:
-        """Extract multiple instances per LLM call."""
+    ) -> tuple[list[PIIRecord], int, int]:
+        """Extract multiple instances per LLM call with retry and split-to-individual.
+
+        Returns (records, total_retries, permanent_failures).
+
+        Retry strategy:
+        1. Try the batch up to MAX_RETRIES times with exponential backoff.
+        2. If all batch retries fail, split into individual instances and
+           retry each separately (also with retries).
+        """
         records: list[PIIRecord] = []
+        total_retries = 0
+        permanent_failures = 0
 
         for batch_start in range(0, len(instances), self.batch_size):
             batch_instances = instances[batch_start:batch_start + self.batch_size]
@@ -216,36 +278,63 @@ class LLMTemplateExtractor:
                 document_type=schema.document_type,
             )
 
-            try:
-                response = self.client.generate(
-                    prompt,
-                    system="You extract personal information from documents. "
-                    "Respond ONLY with valid JSON.",
-                    use_case="template_extraction_batch",
-                    document_id=doc_id,
-                )
-                batch_records = self._parse_batch_extraction(
-                    response, doc_id, batch_instances,
-                )
-                records.extend(batch_records)
-            except Exception:
-                logger.warning(
-                    "Batch LLM extraction failed at offset %d of %s, "
-                    "falling back to sequential",
-                    batch_start, doc_id, exc_info=True,
-                )
-                # Fallback: try sequential for this batch
-                for i, instance_pages in enumerate(batch_instances):
-                    texts = batch_texts[i]
-                    if not any(t.strip() for t in texts):
-                        continue
-                    try:
-                        single_prompt = build_extraction_prompt(
-                            page_texts=texts,
-                            page_roles=template.page_roles,
-                            instance_index=batch_start + i,
-                            document_type=schema.document_type,
+            # --- Retry the batch ---
+            batch_succeeded = False
+            for attempt in range(MAX_RETRIES):
+                try:
+                    response = self.client.generate(
+                        prompt,
+                        system="You extract personal information from documents. "
+                        "Respond ONLY with valid JSON.",
+                        use_case="template_extraction_batch",
+                        document_id=doc_id,
+                    )
+                    batch_records = self._parse_batch_extraction(
+                        response, doc_id, batch_instances,
+                    )
+                    if batch_records:
+                        records.extend(batch_records)
+                        batch_succeeded = True
+                        break
+                    # Parsed OK but empty — not retry-able
+                    batch_succeeded = True
+                    break
+                except Exception:
+                    if attempt < MAX_RETRIES - 1:
+                        backoff = RETRY_BACKOFF_SECONDS[min(attempt, len(RETRY_BACKOFF_SECONDS) - 1)]
+                        logger.warning(
+                            "Batch extraction attempt %d/%d failed at offset %d of %s, "
+                            "retrying in %ds",
+                            attempt + 1, MAX_RETRIES, batch_start, doc_id, backoff,
                         )
+                        total_retries += 1
+                        time.sleep(backoff)
+                    else:
+                        logger.warning(
+                            "Batch extraction failed %d times at offset %d of %s, "
+                            "splitting to individual instances",
+                            MAX_RETRIES, batch_start, doc_id,
+                        )
+
+            if batch_succeeded:
+                continue
+
+            # --- Split to individual instances ---
+            for i, instance_pages in enumerate(batch_instances):
+                texts_single = batch_texts[i]
+                if not any(t.strip() for t in texts_single):
+                    continue
+
+                single_prompt = build_extraction_prompt(
+                    page_texts=texts_single,
+                    page_roles=template.page_roles,
+                    instance_index=batch_start + i,
+                    document_type=schema.document_type,
+                )
+
+                rec = None
+                for attempt in range(MAX_RETRIES):
+                    try:
                         resp = self.client.generate(
                             single_prompt,
                             system="You extract personal information from documents. "
@@ -255,11 +344,20 @@ class LLMTemplateExtractor:
                         )
                         rec = self._parse_extraction(resp, doc_id, instance_pages)
                         if rec is not None:
-                            records.append(rec)
+                            break
+                        break  # parsed OK, no person
                     except Exception:
-                        continue
+                        if attempt < MAX_RETRIES - 1:
+                            backoff = RETRY_BACKOFF_SECONDS[min(attempt, len(RETRY_BACKOFF_SECONDS) - 1)]
+                            total_retries += 1
+                            time.sleep(backoff)
+                        else:
+                            permanent_failures += 1
 
-        return records
+                if rec is not None:
+                    records.append(rec)
+
+        return records, total_retries, permanent_failures
 
     # ------------------------------------------------------------------
     # Parsing
@@ -554,20 +652,66 @@ class LLMTemplateExtractor:
 # ---------------------------------------------------------------------------
 
 
+def _build_anchor_key(
+    rec: PIIRecord,
+    active_anchors: list[str] | None,
+) -> str | tuple:
+    """Build a merge key from the record based on active dedup anchors.
+
+    Priority order (first match wins):
+    1. ``"ssn"`` + record has government_id → key includes government_id
+    2. ``"name_dob"`` + record has name + dob → key = (name, dob)
+    3. ``"email"`` + record has email → key includes email
+    4. ``"phone"`` + record has phone → key includes phone
+    5. ``"name_address"`` + record has name + address → key = (name, address)
+    6. Fallback: (name, page_range) — instance-aware, never cross-merges
+    """
+    name_norm = " ".join(rec.raw_name.lower().split()) if rec.raw_name else ""
+    if not name_norm:
+        return ("", rec.page_range or "")
+
+    if active_anchors is None:
+        # Default: instance-aware (backward compatible)
+        return (name_norm, rec.page_range or "")
+
+    anchors = set(a.lower().strip() for a in active_anchors)
+
+    if "ssn" in anchors and rec.raw_government_id:
+        gov_norm = rec.raw_government_id.strip().upper().replace(" ", "")
+        return ("gov", gov_norm)
+
+    if "name_dob" in anchors and rec.raw_dob:
+        return ("name_dob", name_norm, rec.raw_dob.strip().lower())
+
+    if "email" in anchors and rec.raw_email:
+        return ("email", rec.raw_email.strip().lower())
+
+    if "phone" in anchors and rec.raw_phone:
+        return ("phone", rec.raw_phone.strip())
+
+    if "name_address" in anchors and rec.raw_address:
+        addr_str = str(rec.raw_address).lower()
+        return ("name_addr", name_norm, addr_str)
+
+    # Fallback: instance-aware
+    return (name_norm, rec.page_range or "")
+
+
 def _deduplicate_records(
     records: list[PIIRecord],
     *,
     instance_aware: bool = True,
+    active_anchors: list[str] | None = None,
 ) -> list[PIIRecord]:
-    """Deduplicate PIIRecords, optionally respecting template instance boundaries.
+    """Deduplicate PIIRecords using configurable anchor strategy.
 
-    When ``instance_aware=True`` (default, for template documents):
-        Key = (normalized_name, page_range).  Records from DIFFERENT template
-        instances (different page_range) are NEVER merged, even if names match.
-        Each template instance boundary = one unique person.
+    When ``active_anchors`` is provided (from protocol config), records are
+    merged when they share the anchor value (e.g., same government ID).
+    Page ranges are concatenated for lineage.
 
-    When ``instance_aware=False`` (for tabular/non-template documents):
-        Key = normalized_name only.  Same name across pages = same person.
+    When ``active_anchors`` is ``None`` (default):
+        - ``instance_aware=True``: Key = (name, page_range) — template docs
+        - ``instance_aware=False``: Key = name only — tabular docs
 
     Within the same key, merges fields: keeps the most-populated record,
     fills in any gaps from duplicates.  Combines entity_types_found.
@@ -575,17 +719,21 @@ def _deduplicate_records(
     if not records:
         return records
 
-    seen: dict[str | tuple[str, str], PIIRecord] = {}
+    seen: dict[str | tuple, PIIRecord] = {}
 
     for rec in records:
         if not rec.raw_name:
             continue
-        name_norm = " ".join(rec.raw_name.lower().split())
-        key: str | tuple[str, str]
-        if instance_aware:
-            key = (name_norm, rec.page_range or "")
+
+        if active_anchors is not None:
+            key = _build_anchor_key(rec, active_anchors)
         else:
-            key = name_norm
+            name_norm = " ".join(rec.raw_name.lower().split())
+            if instance_aware:
+                key = (name_norm, rec.page_range or "")
+            else:
+                key = name_norm
+
         if key not in seen:
             seen[key] = rec
             continue
@@ -617,7 +765,7 @@ def _deduplicate_records(
         if not base.raw_phone and donor.raw_phone:
             merged_kwargs["raw_phone"] = donor.raw_phone
 
-        # Combine page ranges
+        # Combine page ranges (concatenate for lineage)
         existing_ranges = set(base.page_range.split(", ")) if base.page_range else set()
         donor_ranges = set(donor.page_range.split(", ")) if donor.page_range else set()
         all_ranges = existing_ranges | donor_ranges
@@ -638,7 +786,13 @@ def _deduplicate_records(
 
 
 def _parse_json(text: str) -> dict | list | None:
-    """Parse JSON from LLM response, stripping markdown fences."""
+    """Parse JSON from LLM response, handling markdown fences and truncation.
+
+    Handles common LLM response issues:
+    - Markdown ````` ``` ````` fences around JSON
+    - "Extra data" errors (multiple JSON objects concatenated)
+    - Truncated JSON (attempts to close open brackets)
+    """
     cleaned = text.strip()
     if cleaned.startswith("```"):
         lines = cleaned.split("\n")
@@ -648,12 +802,89 @@ def _parse_json(text: str) -> dict | list | None:
     try:
         return json.loads(cleaned)
     except json.JSONDecodeError:
-        # Try to find JSON within the response
-        for start_char in ("{", "["):
-            idx = cleaned.find(start_char)
-            if idx >= 0:
+        pass
+
+    # Try to find JSON within the response
+    for start_char in ("[", "{"):
+        idx = cleaned.find(start_char)
+        if idx < 0:
+            continue
+        fragment = cleaned[idx:]
+        try:
+            return json.loads(fragment)
+        except json.JSONDecodeError as e:
+            # "Extra data" — multiple JSON values concatenated.
+            # Use json.JSONDecoder to parse just the first valid value.
+            if "Extra data" in str(e):
                 try:
-                    return json.loads(cleaned[idx:])
+                    decoder = json.JSONDecoder()
+                    result, _ = decoder.raw_decode(fragment)
+                    return result
                 except json.JSONDecodeError:
-                    continue
+                    pass
+
+            # Truncated JSON — try to close open brackets
+            result = _try_close_truncated(fragment)
+            if result is not None:
+                return result
+
+    return None
+
+
+def _try_close_truncated(text: str) -> dict | list | None:
+    """Attempt to close truncated JSON by adding missing brackets/braces."""
+    # Count open vs close brackets
+    open_brackets = text.count("[") - text.count("]")
+    open_braces = text.count("{") - text.count("}")
+
+    if open_brackets <= 0 and open_braces <= 0:
         return None
+
+    # Remove trailing comma if present
+    attempt = text.rstrip().rstrip(",")
+
+    # Close in reverse order (braces first, then brackets)
+    attempt += "}" * max(0, open_braces) + "]" * max(0, open_brackets)
+
+    try:
+        return json.loads(attempt)
+    except json.JSONDecodeError:
+        # Try more aggressively: truncate to last complete object
+        if text.startswith("["):
+            # Find the last complete "}" before the truncation
+            last_brace = text.rfind("}")
+            if last_brace > 0:
+                candidate = text[:last_brace + 1] + "]"
+                try:
+                    return json.loads(candidate)
+                except json.JSONDecodeError:
+                    pass
+        return None
+
+
+def _unload_unused_models(client: OllamaClient) -> None:
+    """Unload non-active models from Ollama to free VRAM.
+
+    Posts keep_alive=0 to tell Ollama to release the model from memory
+    for any model that is NOT the client's active model.
+    """
+    try:
+        import httpx
+        resp = httpx.get(f"{client.base_url}/api/tags", timeout=10)
+        if resp.status_code != 200:
+            return
+        models = resp.json().get("models", [])
+        for m in models:
+            model_name = m.get("name", "")
+            if model_name and model_name != client.model:
+                try:
+                    httpx.post(
+                        f"{client.base_url}/api/generate",
+                        json={"model": model_name, "keep_alive": 0},
+                        timeout=10,
+                    )
+                    logger.debug("Unloaded model %s to free VRAM", model_name)
+                except Exception:
+                    pass
+    except Exception:
+        pass  # best-effort

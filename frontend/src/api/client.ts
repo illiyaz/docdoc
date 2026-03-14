@@ -842,10 +842,21 @@ export interface ExtractionPreview {
   sample_rows?: Record<string, string>[]
 }
 
-export async function getAnalysisResults(jobId: string): Promise<AnalysisReviewDetail[]> {
+export interface AnalysisResults {
+  documents: AnalysisReviewDetail[]
+  dedup_anchors: string[] | null
+  protocol_name: string
+}
+
+export async function getAnalysisResults(jobId: string): Promise<AnalysisResults> {
   const res = await fetch(`${BASE_URL}/jobs/${jobId}/analysis`)
   if (!res.ok) throw new Error(`Failed to load analysis: ${res.status}`)
-  return res.json()
+  const data = await res.json()
+  // Handle backward-compatible array response (pre-upgrade)
+  if (Array.isArray(data)) {
+    return { documents: data, dedup_anchors: null, protocol_name: "" }
+  }
+  return data
 }
 
 export interface DetectionDecision {

@@ -1024,6 +1024,13 @@ def extract_generator(
 
     target_entities = _resolve_target_entities(protocol_config, protocol_id)
 
+    # --- Resolve dedup anchors from protocol config ---
+    dedup_anchors: list[str] | None = None
+    if protocol_config and isinstance(protocol_config, dict):
+        dedup_anchors = protocol_config.get("dedup_anchors")
+        if dedup_anchors is not None and not isinstance(dedup_anchors, list):
+            dedup_anchors = None
+
     # --- Load approved documents ---
     approved_docs = (
         db.execute(
@@ -1251,7 +1258,7 @@ def extract_generator(
                                 page_texts_tab[pg] = ""
                             page_texts_tab[pg] += b.text + "\n"
 
-                        client = OllamaClient(db_session=db)
+                        client = OllamaClient(db_session=db, timeout_s=120)
                         text_extractor = LLMTemplateExtractor(client, batch_size=batch_size)
                         table_records = text_extractor.extract_table_pages(
                             schema, page_texts_tab, str(doc.id),
@@ -1282,10 +1289,11 @@ def extract_generator(
                                 page_texts[pg] = ""
                             page_texts[pg] += b.text + "\n"
 
-                        client = OllamaClient(db_session=db)
+                        client = OllamaClient(db_session=db, timeout_s=120)
                         text_extractor = LLMTemplateExtractor(client, batch_size=batch_size)
                         llm_records = text_extractor.extract_all_instances(
                             schema, page_texts, str(doc.id), total_pg,
+                            active_anchors=dedup_anchors,
                         )
 
                         if llm_records:
@@ -1354,7 +1362,7 @@ def extract_generator(
         from app.rra.entity_resolver import EntityResolver
 
         resolver = EntityResolver()
-        groups = resolver.resolve(all_records)
+        groups = resolver.resolve(all_records, active_anchors=dedup_anchors)
 
         yield _sse({
             "stage": "resolution", "status": "complete",

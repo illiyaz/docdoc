@@ -1192,10 +1192,13 @@ function PipelineProgressView({ jobId }: { jobId: string }) {
 
 function AnalysisReviewPanel({ jobId, onExtractionComplete }: { jobId: string; onExtractionComplete: () => void }) {
   const queryClient = useQueryClient()
-  const { data: reviews, isLoading } = useQuery({
+  const { data: analysisData, isLoading } = useQuery({
     queryKey: ["analysis-reviews", jobId],
     queryFn: () => getAnalysisResults(jobId),
   })
+  const reviews = analysisData?.documents
+  const dedupAnchors = analysisData?.dedup_anchors
+  const protocolName = analysisData?.protocol_name
   const [isExtracting, setIsExtracting] = useState(false)
   const [extractStages, setExtractStages] = useState<Record<string, { status: string; message: string }>>({})
   const [reviewError, setReviewError] = useState<string | null>(null)
@@ -1379,6 +1382,33 @@ function AnalysisReviewPanel({ jobId, onExtractionComplete }: { jobId: string; o
             </button>
           )}
         </div>
+      </div>
+
+      {/* Deduplication Strategy */}
+      <div className="border rounded-md p-3 space-y-1.5 bg-muted/30">
+        <p className="text-xs font-medium">Deduplication Strategy {protocolName ? `(${protocolName})` : ""}</p>
+        {dedupAnchors ? (
+          <>
+            <p className="text-xs text-muted-foreground">Records will be merged when they share:</p>
+            <div className="space-y-1">
+              {[
+                { key: "ssn", label: "Government ID (SSN / NI Number)" },
+                { key: "email", label: "Email address" },
+                { key: "phone", label: "Phone number" },
+                { key: "name_dob", label: "Name + Date of Birth" },
+                { key: "name_address", label: "Name + Address" },
+              ].map(({ key, label }) => (
+                <label key={key} className="flex items-center gap-2 text-xs">
+                  <input type="checkbox" checked={dedupAnchors.includes(key)} disabled className="h-3 w-3" />
+                  <span className={dedupAnchors.includes(key) ? "" : "text-muted-foreground"}>{label}</span>
+                </label>
+              ))}
+            </div>
+            <p className="text-xs text-muted-foreground italic">Edit in Protocols tab</p>
+          </>
+        ) : (
+          <p className="text-xs text-muted-foreground">No deduplication strategy configured. Using defaults (all anchors).</p>
+        )}
       </div>
 
       {reviews.map((doc) => (

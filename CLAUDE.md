@@ -346,7 +346,13 @@ These are detailed in [docs/SCHEMA.md](docs/SCHEMA.md). Summary:
 
 **CRITICAL Bugfix: Cross-instance dedup over-merging** — 149 unique individuals were being collapsed to 28 rows. Root cause: `_deduplicate_records()` keyed on name only, merging people from DIFFERENT template instances (e.g., "P Davie" on pages 1-3 merged with "P Davies" on pages 4-6). Fix: (1) `_deduplicate_records()` now keys on `(name, page_range)` for template docs (`instance_aware=True`), keeping `name`-only for tables (`instance_aware=False`). (2) `EntityResolver.build_confidence()` returns 0.0 for same-document records with different `page_range` (cross-instance merge prevention). Each template instance = one unique person. 7 net new tests.
 
-**2145 tests passing after Steps 1–20.**
+**Batch Reliability + Configurable Dedup + Dedup UI** (production fixes):
+  - Retry: MAX_RETRIES=3, backoff 2s/4s/8s, split-to-individual on batch failure, unload_unused_models(), timeout_override=120s
+  - Configurable dedup: _build_anchor_key() with 5 anchors (ssn, name_dob, email, phone, name_address), wired from protocol config
+  - Analysis API returns {documents, dedup_anchors, protocol_name}, frontend shows read-only anchor checkboxes
+  - `tests/test_batch_reliability.py`: 30 new tests
+
+**2177 tests passing after Steps 1–20.**
 
 See [docs/PLAN.md](docs/PLAN.md) for active steps and [docs/PLAN_COMPLETED.md](docs/PLAN_COMPLETED.md) for completed reference.
 

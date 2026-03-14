@@ -1577,7 +1577,10 @@ class TestAnalysisReview:
         db_session.commit()
         resp = client.get(f"/api/jobs/{run.id}/analysis")
         assert resp.status_code == 200
-        assert resp.json() == []
+        data = resp.json()
+        assert data["documents"] == []
+        assert data["dedup_anchors"] is None
+        assert data["protocol_name"] == ""
 
     def test_get_analysis_with_document(self, client: TestClient, db_session: Session) -> None:
         """GET /jobs/{id}/analysis returns document analysis details."""
@@ -1614,10 +1617,11 @@ class TestAnalysisReview:
         resp = client.get(f"/api/jobs/{run.id}/analysis")
         assert resp.status_code == 200
         data = resp.json()
-        assert len(data) == 1
-        assert data[0]["file_name"] == "test.csv"
-        assert data[0]["review_status"] == "pending_review"
-        assert data[0]["sample_extraction_count"] == 5
+        docs = data["documents"]
+        assert len(docs) == 1
+        assert docs[0]["file_name"] == "test.csv"
+        assert docs[0]["review_status"] == "pending_review"
+        assert docs[0]["sample_extraction_count"] == 5
 
     def test_approve_document(self, client: TestClient, db_session: Session) -> None:
         """POST /jobs/{id}/documents/{doc_id}/approve transitions review to approved."""
