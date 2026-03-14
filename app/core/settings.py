@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     upload_max_total_size_mb: int = Field(default=500, alias="UPLOAD_MAX_TOTAL_SIZE_MB")
     llm_assist_enabled: bool = Field(default=False, alias="LLM_ASSIST_ENABLED")
     ollama_url: str = Field(default="http://localhost:11434", alias="OLLAMA_URL")
-    ollama_model: str = Field(default="qwen2.5:7b", alias="OLLAMA_MODEL")
+    ollama_model: str = Field(default="llama3.2-vision:latest", alias="OLLAMA_MODEL")
     ollama_timeout_s: int = Field(default=60, alias="OLLAMA_TIMEOUT_S")
     ollama_vision_model: str = Field(default="llama3.2-vision:latest", alias="OLLAMA_VISION_MODEL")
     use_vision_extraction: bool = Field(default=True, alias="USE_VISION_EXTRACTION")

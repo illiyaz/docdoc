@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from unittest.mock import MagicMock
 
 import pytest
@@ -576,3 +577,212 @@ class TestLLMEntityAnalyzer:
 
         result = analyzer._parse_response(response, "doc-0")
         assert result.entity_groups[0].role == "unknown"
+
+
+# ---------------------------------------------------------------------------
+# Background Extraction Tests
+# ---------------------------------------------------------------------------
+
+class TestSerializeDeserializePIIRecord:
+    """Tests for PIIRecord round-trip serialization used in background extraction."""
+
+    def test_serialize_roundtrip(self):
+        from app.rra.entity_resolver import PIIRecord
+        from app.pipeline.two_phase import _serialize_pii_record, _deserialize_pii_record
+
+        rec = PIIRecord(
+            record_id="r1",
+            entity_type="PERSON",
+            normalized_value="john doe",
+            raw_name="John Doe",
+            raw_email="john@example.com",
+            source_document_id="doc-1",
+            page_or_sheet=3,
+            page_range="1-5",
+            entity_types_found=("PERSON", "EMAIL"),
+            validation_flags=("name_verified",),
+        )
+        serialized = _serialize_pii_record(rec)
+        assert isinstance(serialized, dict)
+        assert serialized["record_id"] == "r1"
+        assert isinstance(serialized["entity_types_found"], list)
+
+        restored = _deserialize_pii_record(serialized)
+        assert restored.record_id == rec.record_id
+        assert restored.raw_name == rec.raw_name
+        assert restored.entity_types_found == ("PERSON", "EMAIL")
+        assert restored.validation_flags == ("name_verified",)
+
+    def test_serialize_empty_tuples(self):
+        from app.rra.entity_resolver import PIIRecord
+        from app.pipeline.two_phase import _serialize_pii_record, _deserialize_pii_record
+
+        rec = PIIRecord(record_id="r2", entity_type="SSN", normalized_value="xxx")
+        serialized = _serialize_pii_record(rec)
+        assert serialized["entity_types_found"] == []
+        restored = _deserialize_pii_record(serialized)
+        assert restored.entity_types_found == ()
+
+
+class TestUpdateExtractionProgress:
+    """Tests for _update_extraction_progress() writing to run.metrics."""
+
+    def test_progress_written_to_metrics(self):
+        from app.pipeline.two_phase import _update_extraction_progress
+        from unittest.mock import MagicMock, patch
+
+        db = MagicMock()
+        run = MagicMock()
+        run.metrics = {}
+
+        with patch("app.pipeline.two_phase.flag_modified"):
+            _update_extraction_progress(
+                db, run,
+                stage="detection",
+                message="Scanning doc 1/3...",
+                completed_doc_ids=["doc-a"],
+                total_docs=3,
+                current_doc=1,
+                records_found=5,
+            )
+
+        assert run.metrics["extraction_progress"]["stage"] == "detection"
+        assert run.metrics["extraction_progress"]["message"] == "Scanning doc 1/3..."
+        assert run.metrics["extraction_progress"]["completed_doc_ids"] == ["doc-a"]
+        assert run.metrics["extraction_progress"]["records_found"] == 5
+        assert "heartbeat" in run.metrics["extraction_progress"]
+        db.commit.assert_called_once()
+
+    def test_progress_preserves_existing_metrics(self):
+        from app.pipeline.two_phase import _update_extraction_progress
+        from unittest.mock import MagicMock, patch
+
+        db = MagicMock()
+        run = MagicMock()
+        run.metrics = {"some_other_key": "value"}
+
+        with patch("app.pipeline.two_phase.flag_modified"):
+            _update_extraction_progress(
+                db, run, stage="resolution", message="Resolving...",
+                total_docs=2, current_doc=2, records_found=10,
+            )
+
+        assert run.metrics["some_other_key"] == "value"
+        assert run.metrics["extraction_progress"]["stage"] == "resolution"
+
+    def test_progress_with_result(self):
+        from app.pipeline.two_phase import _update_extraction_progress
+        from unittest.mock import MagicMock, patch
+
+        db = MagicMock()
+        run = MagicMock()
+        run.metrics = {}
+
+        result_data = {"job_id": "abc", "status": "COMPLETE", "subjects_found": 10}
+        with patch("app.pipeline.two_phase.flag_modified"):
+            _update_extraction_progress(
+                db, run, stage="complete", message="Done",
+                total_docs=1, current_doc=1, records_found=10,
+                result=result_data,
+            )
+
+        assert run.metrics["extraction_progress"]["result"] == result_data
+
+
+class TestExtractGeneratorRelay:
+    """Tests for the SSE relay extract_generator()."""
+
+    def test_generator_rejects_wrong_pipeline_mode(self):
+        """extract_generator yields error for non-two_phase jobs."""
+        from app.pipeline.two_phase import extract_generator
+        from unittest.mock import MagicMock, patch
+
+        mock_db = MagicMock()
+        mock_run = MagicMock()
+        mock_run.pipeline_mode = "full"
+        mock_run.status = "analyzed"
+
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = mock_run
+        mock_db.execute.return_value = mock_result
+
+        registry = MagicMock()
+        events = list(extract_generator("00000000-0000-0000-0000-000000000001", mock_db, registry))
+        assert len(events) == 1
+        assert "not a two-phase pipeline" in events[0]
+
+    def test_generator_accepts_extracting_status_for_reconnect(self):
+        """extract_generator does not reject 'extracting' status (reconnect)."""
+        from app.pipeline.two_phase import extract_generator, _extraction_threads
+        from unittest.mock import MagicMock, patch
+        import threading
+
+        job_id = "00000000-0000-0000-0000-000000000002"
+
+        mock_db = MagicMock()
+        mock_run = MagicMock()
+        mock_run.pipeline_mode = "two_phase"
+        mock_run.status = "extracting"
+        mock_run.config_snapshot = {"protocol_id": "hipaa"}
+        mock_run.metrics = {"extraction_progress": {
+            "stage": "complete",
+            "message": "Extraction complete",
+            "heartbeat": datetime.now(timezone.utc).isoformat(),
+            "result": {"job_id": job_id, "status": "COMPLETE", "subjects_found": 5, "notification_required": 2, "export_count": 5},
+        }}
+
+        call_count = [0]
+
+        def _mock_execute(stmt):
+            result = MagicMock()
+            # After first call, set status to completed so loop exits
+            if call_count[0] > 0:
+                mock_run.status = "completed"
+            call_count[0] += 1
+            result.scalar_one_or_none.return_value = mock_run
+            return result
+
+        mock_db.execute.side_effect = _mock_execute
+        mock_db.expire_all = MagicMock()
+
+        # Put a mock alive thread so _maybe_launch doesn't try to start one
+        mock_thread = MagicMock()
+        mock_thread.is_alive.return_value = True
+        _extraction_threads[job_id] = mock_thread
+
+        registry = MagicMock()
+
+        with patch("app.pipeline.two_phase.time.sleep"):
+            events = list(extract_generator(job_id, mock_db, registry))
+
+        # Should not get an error about status
+        error_events = [e for e in events if "error" in e and "expected" in e]
+        assert len(error_events) == 0
+
+        # Should get a complete event
+        complete_events = [e for e in events if "COMPLETE" in e]
+        assert len(complete_events) >= 1
+
+        # Cleanup
+        _extraction_threads.pop(job_id, None)
+
+    def test_completed_job_returns_result_immediately(self):
+        """If job is already completed, return result immediately without polling."""
+        from app.pipeline.two_phase import extract_generator
+
+        mock_db = MagicMock()
+        mock_run = MagicMock()
+        mock_run.pipeline_mode = "two_phase"
+        mock_run.status = "completed"
+        mock_run.metrics = {"extraction_progress": {
+            "result": {"job_id": "test", "status": "COMPLETE", "subjects_found": 3},
+        }}
+
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = mock_run
+        mock_db.execute.return_value = mock_result
+
+        registry = MagicMock()
+        events = list(extract_generator("00000000-0000-0000-0000-000000000003", mock_db, registry))
+        assert len(events) == 1
+        assert "COMPLETE" in events[0]

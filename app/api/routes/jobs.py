@@ -733,9 +733,10 @@ def extract_stream(
     job_id: str,
     registry: ProtocolRegistry = Depends(get_protocol_registry),
 ):
-    """Run the extraction phase for approved documents with SSE streaming.
+    """Run or reconnect to the extraction phase with SSE streaming.
 
-    Requires the job to have status='analyzed' and pipeline_mode='two_phase'.
+    Accepts status='analyzed' (start new) or 'extracting' (reconnect).
+    Extraction runs in a background thread; this endpoint polls progress.
     """
     from app.pipeline.two_phase import extract_generator
 

@@ -352,7 +352,20 @@ These are detailed in [docs/SCHEMA.md](docs/SCHEMA.md). Summary:
   - Analysis API returns {documents, dedup_anchors, protocol_name}, frontend shows read-only anchor checkboxes
   - `tests/test_batch_reliability.py`: 30 new tests
 
-**2177 tests passing after Steps 1–20.**
+**Background Extraction (SSE Decoupling)**:
+  - `run_extraction_background()` runs extraction in a daemon thread with its own DB session
+  - Per-doc commit: PIIRecords serialized to `Document.metadata_json["extracted_records"]` after each doc
+  - Progress written to `IngestionRun.metrics["extraction_progress"]` with heartbeat
+  - Resume support: completed_doc_ids tracked, skipped on re-launch; records reloaded from metadata_json
+  - Cancellation: background thread checks `run.status == "cancelled"` between docs
+  - `extract_generator()` rewritten as thin SSE relay polling metrics every 2s
+  - Accepts both `analyzed` (start) and `extracting` (reconnect) status
+  - Stale heartbeat detection (>60s) re-launches extraction thread with resume
+  - Frontend: `startExtractStreaming()` auto-reconnects on disconnect (max 60 retries, 2s delay)
+  - Frontend: "Reconnecting to extraction..." amber status indicator
+  - 8 new tests in `test_two_phase.py` (serialize/deserialize, progress, relay, reconnect)
+
+**2185 tests passing after Steps 1–20.**
 
 See [docs/PLAN.md](docs/PLAN.md) for active steps and [docs/PLAN_COMPLETED.md](docs/PLAN_COMPLETED.md) for completed reference.
 

@@ -119,6 +119,7 @@ class LLMTemplateExtractor:
         total_pages: int,
         *,
         active_anchors: list[str] | None = None,
+        progress_callback: "Callable[[int, int, int], None] | None" = None,
     ) -> list[PIIRecord]:
         """Extract PII from all template instances in the document.
 
@@ -131,6 +132,9 @@ class LLMTemplateExtractor:
         active_anchors:
             Dedup anchor names from protocol config (e.g. ``["ssn", "email"]``).
             Passed through to ``_deduplicate_records``.
+        progress_callback:
+            Called after each batch with ``(batch_index, total_batches, records_so_far)``.
+            Used by the background extraction thread to update heartbeat.
         """
         if not schema.template or schema.template.pages_per_instance < 2:
             return []
@@ -153,10 +157,12 @@ class LLMTemplateExtractor:
         if self.batch_size > 1 and len(instances) > 1:
             records, retries, failures = self._extract_batched(
                 schema, template, instances, page_texts, doc_id,
+                progress_callback=progress_callback,
             )
         else:
             records, retries, failures = self._extract_sequential(
                 schema, template, instances, page_texts, doc_id,
+                progress_callback=progress_callback,
             )
 
         logger.info(
@@ -174,6 +180,8 @@ class LLMTemplateExtractor:
         instances: list[list[int]],
         page_texts: dict[int, str],
         doc_id: str,
+        *,
+        progress_callback: "Callable[[int, int, int], None] | None" = None,
     ) -> tuple[list[PIIRecord], int, int]:
         """Extract one instance at a time.
 
@@ -233,6 +241,12 @@ class LLMTemplateExtractor:
             if record is not None:
                 records.append(record)
 
+            if progress_callback is not None:
+                try:
+                    progress_callback(idx + 1, len(instances), len(records))
+                except Exception:
+                    pass
+
         return records, total_retries, permanent_failures
 
     def _extract_batched(
@@ -242,6 +256,8 @@ class LLMTemplateExtractor:
         instances: list[list[int]],
         page_texts: dict[int, str],
         doc_id: str,
+        *,
+        progress_callback: "Callable[[int, int, int], None] | None" = None,
     ) -> tuple[list[PIIRecord], int, int]:
         """Extract multiple instances per LLM call with retry and split-to-individual.
 
@@ -255,6 +271,7 @@ class LLMTemplateExtractor:
         records: list[PIIRecord] = []
         total_retries = 0
         permanent_failures = 0
+        total_batches = (len(instances) + self.batch_size - 1) // self.batch_size
 
         for batch_start in range(0, len(instances), self.batch_size):
             batch_instances = instances[batch_start:batch_start + self.batch_size]
@@ -317,6 +334,12 @@ class LLMTemplateExtractor:
                         )
 
             if batch_succeeded:
+                if progress_callback is not None:
+                    batch_idx = batch_start // self.batch_size + 1
+                    try:
+                        progress_callback(batch_idx, total_batches, len(records))
+                    except Exception:
+                        pass
                 continue
 
             # --- Split to individual instances ---
@@ -356,6 +379,13 @@ class LLMTemplateExtractor:
 
                 if rec is not None:
                     records.append(rec)
+
+            if progress_callback is not None:
+                batch_idx = batch_start // self.batch_size + 1
+                try:
+                    progress_callback(batch_idx, total_batches, len(records))
+                except Exception:
+                    pass
 
         return records, total_retries, permanent_failures
 
@@ -502,6 +532,8 @@ class LLMTemplateExtractor:
         schema: DocumentSchema,
         page_texts: dict[int, str],
         doc_id: str,
+        *,
+        progress_callback: "Callable[[int, int, int], None] | None" = None,
     ) -> list[PIIRecord]:
         """Extract multiple individuals per page from tabular documents.
 
@@ -513,6 +545,7 @@ class LLMTemplateExtractor:
 
         all_records: list[PIIRecord] = []
         sorted_pages = sorted(page_texts.keys())
+        total_batches = (len(sorted_pages) + self.batch_size - 1) // self.batch_size
 
         for batch_start in range(0, len(sorted_pages), self.batch_size):
             batch_pages = sorted_pages[batch_start:batch_start + self.batch_size]
@@ -540,7 +573,13 @@ class LLMTemplateExtractor:
                     "Text table extraction failed for pages %s of %s",
                     batch_pages, doc_id, exc_info=True,
                 )
-                continue
+
+            if progress_callback is not None:
+                batch_idx = batch_start // self.batch_size + 1
+                try:
+                    progress_callback(batch_idx, total_batches, len(all_records))
+                except Exception:
+                    pass
 
         return _deduplicate_records(all_records, instance_aware=False)
 

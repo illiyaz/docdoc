@@ -12,9 +12,12 @@ Both generators follow the exact same SSE pattern as
 """
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
 import logging
+import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Generator
@@ -22,6 +25,7 @@ from uuid import UUID, uuid4
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.core.policies import StorageMode, StoragePolicyConfig
 from app.core.security import SecurityService
@@ -950,22 +954,645 @@ def analyze_generator(
 # Phase 2: Extract generator
 # ---------------------------------------------------------------------------
 
+def _serialize_pii_record(rec) -> dict:
+    """Serialize a PIIRecord dataclass to a JSON-safe dict."""
+    d = dataclasses.asdict(rec)
+    # Convert tuples to lists for JSON
+    for k, v in d.items():
+        if isinstance(v, tuple):
+            d[k] = list(v)
+    return d
+
+
+def _deserialize_pii_record(d: dict):
+    """Deserialize a dict back into a PIIRecord."""
+    from app.rra.entity_resolver import PIIRecord
+    # Convert lists back to tuples for tuple fields
+    for k in ("entity_types_found", "validation_flags"):
+        if k in d and isinstance(d[k], list):
+            d[k] = tuple(d[k])
+    return PIIRecord(**d)
+
+
+def _update_extraction_progress(
+    db: Session,
+    run: IngestionRun,
+    *,
+    stage: str,
+    message: str,
+    completed_doc_ids: list[str] | None = None,
+    total_docs: int = 0,
+    current_doc: int = 0,
+    records_found: int = 0,
+    detail: dict | None = None,
+    result: dict | None = None,
+) -> None:
+    """Write extraction progress into run.metrics and commit."""
+    metrics = dict(run.metrics or {})
+    progress = {
+        "stage": stage,
+        "message": message,
+        "heartbeat": datetime.now(timezone.utc).isoformat(),
+        "total_docs": total_docs,
+        "current_doc": current_doc,
+        "records_found": records_found,
+    }
+    if completed_doc_ids is not None:
+        progress["completed_doc_ids"] = completed_doc_ids
+    if detail is not None:
+        progress["detail"] = detail
+    if result is not None:
+        progress["result"] = result
+    metrics["extraction_progress"] = progress
+    run.metrics = metrics
+    # Force SQLAlchemy to detect the JSON mutation
+    flag_modified(run, "metrics")
+    db.commit()
+
+
+def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
+    """Run extraction in a background thread with its own DB session.
+
+    Progress is written to ``IngestionRun.metrics["extraction_progress"]``
+    after each document, allowing the SSE relay to poll and forward events.
+    Extracted records are persisted to ``Document.metadata_json["extracted_records"]``
+    after each document for crash-resume support.
+    """
+    from app.api.deps import _get_session_factory
+
+    db = _get_session_factory()()
+    run: IngestionRun | None = None
+
+    try:
+        job_uuid = UUID(job_id)
+        run = db.execute(
+            select(IngestionRun).where(IngestionRun.id == job_uuid)
+        ).scalar_one_or_none()
+
+        if run is None:
+            return
+
+        # --- Load protocol ---
+        config_snapshot = run.config_snapshot or {}
+        protocol_id = config_snapshot.get("protocol_id", "")
+        try:
+            protocol = registry.get(protocol_id)
+        except KeyError:
+            run.status = "failed"
+            run.error_summary = f"Protocol not found: {protocol_id!r}"
+            run.completed_at = datetime.now(timezone.utc)
+            db.commit()
+            return
+
+        # --- Load protocol config for entity filtering ---
+        protocol_config: dict | None = None
+        protocol_config_id = config_snapshot.get("protocol_config_id")
+        if protocol_config_id:
+            try:
+                from app.db.models import ProtocolConfig
+                pc = db.get(ProtocolConfig, UUID(protocol_config_id))
+                if pc is not None:
+                    protocol_config = pc.config_json
+            except Exception:
+                pass
+
+        target_entities = _resolve_target_entities(protocol_config, protocol_id)
+
+        # --- Resolve dedup anchors from protocol config ---
+        dedup_anchors: list[str] | None = None
+        if protocol_config and isinstance(protocol_config, dict):
+            dedup_anchors = protocol_config.get("dedup_anchors")
+            if dedup_anchors is not None and not isinstance(dedup_anchors, list):
+                dedup_anchors = None
+
+        # --- Load approved documents ---
+        approved_docs = (
+            db.execute(
+                select(Document).where(
+                    Document.ingestion_run_id == run.id,
+                    Document.analysis_phase_status == "approved",
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+        if not approved_docs:
+            run.status = "failed"
+            run.error_summary = "No approved documents found for extraction"
+            run.completed_at = datetime.now(timezone.utc)
+            db.commit()
+            return
+
+        # --- Resume support: load previously completed docs ---
+        existing_progress = (run.metrics or {}).get("extraction_progress", {})
+        completed_doc_ids: list[str] = list(existing_progress.get("completed_doc_ids", []))
+        completed_set = set(completed_doc_ids)
+
+        from app.rra.entity_resolver import PIIRecord
+
+        all_records: list[PIIRecord] = []
+
+        # Reload records from previously completed docs
+        for doc in approved_docs:
+            if str(doc.id) in completed_set:
+                stored = (doc.metadata_json or {}).get("extracted_records", [])
+                for rd in stored:
+                    all_records.append(_deserialize_pii_record(rd))
+
+        _update_extraction_progress(
+            db, run,
+            stage="detection", message="Starting PII detection...",
+            completed_doc_ids=completed_doc_ids,
+            total_docs=len(approved_docs), current_doc=len(completed_set),
+            records_found=len(all_records),
+            detail={"total": len(approved_docs), "current": len(completed_set), "status": "running"},
+        )
+
+        # --- Check cancellation helper ---
+        def _is_cancelled() -> bool:
+            db.expire(run)
+            return run.status == "cancelled"
+
+        from app.pii.presidio_engine import PresidioEngine
+        from app.readers.registry import get_reader
+
+        settings = get_settings()
+        engine = PresidioEngine()
+
+        schema_filter_cls = None
+        doc_understanding_cls = None
+        if settings.llm_assist_enabled:
+            try:
+                from app.pii.schema_filter import SchemaFilter as _SF
+                from app.structure.llm_document_understanding import LLMDocumentUnderstanding as _LDU
+                schema_filter_cls = _SF
+                doc_understanding_cls = _LDU
+            except Exception:
+                pass
+
+        # Build per-document selected entity types
+        doc_selected_types: dict[UUID, list[str] | None] = {}
+        for doc in approved_docs:
+            review = db.query(DocumentAnalysisReview).filter(
+                DocumentAnalysisReview.document_id == doc.id,
+                DocumentAnalysisReview.ingestion_run_id == run.id,
+            ).first()
+            if review and review.selected_entity_types:
+                doc_selected_types[doc.id] = review.selected_entity_types
+            else:
+                doc_selected_types[doc.id] = None
+
+        for i, doc in enumerate(approved_docs, 1):
+            if str(doc.id) in completed_set:
+                continue  # already extracted (resume)
+
+            if _is_cancelled():
+                return
+
+            _update_extraction_progress(
+                db, run,
+                stage="detection", message=f"Scanning document {i}/{len(approved_docs)}...",
+                completed_doc_ids=completed_doc_ids,
+                total_docs=len(approved_docs), current_doc=i,
+                records_found=len(all_records),
+                detail={"total": len(approved_docs), "current": i, "status": "running"},
+            )
+
+            try:
+                doc_targets = doc_selected_types.get(doc.id) or target_entities
+                reader = get_reader(doc.source_path)
+                blocks = reader.read()
+
+                schema = None
+                if doc_understanding_cls is not None and schema_filter_cls is not None:
+                    try:
+                        onset_page = doc.sample_onset_page or 0
+                        heuristic_doc_type = "unknown"
+                        if doc.structure_analysis and isinstance(doc.structure_analysis, dict):
+                            heuristic_doc_type = doc.structure_analysis.get("document_type", "unknown")
+                        doc_pages = set(b.page_or_sheet for b in blocks)
+                        total_pages = len(doc_pages)
+                        du = doc_understanding_cls(db_session=db)
+                        schema = du.understand(
+                            blocks,
+                            heuristic_doc_type=heuristic_doc_type,
+                            file_name=doc.file_name or "",
+                            file_type=doc.file_type or "",
+                            structure_class=doc.structure_class or "",
+                            onset_page=onset_page,
+                            document_id=str(doc.id),
+                            total_pages=total_pages,
+                            protocol_name=protocol_id,
+                            protocol_config=protocol_config,
+                        )
+                    except Exception:
+                        pass
+
+                is_template = (
+                    schema is not None
+                    and schema.template
+                    and schema.template.pages_per_instance >= 2
+                )
+                is_tabular = (
+                    schema is not None
+                    and schema.is_tabular
+                    and schema.records_per_page_estimate > 1
+                )
+                doc_pages = set(b.page_or_sheet for b in blocks)
+                total_pg = len(doc_pages)
+
+                records: list[PIIRecord] = []
+                extraction_path = "3"
+
+                batch_size = DEFAULT_EXTRACTION_BATCH_SIZE
+                base_key = protocol_id.lower().replace("-", "_").replace(" ", "_")
+                if base_key in PROTOCOL_LLM_CONFIG:
+                    batch_size = int(PROTOCOL_LLM_CONFIG[base_key].get(
+                        "extraction_batch_size", batch_size,
+                    ))
+
+                vision_model = None
+                vision_dpi = settings.vision_page_dpi
+                if protocol_config and isinstance(protocol_config, dict):
+                    vision_model = protocol_config.get("vision_model")
+                    if "vision_page_dpi" in protocol_config:
+                        vision_dpi = int(protocol_config["vision_page_dpi"])
+                if not vision_model and base_key in PROTOCOL_LLM_CONFIG:
+                    vision_model = PROTOCOL_LLM_CONFIG[base_key].get("vision_model")
+                    if not vision_dpi and "vision_page_dpi" in PROTOCOL_LLM_CONFIG[base_key]:
+                        vision_dpi = int(PROTOCOL_LLM_CONFIG[base_key]["vision_page_dpi"])
+
+                instances: list[list[int]] | None = None
+                if is_template:
+                    if doc.source_path:
+                        try:
+                            from app.pipeline.instance_detector import find_instance_boundaries as _find_bounds
+                            marker = getattr(schema.template, "instance_marker", None)
+                            instances = _find_bounds(doc.source_path, marker)
+                        except Exception:
+                            pass
+                    if not instances:
+                        page_texts_for_bounds: dict[int, str] = {}
+                        for b in blocks:
+                            pg = b.page_or_sheet
+                            if pg not in page_texts_for_bounds:
+                                page_texts_for_bounds[pg] = ""
+                            page_texts_for_bounds[pg] += b.text + "\n"
+                        if schema.template.instance_marker:
+                            instances = schema.template.find_instance_boundaries(page_texts_for_bounds)
+                        else:
+                            instances = schema.template.get_instance_pages(total_pg)
+
+                # Heartbeat callback — keeps SSE relay from thinking thread is dead
+                def _heartbeat_cb(batch_idx: int, total_batches: int, records_so_far: int) -> None:
+                    _update_extraction_progress(
+                        db, run,
+                        stage="detection",
+                        message=f"Extracting {doc.file_name}: batch {batch_idx}/{total_batches} ({records_so_far} records)",
+                        completed_doc_ids=completed_doc_ids,
+                        total_docs=len(approved_docs), current_doc=i,
+                        records_found=len(all_records) + records_so_far,
+                        detail={"total": len(approved_docs), "current": i, "status": "running",
+                                "batch": batch_idx, "total_batches": total_batches},
+                    )
+
+                # --- Path 1: Vision ---
+                if (
+                    settings.use_vision_extraction
+                    and settings.llm_assist_enabled
+                    and doc.source_path
+                    and (doc.file_type or "").lower() in ("pdf", ".pdf", "application/pdf")
+                ):
+                    try:
+                        from app.llm.client import OllamaClient
+                        from app.structure.vision_extractor import VisionDocumentExtractor
+                        client = OllamaClient(db_session=db)
+                        if client.is_vision_available(model_override=vision_model):
+                            vision_ext = VisionDocumentExtractor(
+                                client, batch_size=batch_size, dpi=vision_dpi, vision_model=vision_model,
+                            )
+                            if is_template and instances:
+                                records = vision_ext.extract_template_instances(
+                                    doc.source_path, schema, instances, str(doc.id),
+                                    progress_callback=_heartbeat_cb,
+                                )
+                            elif is_tabular:
+                                all_page_nums = sorted(doc_pages)
+                                records = vision_ext.extract_table_pages(
+                                    doc.source_path, all_page_nums, str(doc.id), schema,
+                                )
+                            else:
+                                all_page_nums = sorted(doc_pages)
+                                records = vision_ext.extract_pages(
+                                    doc.source_path, all_page_nums, str(doc.id), schema,
+                                )
+                            if records:
+                                extraction_path = "1"
+                                logger.info("Path 1 (Vision) for %s: %d records", doc.file_name, len(records))
+                    except Exception:
+                        logger.warning("Path 1 (Vision) failed for %s, trying Path 2", doc.file_name, exc_info=True)
+
+                # --- Path 2a: Text + LLM table ---
+                if not records and settings.llm_assist_enabled and is_tabular:
+                    try:
+                        from app.llm.client import OllamaClient
+                        from app.structure.llm_template_extractor import LLMTemplateExtractor
+                        page_texts_tab: dict[int, str] = {}
+                        for b in blocks:
+                            pg = b.page_or_sheet
+                            if pg not in page_texts_tab:
+                                page_texts_tab[pg] = ""
+                            page_texts_tab[pg] += b.text + "\n"
+                        client = OllamaClient(db_session=db, timeout_s=120)
+                        text_extractor = LLMTemplateExtractor(client, batch_size=batch_size)
+                        table_records = text_extractor.extract_table_pages(
+                            schema, page_texts_tab, str(doc.id),
+                            progress_callback=_heartbeat_cb,
+                        )
+                        if table_records:
+                            records = table_records
+                            extraction_path = "2-table"
+                            logger.info("Path 2a (Text+LLM table) for %s: %d records", doc.file_name, len(records))
+                    except Exception:
+                        logger.warning("Path 2a (Text+LLM table) failed for %s", doc.file_name, exc_info=True)
+
+                # --- Path 2b: Text + LLM template ---
+                if not records and settings.llm_assist_enabled and is_template and instances:
+                    try:
+                        from app.llm.client import OllamaClient
+                        from app.structure.llm_template_extractor import LLMTemplateExtractor
+                        page_texts: dict[int, str] = {}
+                        for b in blocks:
+                            pg = b.page_or_sheet
+                            if pg not in page_texts:
+                                page_texts[pg] = ""
+                            page_texts[pg] += b.text + "\n"
+                        client = OllamaClient(db_session=db, timeout_s=120)
+                        text_extractor = LLMTemplateExtractor(client, batch_size=batch_size)
+                        llm_records = text_extractor.extract_all_instances(
+                            schema, page_texts, str(doc.id), total_pg,
+                            active_anchors=dedup_anchors,
+                            progress_callback=_heartbeat_cb,
+                        )
+                        if llm_records:
+                            records = llm_records
+                            extraction_path = "2"
+                            logger.info("Path 2 (Text+LLM) for %s: %d records", doc.file_name, len(records))
+                    except Exception:
+                        logger.warning("Path 2 (Text+LLM) failed for %s, falling back to Path 3", doc.file_name, exc_info=True)
+
+                # --- Path 3: Presidio only ---
+                if not records:
+                    detections = engine.analyze(blocks, target_entity_types=doc_targets)
+                    if schema is not None and schema_filter_cls is not None:
+                        try:
+                            sf = schema_filter_cls(schema)
+                            result = sf.filter_detections(detections)
+                            detections = result.kept
+                        except Exception:
+                            pass
+                    if is_template and instances:
+                        records = extract_with_template(detections, schema, str(doc.id), total_pg)
+                    else:
+                        records = [detection_to_pii_record(det, str(doc.id)) for det in detections]
+                    extraction_path = "3"
+                    logger.info("Path 3 (Presidio) for %s: %d records", doc.file_name, len(records))
+
+                # --- Persist records immediately (before validation) ---
+                all_records.extend(records)
+
+                # Persist to doc metadata for resume support
+                meta = dict(doc.metadata_json or {})
+                meta["extracted_records"] = [_serialize_pii_record(r) for r in records]
+                doc.metadata_json = meta
+                flag_modified(doc, "metadata_json")
+
+                # --- Pattern validation (wrapped separately) ---
+                try:
+                    if records:
+                        from app.pii.pattern_validator import validate_extracted_records
+                        pre_count = len(records)
+                        validated = validate_extracted_records(records)
+                        if len(validated) < pre_count:
+                            logger.info("Validation suppressed %d/%d records for %s", pre_count - len(validated), pre_count, doc.file_name)
+                        # Replace in all_records with validated versions
+                        all_records[-len(records):] = validated
+                        records = validated
+                except Exception:
+                    logger.warning("Pattern validation failed for %s, using raw records", doc.file_name, exc_info=True)
+
+                completed_doc_ids.append(str(doc.id))
+                _update_extraction_progress(
+                    db, run,
+                    stage="detection",
+                    message=f"Extracted {len(records)} record(s) from {doc.file_name} (Path {extraction_path})",
+                    completed_doc_ids=completed_doc_ids,
+                    total_docs=len(approved_docs), current_doc=i,
+                    records_found=len(all_records),
+                    detail={"extraction_path": extraction_path, "records": len(records), "total": len(approved_docs), "current": i, "status": "running"},
+                )
+
+            except Exception as e:
+                logger.warning("Detection failed for doc %s: %s", doc.file_name, type(e).__name__, exc_info=True)
+
+        if _is_cancelled():
+            return
+
+        _update_extraction_progress(
+            db, run,
+            stage="detection",
+            message=f"Detected {len(all_records)} PII record(s) across {len(approved_docs)} document(s)",
+            completed_doc_ids=completed_doc_ids,
+            total_docs=len(approved_docs), current_doc=len(approved_docs),
+            records_found=len(all_records),
+            detail={"records_found": len(all_records), "status": "complete"},
+        )
+
+        # --- Stage 2: Entity Resolution ---
+        _update_extraction_progress(
+            db, run, stage="resolution", message="Resolving entities...",
+            completed_doc_ids=completed_doc_ids,
+            total_docs=len(approved_docs), current_doc=len(approved_docs),
+            records_found=len(all_records),
+            detail={"status": "running"},
+        )
+
+        from app.rra.entity_resolver import EntityResolver
+
+        resolver = EntityResolver()
+        groups = resolver.resolve(all_records, active_anchors=dedup_anchors)
+
+        _update_extraction_progress(
+            db, run, stage="resolution",
+            message=f"Resolved into {len(groups)} group(s)",
+            completed_doc_ids=completed_doc_ids,
+            total_docs=len(approved_docs), current_doc=len(approved_docs),
+            records_found=len(all_records),
+            detail={"status": "complete"},
+        )
+
+        # --- Stage 3: Deduplication ---
+        _update_extraction_progress(
+            db, run, stage="deduplication", message="Building notification subjects...",
+            completed_doc_ids=completed_doc_ids,
+            total_docs=len(approved_docs), current_doc=len(approved_docs),
+            records_found=len(all_records),
+            detail={"status": "running"},
+        )
+
+        if run.project_id is not None:
+            old_count = db.query(NotificationSubject).filter(
+                NotificationSubject.project_id == run.project_id,
+            ).delete()
+            db.commit()
+            if old_count:
+                logger.info("Cleared %d old notification subjects for project %s", old_count, run.project_id)
+
+        from app.rra.deduplicator import Deduplicator
+
+        dedup = Deduplicator(db)
+        subjects = dedup.build_subjects(groups)
+
+        for subj in subjects:
+            if subj.project_id is None and run.project_id is not None:
+                subj.project_id = run.project_id
+
+        review_count = 0
+        try:
+            from app.review.queue_manager import QueueManager
+            qm = QueueManager(db)
+            for idx, group in enumerate(groups):
+                if idx >= len(subjects):
+                    break
+                subj = subjects[idx]
+                sid = str(subj.subject_id)
+                if group.merge_confidence < 0.60:
+                    qm.create_task("escalation", sid)
+                    review_count += 1
+                elif group.merge_confidence < 0.80 or group.needs_human_review:
+                    qm.create_task("low_confidence", sid)
+                    review_count += 1
+        except Exception:
+            pass
+
+        db.commit()
+
+        _update_extraction_progress(
+            db, run, stage="deduplication",
+            message=f"Built {len(subjects)} subject(s), {review_count} for review",
+            completed_doc_ids=completed_doc_ids,
+            total_docs=len(approved_docs), current_doc=len(approved_docs),
+            records_found=len(all_records),
+            detail={"status": "complete"},
+        )
+
+        # --- Stage 4: Notification ---
+        _update_extraction_progress(
+            db, run, stage="notification", message="Building notification list...",
+            completed_doc_ids=completed_doc_ids,
+            total_docs=len(approved_docs), current_doc=len(approved_docs),
+            records_found=len(all_records),
+            detail={"status": "running"},
+        )
+
+        from app.notification.list_builder import build_notification_list
+
+        nl = build_notification_list(str(job_uuid), protocol, subjects, db)
+        notif_count = sum(1 for s in subjects if s.notification_required)
+
+        _update_extraction_progress(
+            db, run, stage="notification",
+            message=f"{notif_count} notification(s) required",
+            completed_doc_ids=completed_doc_ids,
+            total_docs=len(approved_docs), current_doc=len(approved_docs),
+            records_found=len(all_records),
+            detail={"status": "complete"},
+        )
+
+        # --- Auto-export CSV ---
+        export_count = 0
+        if subjects and run.project_id:
+            try:
+                from app.export.csv_exporter import CSVExporter
+
+                export_dir = Path("/tmp/docdoc_exports") / str(run.project_id)
+                export_dir.mkdir(parents=True, exist_ok=True)
+
+                exporter = CSVExporter(db)
+                export_job = exporter.run(
+                    project_id=run.project_id,
+                    output_dir=export_dir,
+                    export_schema="auditor",
+                )
+                export_count = export_job.row_count or 0
+            except Exception:
+                logger.debug("Auto-export failed (best-effort)", exc_info=True)
+
+        # --- Mark run as completed ---
+        run.status = "completed"
+        run.completed_at = datetime.now(timezone.utc)
+        _update_extraction_progress(
+            db, run, stage="complete",
+            message="Extraction complete",
+            completed_doc_ids=completed_doc_ids,
+            total_docs=len(approved_docs), current_doc=len(approved_docs),
+            records_found=len(all_records),
+            result={
+                "job_id": str(job_uuid),
+                "status": "COMPLETE",
+                "subjects_found": len(subjects),
+                "notification_required": notif_count,
+                "export_count": export_count,
+            },
+        )
+
+    except Exception as exc:
+        logger.error("Job %s failed at extract phase: %s", str(job_uuid), type(exc).__name__, exc_info=True)
+        if run is not None:
+            run.status = "failed"
+            run.error_summary = str(type(exc).__name__)
+            run.completed_at = datetime.now(timezone.utc)
+            try:
+                metrics = dict(run.metrics or {})
+                metrics["extraction_progress"] = {
+                    "stage": "error",
+                    "message": f"Pipeline failed: {type(exc).__name__}",
+                    "heartbeat": datetime.now(timezone.utc).isoformat(),
+                }
+                run.metrics = metrics
+                from sqlalchemy.orm.attributes import flag_modified
+                flag_modified(run, "metrics")
+                db.commit()
+            except Exception:
+                db.rollback()
+
+    finally:
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
+        finally:
+            db.close()
+
+
+# Currently active background extraction threads, keyed by job_id
+_extraction_threads: dict[str, threading.Thread] = {}
+
+
 def extract_generator(
     job_id: str,
     db: Session | None,
     registry: ProtocolRegistry,
 ) -> Generator[str, None, None]:
-    """Run the extraction phase for approved documents, yielding SSE events.
+    """SSE relay for extraction — polls background thread progress.
 
-    Stages: detection -> resolution -> deduplication -> notification -> complete.
-
-    Requires the IngestionRun to have status="analyzed" and
-    pipeline_mode="two_phase".
+    If the job is in ``analyzed`` status, starts a background extraction thread.
+    If the job is already ``extracting`` (reconnect), just polls.
+    Yields SSE events in the same format as the previous inline implementation.
     """
     owns_db = False
-    run: IngestionRun | None = None
 
-    # --- Acquire DB session ---
     try:
         if db is None:
             from app.api.deps import _get_session_factory
@@ -975,7 +1602,6 @@ def extract_generator(
         yield _sse({"stage": "error", "message": f"Database connection failed: {type(exc).__name__}"})
         return
 
-    # --- Load IngestionRun ---
     try:
         job_uuid = UUID(job_id)
     except (ValueError, AttributeError):
@@ -994,500 +1620,122 @@ def extract_generator(
         yield _sse({"stage": "error", "message": f"Job {job_id!r} is not a two-phase pipeline job"})
         return
 
-    if run.status != "analyzed":
+    # Accept both "analyzed" (start) and "extracting" (reconnect)
+    if run.status not in ("analyzed", "extracting"):
+        # If already completed/failed, return final state immediately
+        if run.status in ("completed", "failed"):
+            progress = (run.metrics or {}).get("extraction_progress", {})
+            if progress.get("result"):
+                yield _sse({"stage": "complete", "result": progress["result"]})
+            elif run.status == "failed":
+                yield _sse({"stage": "error", "message": progress.get("message", "Pipeline failed")})
+            else:
+                yield _sse({"stage": "complete", "result": {"job_id": job_id, "status": "COMPLETE"}})
+            return
         yield _sse({
             "stage": "error",
-            "message": f"Job {job_id!r} status is {run.status!r}, expected 'analyzed'",
+            "message": f"Job {job_id!r} status is {run.status!r}, expected 'analyzed' or 'extracting'",
         })
         return
 
-    # --- Load protocol ---
-    config_snapshot = run.config_snapshot or {}
-    protocol_id = config_snapshot.get("protocol_id", "")
-    try:
-        protocol = registry.get(protocol_id)
-    except KeyError:
-        yield _sse({"stage": "error", "message": f"Protocol not found: {protocol_id!r}"})
-        return
+    # --- Start background thread if needed ---
+    if run.status == "analyzed":
+        run.status = "extracting"
+        db.commit()
 
-    # --- Load protocol config for entity filtering ---
-    protocol_config: dict | None = None
-    protocol_config_id = config_snapshot.get("protocol_config_id")
-    if protocol_config_id:
-        try:
-            from app.db.models import ProtocolConfig
-            pc = db.get(ProtocolConfig, UUID(protocol_config_id))
-            if pc is not None:
-                protocol_config = pc.config_json
-        except Exception:
-            pass  # best-effort
+    _maybe_launch_extraction(job_id, registry)
 
-    target_entities = _resolve_target_entities(protocol_config, protocol_id)
+    # --- Poll loop ---
+    last_message = ""
+    stale_count = 0
+    POLL_INTERVAL = 2  # seconds
+    STALE_THRESHOLD = 30  # polls (~60s) before considering heartbeat stale
 
-    # --- Resolve dedup anchors from protocol config ---
-    dedup_anchors: list[str] | None = None
-    if protocol_config and isinstance(protocol_config, dict):
-        dedup_anchors = protocol_config.get("dedup_anchors")
-        if dedup_anchors is not None and not isinstance(dedup_anchors, list):
-            dedup_anchors = None
+    while True:
+        time.sleep(POLL_INTERVAL)
 
-    # --- Load approved documents ---
-    approved_docs = (
-        db.execute(
-            select(Document).where(
-                Document.ingestion_run_id == run.id,
-                Document.analysis_phase_status == "approved",
-            )
-        )
-        .scalars()
-        .all()
-    )
+        # Refresh run from DB to pick up background thread's commits
+        db.expire_all()
+        run = db.execute(
+            select(IngestionRun).where(IngestionRun.id == job_uuid)
+        ).scalar_one_or_none()
 
-    if not approved_docs:
-        yield _sse({"stage": "error", "message": "No approved documents found for extraction"})
-        return
+        if run is None:
+            yield _sse({"stage": "error", "message": "Job disappeared"})
+            return
 
-    # Update run status — commit immediately so UI can see it
-    run.status = "extracting"
-    db.commit()
+        progress = (run.metrics or {}).get("extraction_progress", {})
+        stage = progress.get("stage", "")
+        message = progress.get("message", "")
+        detail = progress.get("detail", {})
+        result = progress.get("result")
 
-    try:
-        # --- Stage 1: Detection ---
-        yield _sse({
-            "stage": "detection", "status": "running",
-            "message": "Starting PII detection...",
-            "detail": {"total": len(approved_docs), "current": 0},
-        })
+        # Yield progress if it changed
+        if message and message != last_message:
+            stale_count = 0
+            event: dict = {"stage": stage, "message": message}
+            if detail:
+                status = detail.get("status", "running")
+                event["status"] = status
+                event["detail"] = {k: v for k, v in detail.items() if k != "status"}
+            if result:
+                event["result"] = result
+            yield _sse(event)
+            last_message = message
 
-        from app.pii.presidio_engine import PresidioEngine
-        from app.readers.registry import get_reader
-        from app.rra.entity_resolver import PIIRecord
-
-        settings = get_settings()
-        engine = PresidioEngine()
-        all_records: list[PIIRecord] = []
-
-        # Optionally set up SchemaFilter for extract phase
-        schema_filter_cls = None
-        doc_understanding_cls = None
-        if settings.llm_assist_enabled:
-            try:
-                from app.pii.schema_filter import SchemaFilter as _SF
-                from app.structure.llm_document_understanding import LLMDocumentUnderstanding as _LDU
-                schema_filter_cls = _SF
-                doc_understanding_cls = _LDU
-            except Exception:
-                pass
-
-        # Build per-document selected entity types from review decisions
-        doc_selected_types: dict[UUID, list[str] | None] = {}
-        for doc in approved_docs:
-            review = db.query(DocumentAnalysisReview).filter(
-                DocumentAnalysisReview.document_id == doc.id,
-                DocumentAnalysisReview.ingestion_run_id == run.id,
-            ).first()
-            if review and review.selected_entity_types:
-                doc_selected_types[doc.id] = review.selected_entity_types
+        # Check for terminal states
+        if run.status == "completed":
+            if result:
+                yield _sse({"stage": "complete", "result": result})
             else:
-                doc_selected_types[doc.id] = None
+                yield _sse({"stage": "complete", "result": {"job_id": job_id, "status": "COMPLETE"}})
+            return
 
-        for i, doc in enumerate(approved_docs, 1):
-            yield _sse({
-                "stage": "detection", "status": "running",
-                "message": f"Scanning document {i}/{len(approved_docs)}...",
-                "detail": {"total": len(approved_docs), "current": i},
-            })
+        if run.status == "failed":
+            yield _sse({"stage": "error", "message": progress.get("message", "Pipeline failed")})
+            return
 
+        if run.status == "cancelled":
+            yield _sse({"stage": "error", "message": "Extraction cancelled"})
+            return
+
+        # Stale heartbeat detection
+        heartbeat = progress.get("heartbeat", "")
+        if heartbeat:
             try:
-                # Use per-document selected types if reviewer specified them;
-                # otherwise fall back to protocol-level target entities
-                doc_targets = doc_selected_types.get(doc.id) or target_entities
+                hb_time = datetime.fromisoformat(heartbeat)
+                age = (datetime.now(timezone.utc) - hb_time).total_seconds()
+                if age > 60:
+                    stale_count += 1
+                else:
+                    stale_count = 0
+            except (ValueError, TypeError):
+                stale_count += 1
+        else:
+            stale_count += 1
 
-                reader = get_reader(doc.source_path)
-                blocks = reader.read()
+        if stale_count >= STALE_THRESHOLD:
+            _maybe_launch_extraction(job_id, registry)
+            stale_count = 0
 
-                # Get DocumentSchema via LLM understanding (if available)
-                schema = None
-                if doc_understanding_cls is not None and schema_filter_cls is not None:
-                    try:
-                        onset_page = doc.sample_onset_page or 0
-                        heuristic_doc_type = "unknown"
-                        if doc.structure_analysis and isinstance(doc.structure_analysis, dict):
-                            heuristic_doc_type = doc.structure_analysis.get("document_type", "unknown")
+    # Unreachable, but for clarity
+    if owns_db and db is not None:
+        db.close()
 
-                        doc_pages = set(b.page_or_sheet for b in blocks)
-                        total_pages = len(doc_pages)
 
-                        du = doc_understanding_cls(db_session=db)
-                        schema = du.understand(
-                            blocks,
-                            heuristic_doc_type=heuristic_doc_type,
-                            file_name=doc.file_name or "",
-                            file_type=doc.file_type or "",
-                            structure_class=doc.structure_class or "",
-                            onset_page=onset_page,
-                            document_id=str(doc.id),
-                            total_pages=total_pages,
-                            protocol_name=protocol_id,
-                            protocol_config=protocol_config,
-                        )
-                    except Exception:
-                        pass
+def _maybe_launch_extraction(job_id: str, registry: ProtocolRegistry) -> None:
+    """Launch extraction background thread if not already running."""
+    existing = _extraction_threads.get(job_id)
+    if existing is not None and existing.is_alive():
+        logger.debug("Extraction thread for %s still alive, skipping re-launch", job_id[:8])
+        return
 
-                # 4-path extraction (exclusive, clear priority):
-                #   Path A: Template extraction (1 person per N pages)
-                #   Path B: Table extraction (N people per page)  — NEW
-                #   Path 1: Vision model (primary for non-template/non-table)
-                #   Path 2: Text + LLM (fallback when vision unavailable)
-                #   Path 3: Presidio only (last resort, no LLM)
-                is_template = (
-                    schema is not None
-                    and schema.template
-                    and schema.template.pages_per_instance >= 2
-                )
-                is_tabular = (
-                    schema is not None
-                    and schema.is_tabular
-                    and schema.records_per_page_estimate > 1
-                )
-                doc_pages = set(b.page_or_sheet for b in blocks)
-                total_pg = len(doc_pages)
-
-                records: list[PIIRecord] = []
-                extraction_path = "3"  # default: Presidio
-
-                # Resolve batch size from protocol config
-                batch_size = DEFAULT_EXTRACTION_BATCH_SIZE
-                base_key = protocol_id.lower().replace("-", "_").replace(" ", "_")
-                if base_key in PROTOCOL_LLM_CONFIG:
-                    batch_size = int(PROTOCOL_LLM_CONFIG[base_key].get(
-                        "extraction_batch_size", batch_size,
-                    ))
-
-                # Resolve vision model: user override → protocol default → global
-                vision_model = None
-                vision_dpi = settings.vision_page_dpi
-                if protocol_config and isinstance(protocol_config, dict):
-                    vision_model = protocol_config.get("vision_model")
-                    if "vision_page_dpi" in protocol_config:
-                        vision_dpi = int(protocol_config["vision_page_dpi"])
-                if not vision_model and base_key in PROTOCOL_LLM_CONFIG:
-                    vision_model = PROTOCOL_LLM_CONFIG[base_key].get("vision_model")
-                    if not vision_dpi and "vision_page_dpi" in PROTOCOL_LLM_CONFIG[base_key]:
-                        vision_dpi = int(PROTOCOL_LLM_CONFIG[base_key]["vision_page_dpi"])
-
-                # Detect instance boundaries (for template docs)
-                instances: list[list[int]] | None = None
-                if is_template:
-                    # Prefer file-based marker scan over text-based
-                    if doc.source_path:
-                        try:
-                            from app.pipeline.instance_detector import find_instance_boundaries as _find_bounds
-                            marker = getattr(schema.template, "instance_marker", None)
-                            instances = _find_bounds(doc.source_path, marker)
-                        except Exception:
-                            pass
-                    # Fall back to text-based boundaries from template
-                    if not instances:
-                        page_texts_for_bounds: dict[int, str] = {}
-                        for b in blocks:
-                            pg = b.page_or_sheet
-                            if pg not in page_texts_for_bounds:
-                                page_texts_for_bounds[pg] = ""
-                            page_texts_for_bounds[pg] += b.text + "\n"
-                        if schema.template.instance_marker:
-                            instances = schema.template.find_instance_boundaries(page_texts_for_bounds)
-                        else:
-                            instances = schema.template.get_instance_pages(total_pg)
-
-                # --- Path 1: Vision (primary) ---
-                if (
-                    settings.use_vision_extraction
-                    and settings.llm_assist_enabled
-                    and doc.source_path
-                    and (doc.file_type or "").lower() in ("pdf", ".pdf", "application/pdf")
-                ):
-                    try:
-                        from app.llm.client import OllamaClient
-                        from app.structure.vision_extractor import VisionDocumentExtractor
-
-                        client = OllamaClient(db_session=db)
-                        if client.is_vision_available(model_override=vision_model):
-                            vision_ext = VisionDocumentExtractor(
-                                client,
-                                batch_size=batch_size,
-                                dpi=vision_dpi,
-                                vision_model=vision_model,
-                            )
-                            if is_template and instances:
-                                records = vision_ext.extract_template_instances(
-                                    doc.source_path, schema, instances, str(doc.id),
-                                )
-                            elif is_tabular:
-                                all_page_nums = sorted(doc_pages)
-                                records = vision_ext.extract_table_pages(
-                                    doc.source_path, all_page_nums, str(doc.id), schema,
-                                )
-                            else:
-                                all_page_nums = sorted(doc_pages)
-                                records = vision_ext.extract_pages(
-                                    doc.source_path, all_page_nums, str(doc.id), schema,
-                                )
-                            if records:
-                                extraction_path = "1"
-                                logger.info(
-                                    "Path 1 (Vision) for %s: %d records",
-                                    doc.file_name, len(records),
-                                )
-                    except Exception:
-                        logger.warning(
-                            "Path 1 (Vision) failed for %s, trying Path 2",
-                            doc.file_name, exc_info=True,
-                        )
-
-                # --- Path 2a: Text + LLM table extraction (tabular docs) ---
-                if not records and settings.llm_assist_enabled and is_tabular:
-                    try:
-                        from app.llm.client import OllamaClient
-                        from app.structure.llm_template_extractor import LLMTemplateExtractor
-
-                        page_texts_tab: dict[int, str] = {}
-                        for b in blocks:
-                            pg = b.page_or_sheet
-                            if pg not in page_texts_tab:
-                                page_texts_tab[pg] = ""
-                            page_texts_tab[pg] += b.text + "\n"
-
-                        client = OllamaClient(db_session=db, timeout_s=120)
-                        text_extractor = LLMTemplateExtractor(client, batch_size=batch_size)
-                        table_records = text_extractor.extract_table_pages(
-                            schema, page_texts_tab, str(doc.id),
-                        )
-                        if table_records:
-                            records = table_records
-                            extraction_path = "2-table"
-                            logger.info(
-                                "Path 2a (Text+LLM table) for %s: %d records",
-                                doc.file_name, len(records),
-                            )
-                    except Exception:
-                        logger.warning(
-                            "Path 2a (Text+LLM table) failed for %s",
-                            doc.file_name, exc_info=True,
-                        )
-
-                # --- Path 2b: Text + LLM template (fallback) ---
-                if not records and settings.llm_assist_enabled and is_template and instances:
-                    try:
-                        from app.llm.client import OllamaClient
-                        from app.structure.llm_template_extractor import LLMTemplateExtractor
-
-                        page_texts: dict[int, str] = {}
-                        for b in blocks:
-                            pg = b.page_or_sheet
-                            if pg not in page_texts:
-                                page_texts[pg] = ""
-                            page_texts[pg] += b.text + "\n"
-
-                        client = OllamaClient(db_session=db, timeout_s=120)
-                        text_extractor = LLMTemplateExtractor(client, batch_size=batch_size)
-                        llm_records = text_extractor.extract_all_instances(
-                            schema, page_texts, str(doc.id), total_pg,
-                            active_anchors=dedup_anchors,
-                        )
-
-                        if llm_records:
-                            records = llm_records
-                            extraction_path = "2"
-                            logger.info(
-                                "Path 2 (Text+LLM) for %s: %d records",
-                                doc.file_name, len(records),
-                            )
-                    except Exception:
-                        logger.warning(
-                            "Path 2 (Text+LLM) failed for %s, falling back to Path 3",
-                            doc.file_name, exc_info=True,
-                        )
-
-                # --- Path 3: Presidio only (last resort) ---
-                if not records:
-                    detections = engine.analyze(blocks, target_entity_types=doc_targets)
-                    if schema is not None and schema_filter_cls is not None:
-                        try:
-                            sf = schema_filter_cls(schema)
-                            result = sf.filter_detections(detections)
-                            detections = result.kept
-                        except Exception:
-                            pass
-                    if is_template and instances:
-                        records = extract_with_template(detections, schema, str(doc.id), total_pg)
-                    else:
-                        records = [detection_to_pii_record(det, str(doc.id)) for det in detections]
-                    extraction_path = "3"
-                    logger.info(
-                        "Path 3 (Presidio) for %s: %d records",
-                        doc.file_name, len(records),
-                    )
-
-                # --- Pattern validation (Step 20) ---
-                if records:
-                    from app.pii.pattern_validator import validate_extracted_records
-                    pre_count = len(records)
-                    records = validate_extracted_records(records)
-                    if len(records) < pre_count:
-                        logger.info(
-                            "Validation suppressed %d/%d records for %s",
-                            pre_count - len(records), pre_count, doc.file_name,
-                        )
-
-                all_records.extend(records)
-
-                yield _sse({
-                    "stage": "detection", "status": "running",
-                    "message": f"Extracted {len(records)} record(s) from {doc.file_name} (Path {extraction_path})",
-                    "detail": {"extraction_path": extraction_path, "records": len(records)},
-                })
-            except Exception as e:
-                logger.warning("Detection failed for doc %s: %s", doc.file_name, type(e).__name__)
-
-        yield _sse({
-            "stage": "detection", "status": "complete",
-            "message": f"Detected {len(all_records)} PII record(s) across {len(approved_docs)} document(s)",
-            "detail": {"records_found": len(all_records)},
-        })
-
-        # --- Stage 2: Entity Resolution ---
-        yield _sse({"stage": "resolution", "status": "running", "message": "Resolving entities..."})
-
-        from app.rra.entity_resolver import EntityResolver
-
-        resolver = EntityResolver()
-        groups = resolver.resolve(all_records, active_anchors=dedup_anchors)
-
-        yield _sse({
-            "stage": "resolution", "status": "complete",
-            "message": f"Resolved into {len(groups)} group(s)",
-        })
-
-        # --- Stage 3: Deduplication ---
-        yield _sse({"stage": "deduplication", "status": "running", "message": "Building notification subjects..."})
-
-        # Clean previous subjects for this project (each run is a clean slate)
-        if run.project_id is not None:
-            old_count = db.query(NotificationSubject).filter(
-                NotificationSubject.project_id == run.project_id,
-            ).delete()
-            db.commit()
-            if old_count:
-                logger.info("Cleared %d old notification subjects for project %s", old_count, run.project_id)
-
-        from app.rra.deduplicator import Deduplicator
-
-        dedup = Deduplicator(db)
-        subjects = dedup.build_subjects(groups)
-
-        # Set project_id on each NotificationSubject
-        for subj in subjects:
-            if subj.project_id is None and run.project_id is not None:
-                subj.project_id = run.project_id
-
-        # Create ReviewTasks based on merge confidence
-        review_count = 0
-        try:
-            from app.review.queue_manager import QueueManager
-            qm = QueueManager(db)
-            for i, group in enumerate(groups):
-                if i >= len(subjects):
-                    break
-                subj = subjects[i]
-                sid = str(subj.subject_id)
-                if group.merge_confidence < 0.60:
-                    qm.create_task("escalation", sid)
-                    review_count += 1
-                elif group.merge_confidence < 0.80 or group.needs_human_review:
-                    qm.create_task("low_confidence", sid)
-                    review_count += 1
-        except Exception:
-            pass  # best-effort; don't fail pipeline if review queue fails
-
-        db.commit()
-
-        yield _sse({
-            "stage": "deduplication", "status": "complete",
-            "message": f"Built {len(subjects)} subject(s), {review_count} for review",
-        })
-
-        # --- Stage 4: Notification ---
-        yield _sse({"stage": "notification", "status": "running", "message": "Building notification list..."})
-
-        from app.notification.list_builder import build_notification_list
-
-        nl = build_notification_list(str(job_uuid), protocol, subjects, db)
-        notif_count = sum(1 for s in subjects if s.notification_required)
-
-        yield _sse({
-            "stage": "notification", "status": "complete",
-            "message": f"{notif_count} notification(s) required",
-        })
-
-        # --- Auto-export CSV ---
-        export_count = 0
-        if subjects and run.project_id:
-            try:
-                from app.export.csv_exporter import CSVExporter
-                from app.db.models import ExportJob as _EJ
-
-                export_dir = Path("/tmp/docdoc_exports") / str(run.project_id)
-                export_dir.mkdir(parents=True, exist_ok=True)
-
-                exporter = CSVExporter(db)
-                export_job = exporter.run(
-                    project_id=run.project_id,
-                    output_dir=export_dir,
-                    export_schema="auditor",
-                )
-                export_count = export_job.row_count or 0
-                yield _sse({
-                    "stage": "export", "status": "complete",
-                    "message": f"CSV export ready: {export_count} subject(s)",
-                })
-            except Exception:
-                logger.debug("Auto-export failed (best-effort)", exc_info=True)
-
-        # --- Mark run as completed ---
-        run.status = "completed"
-        run.completed_at = datetime.now(timezone.utc)
-        db.commit()
-
-        # --- Complete ---
-        yield _sse({
-            "stage": "complete",
-            "result": {
-                "job_id": str(job_uuid),
-                "status": "COMPLETE",
-                "subjects_found": len(subjects),
-                "notification_required": notif_count,
-                "export_count": export_count,
-            },
-        })
-
-    except Exception as exc:
-        logger.error("Job %s failed at extract phase: %s", str(job_uuid), type(exc).__name__)
-        if run is not None:
-            run.status = "failed"
-            run.error_summary = str(type(exc).__name__)
-            run.completed_at = datetime.now(timezone.utc)
-            try:
-                db.commit()
-            except Exception:
-                db.rollback()
-        yield _sse({"stage": "error", "message": f"Pipeline failed: {type(exc).__name__}"})
-
-    finally:
-        if owns_db and db is not None:
-            try:
-                db.commit()
-            except Exception:
-                db.rollback()
-            finally:
-                db.close()
+    logger.warning("Launching extraction thread for job %s", job_id[:8])
+    t = threading.Thread(
+        target=run_extraction_background,
+        args=(job_id, registry),
+        daemon=True,
+        name=f"extract-{job_id[:8]}",
+    )
+    _extraction_threads[job_id] = t
+    t.start()

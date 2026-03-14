@@ -68,6 +68,8 @@ class VisionDocumentExtractor:
         schema: DocumentSchema,
         instance_boundaries: list[list[int]],
         doc_id: str,
+        *,
+        progress_callback: "Callable[[int, int, int], None] | None" = None,
     ) -> list[PIIRecord]:
         """Extract PII from all template instances using vision.
 
@@ -81,6 +83,7 @@ class VisionDocumentExtractor:
 
         key_page_offset = self._find_key_page_offset(schema)
         records: list[PIIRecord] = []
+        total_batches = (len(instance_boundaries) + self.batch_size - 1) // self.batch_size
 
         for batch_start in range(0, len(instance_boundaries), self.batch_size):
             batch = instance_boundaries[batch_start:batch_start + self.batch_size]
@@ -123,7 +126,13 @@ class VisionDocumentExtractor:
                     "Vision batch extraction failed at offset %d of %s",
                     batch_start, doc_id, exc_info=True,
                 )
-                continue
+
+            if progress_callback is not None:
+                batch_idx = batch_start // self.batch_size + 1
+                try:
+                    progress_callback(batch_idx, total_batches, len(records))
+                except Exception:
+                    pass
 
         return _deduplicate_records(records)
 

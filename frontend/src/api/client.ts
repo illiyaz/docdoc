@@ -945,53 +945,86 @@ export async function startExtractStreaming(
   jobId: string,
   onProgress: (event: PipelineProgress) => void,
 ): Promise<JobResult> {
-  const res = await fetch(`${BASE_URL}/jobs/${jobId}/extract/stream`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-  })
-  if (!res.ok) throw new Error(`Extract failed: ${res.status}`)
-
-  const reader = res.body!.getReader()
-  const decoder = new TextDecoder()
-  let buffer = ""
+  const MAX_RETRIES = 60
+  let retries = 0
   let finalResult: JobResult | null = null
 
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
+  while (retries <= MAX_RETRIES) {
+    try {
+      const res = await fetch(`${BASE_URL}/jobs/${jobId}/extract/stream`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      })
+      if (!res.ok) throw new Error(`Extract failed: ${res.status}`)
 
-    buffer += decoder.decode(value, { stream: true })
+      const reader = res.body!.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ""
 
-    const parts = buffer.split("\n\n")
-    buffer = parts.pop()!
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
 
-    for (const part of parts) {
-      for (const line of part.split("\n")) {
-        if (line.startsWith("data: ")) {
-          try {
-            const data = JSON.parse(line.slice(6)) as PipelineProgress
-            onProgress(data)
-            if (data.stage === "complete" && data.result) {
-              finalResult = data.result
-            }
-            if (data.stage === "error") {
-              throw new Error(data.message)
-            }
-          } catch (e) {
-            if (e instanceof Error && e.message !== "Unexpected end of JSON input") {
-              throw e
+        buffer += decoder.decode(value, { stream: true })
+
+        const parts = buffer.split("\n\n")
+        buffer = parts.pop()!
+
+        for (const part of parts) {
+          for (const line of part.split("\n")) {
+            if (line.startsWith("data: ")) {
+              try {
+                const data = JSON.parse(line.slice(6)) as PipelineProgress
+                onProgress(data)
+                if (data.stage === "complete" && data.result) {
+                  finalResult = data.result
+                }
+                if (data.stage === "error") {
+                  throw new Error(data.message)
+                }
+              } catch (e) {
+                if (e instanceof Error && e.message !== "Unexpected end of JSON input") {
+                  throw e
+                }
+              }
             }
           }
         }
       }
+
+      // Stream ended — check if we got a result
+      if (finalResult) return finalResult
+
+      // Stream ended without complete/error — check job status and maybe reconnect
+      const job = await getJob(jobId)
+      if (job.status === "completed") {
+        return { job_id: jobId, status: "COMPLETE", subjects_found: 0, notification_required: 0 }
+      }
+      if (job.status === "failed" || job.status === "cancelled") {
+        throw new Error(`Extraction ${job.status}`)
+      }
+      if (job.status === "extracting") {
+        // Still running — reconnect
+        retries++
+        onProgress({ stage: "reconnecting", message: `Reconnecting to extraction... (attempt ${retries})` })
+        await new Promise((r) => setTimeout(r, 2000))
+        continue
+      }
+      throw new Error("No result received from extract stream")
+
+    } catch (e) {
+      if (e instanceof Error && e.message.startsWith("Extraction ")) throw e
+      if (e instanceof Error && e.message.startsWith("Extract failed:")) throw e
+      if (e instanceof Error && e.message.startsWith("Pipeline failed:")) throw e
+      // Network error — try to reconnect
+      retries++
+      if (retries > MAX_RETRIES) throw e
+      onProgress({ stage: "reconnecting", message: `Reconnecting to extraction... (attempt ${retries})` })
+      await new Promise((r) => setTimeout(r, 2000))
     }
   }
 
-  if (!finalResult) {
-    throw new Error("No result received from extract stream")
-  }
-
-  return finalResult
+  throw new Error("Max reconnection attempts exceeded")
 }
 
 // ---------------------------------------------------------------------------

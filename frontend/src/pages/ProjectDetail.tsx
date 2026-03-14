@@ -1340,13 +1340,15 @@ function AnalysisReviewPanel({ jobId, onExtractionComplete }: { jobId: string; o
         <p className="text-sm font-medium">Extracting PII from approved documents...</p>
         {Object.entries(extractStages).map(([stage, info]) => (
           <div key={stage} className="flex items-center gap-2 text-xs">
-            {info.status === "complete" ? (
+            {stage === "reconnecting" ? (
+              <Loader2 className="h-3.5 w-3.5 text-amber-500 animate-spin" />
+            ) : info.status === "complete" ? (
               <CheckCircle className="h-3.5 w-3.5 text-green-500" />
             ) : (
               <Loader2 className="h-3.5 w-3.5 text-blue-500 animate-spin" />
             )}
             <span className="capitalize">{stage}</span>
-            <span className="text-muted-foreground">{info.message}</span>
+            <span className={stage === "reconnecting" ? "text-amber-600" : "text-muted-foreground"}>{info.message}</span>
           </div>
         ))}
       </div>
