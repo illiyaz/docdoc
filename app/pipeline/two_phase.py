@@ -277,7 +277,7 @@ def analyze_generator(
         },
     )
     db.add(run)
-    db.flush()
+    db.commit()
 
     try:
         # --- Stage 1: Discovery ---
@@ -309,7 +309,7 @@ def analyze_generator(
             )
             db.add(doc)
             doc_records.append(doc)
-        db.flush()
+        db.commit()
 
         # --- Stage 2: Cataloging ---
         yield _sse({"stage": "cataloging", "status": "running", "message": "Classifying documents..."})
@@ -353,7 +353,7 @@ def analyze_generator(
             except Exception as e:
                 logger.warning("Structure analysis failed for doc %s: %s", doc.file_name, type(e).__name__)
 
-        db.flush()
+        db.commit()
         yield _sse({
             "stage": "structure_analysis", "status": "complete",
             "message": f"Analyzed structure of {len(doc_records)} document(s)",
@@ -465,7 +465,7 @@ def analyze_generator(
                 doc_detections[doc.id] = []
                 doc.analysis_phase_status = "sample_failed"
 
-        db.flush()
+        db.commit()
 
         yield _sse({
             "stage": "verified_onset", "status": "complete",
@@ -548,7 +548,7 @@ def analyze_generator(
                             # Update extraction count
                             doc.sample_extraction_count = len(result.kept)
 
-                db.flush()
+                db.commit()
             except Exception as e:
                 logger.warning("Document understanding stage failed: %s", type(e).__name__)
         else:
@@ -838,7 +838,7 @@ def analyze_generator(
                             analysis.estimated_unique_individuals,
                         )
 
-                db.flush()
+                db.commit()
             except Exception as e:
                 logger.warning("Entity analysis stage failed: %s", type(e).__name__)
         else:
@@ -892,7 +892,7 @@ def analyze_generator(
                 doc.analysis_phase_status = "pending_review"
                 review_count += 1
 
-        db.flush()
+        db.commit()
 
         yield _sse({
             "stage": "auto_approve", "status": "complete",
@@ -1369,7 +1369,7 @@ def extract_generator(
             old_count = db.query(NotificationSubject).filter(
                 NotificationSubject.project_id == run.project_id,
             ).delete()
-            db.flush()
+            db.commit()
             if old_count:
                 logger.info("Cleared %d old notification subjects for project %s", old_count, run.project_id)
 
@@ -1402,7 +1402,7 @@ def extract_generator(
         except Exception:
             pass  # best-effort; don't fail pipeline if review queue fails
 
-        db.flush()
+        db.commit()
 
         yield _sse({
             "stage": "deduplication", "status": "complete",

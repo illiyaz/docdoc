@@ -376,8 +376,8 @@ class TestVisionDocumentExtractor:
         records = extractor._parse_batch_response("not json at all", "doc-1", [[0]])
         assert records == []
 
-    def test_deduplicate_records(self):
-        """Same name twice → merged record with all fields."""
+    def test_deduplicate_records_same_instance(self):
+        """Same name, same page_range → merged record with all fields."""
         from app.structure.vision_extractor import VisionDocumentExtractor
 
         client = MagicMock()
@@ -388,18 +388,36 @@ class TestVisionDocumentExtractor:
             {"PERSON": "John Smith", "DATE_OF_BIRTH": "01-Jan-1980"},
         ])
 
+        # Both records from the SAME instance pages → same page_range → should merge
         records = extractor._parse_batch_response(
-            response, "doc-1", [[0], [1]],
+            response, "doc-1", [[0, 1], [0, 1]],
         )
-        # _parse_batch_response doesn't deduplicate, but extract_* methods do
-        # Test the dedup directly
         from app.structure.llm_template_extractor import _deduplicate_records
         deduped = _deduplicate_records(records)
         assert len(deduped) == 1
         assert deduped[0].raw_name == "John Smith"
-        # Fields from both records should be merged
         assert deduped[0].raw_government_id == "AB123456C"
         assert deduped[0].raw_dob == "01-Jan-1980"
+
+    def test_deduplicate_records_different_instances(self):
+        """Same name, different page_range → NOT merged (different people)."""
+        from app.structure.vision_extractor import VisionDocumentExtractor
+
+        client = MagicMock()
+        extractor = VisionDocumentExtractor(client)
+
+        response = json.dumps([
+            {"PERSON": "John Smith", "NI_NUMBER": "AB123456C"},
+            {"PERSON": "John Smith", "DATE_OF_BIRTH": "01-Jan-1980"},
+        ])
+
+        # Records from DIFFERENT instance pages → different page_range → NOT merged
+        records = extractor._parse_batch_response(
+            response, "doc-1", [[0], [1]],
+        )
+        from app.structure.llm_template_extractor import _deduplicate_records
+        deduped = _deduplicate_records(records)
+        assert len(deduped) == 2
 
     def test_find_key_page_offset(self):
         """Finds the page with most PII fields."""

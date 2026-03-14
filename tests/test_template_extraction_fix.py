@@ -280,10 +280,94 @@ class TestSameDocSameNameDedup:
         resolver = EntityResolver()
         groups = resolver.resolve(records)
 
-        # All 3 records should be in one group
+        # All 3 records should be in one group (no page_range → safety net fires)
         assert len(groups) == 1
         assert len(groups[0].records) == 3
         assert groups[0].merge_confidence >= 0.80
+
+
+class TestCrossInstanceMergePrevention:
+    """Cross-instance records must NEVER merge, even with identical names."""
+
+    def test_same_name_different_page_range_zero_confidence(self):
+        """Same doc, same name, different page_range → 0.0 confidence."""
+        r1 = PIIRecord(
+            record_id="1", entity_type="PERSON", normalized_value="P Davies",
+            raw_name="P Davies", source_document_id="doc1-test-pension",
+            page_range="1-3",
+        )
+        r2 = PIIRecord(
+            record_id="2", entity_type="PERSON", normalized_value="P Davies",
+            raw_name="P Davies", source_document_id="doc1-test-pension",
+            page_range="4-6",
+        )
+        conf = build_confidence(r1, r2)
+        assert conf == 0.0
+
+    def test_similar_names_different_instances_not_merged(self):
+        """P Davie vs P Davies from different instances → 0.0."""
+        r1 = PIIRecord(
+            record_id="1", entity_type="PERSON", normalized_value="P Davie",
+            raw_name="P Davie", source_document_id="doc1-test-pension",
+            page_range="1-3", raw_dob="01-Jan-1960",
+        )
+        r2 = PIIRecord(
+            record_id="2", entity_type="PERSON", normalized_value="P Davies",
+            raw_name="P Davies", source_document_id="doc1-test-pension",
+            page_range="4-6", raw_dob="01-Jan-1960",
+        )
+        conf = build_confidence(r1, r2)
+        assert conf == 0.0
+
+    def test_resolver_keeps_149_instances_separate(self):
+        """149 template instances with some duplicate names → 149 groups."""
+        records = []
+        for i in range(149):
+            records.append(PIIRecord(
+                record_id=str(i),
+                entity_type="PERSON",
+                normalized_value=f"Person {i % 50}",  # only 50 unique names for 149 people
+                raw_name=f"Person {i % 50}",
+                source_document_id="doc1-pension-statement-long-id",
+                page_range=f"{i*3+1}-{i*3+3}",
+                raw_government_id=f"AB{i:06d}C",
+            ))
+
+        resolver = EntityResolver()
+        groups = resolver.resolve(records)
+        # Each instance is a separate person — must get 149 groups
+        assert len(groups) == 149
+
+    def test_same_instance_same_name_still_merges(self):
+        """Same doc, same name, SAME page_range → still merges (0.95)."""
+        r1 = PIIRecord(
+            record_id="1", entity_type="PERSON", normalized_value="P Davies",
+            raw_name="P Davies", source_document_id="doc1-test-pension",
+            page_range="1-3",
+        )
+        r2 = PIIRecord(
+            record_id="2", entity_type="PERSON", normalized_value="P Davies",
+            raw_name="P Davies", source_document_id="doc1-test-pension",
+            page_range="1-3",
+        )
+        conf = build_confidence(r1, r2)
+        assert conf >= 0.95
+
+    def test_different_docs_same_page_range_not_blocked(self):
+        """Different docs, same page_range → normal matching (not blocked)."""
+        r1 = PIIRecord(
+            record_id="1", entity_type="PERSON", normalized_value="P Davies",
+            raw_name="P Davies", source_document_id="doc1-pension",
+            page_range="1-3", raw_dob="01-Jan-1960",
+        )
+        r2 = PIIRecord(
+            record_id="2", entity_type="PERSON", normalized_value="P Davies",
+            raw_name="P Davies", source_document_id="doc2-pension",
+            page_range="1-3", raw_dob="01-Jan-1960",
+        )
+        conf = build_confidence(r1, r2)
+        # Different docs → cross-instance check doesn't fire → normal matching
+        assert conf > 0.0
 
 
 # ===========================================================================

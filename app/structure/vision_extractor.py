@@ -183,7 +183,7 @@ class VisionDocumentExtractor:
                 )
                 continue
 
-        return _deduplicate_records(all_records)
+        return _deduplicate_records(all_records, instance_aware=False)
 
     # ------------------------------------------------------------------
     # Tabular documents (multiple individuals per page)
@@ -239,7 +239,7 @@ class VisionDocumentExtractor:
                 )
                 continue
 
-        return _deduplicate_records(all_records)
+        return _deduplicate_records(all_records, instance_aware=False)
 
     def _parse_table_response(
         self,

@@ -444,7 +444,7 @@ class LLMTemplateExtractor:
                 )
                 continue
 
-        return _deduplicate_records(all_records)
+        return _deduplicate_records(all_records, instance_aware=False)
 
     def _build_table_text_prompt(
         self,
@@ -554,22 +554,38 @@ class LLMTemplateExtractor:
 # ---------------------------------------------------------------------------
 
 
-def _deduplicate_records(records: list[PIIRecord]) -> list[PIIRecord]:
-    """Deduplicate PIIRecords by normalized name.
+def _deduplicate_records(
+    records: list[PIIRecord],
+    *,
+    instance_aware: bool = True,
+) -> list[PIIRecord]:
+    """Deduplicate PIIRecords, optionally respecting template instance boundaries.
 
-    Same name (case-insensitive, whitespace-normalized) = same person.
-    Merges fields: keeps the most-populated record, fills in any gaps
-    from duplicates.  Combines page_range and entity_types_found.
+    When ``instance_aware=True`` (default, for template documents):
+        Key = (normalized_name, page_range).  Records from DIFFERENT template
+        instances (different page_range) are NEVER merged, even if names match.
+        Each template instance boundary = one unique person.
+
+    When ``instance_aware=False`` (for tabular/non-template documents):
+        Key = normalized_name only.  Same name across pages = same person.
+
+    Within the same key, merges fields: keeps the most-populated record,
+    fills in any gaps from duplicates.  Combines entity_types_found.
     """
     if not records:
         return records
 
-    seen: dict[str, PIIRecord] = {}  # normalized_name → best record
+    seen: dict[str | tuple[str, str], PIIRecord] = {}
 
     for rec in records:
         if not rec.raw_name:
             continue
-        key = " ".join(rec.raw_name.lower().split())
+        name_norm = " ".join(rec.raw_name.lower().split())
+        key: str | tuple[str, str]
+        if instance_aware:
+            key = (name_norm, rec.page_range or "")
+        else:
+            key = name_norm
         if key not in seen:
             seen[key] = rec
             continue

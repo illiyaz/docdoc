@@ -159,12 +159,26 @@ def build_confidence(
     if "primary_subject" in roles and "provider" in roles:
         return 0.0
 
+    # --- Cross-instance merge prevention ---
+    # If two records come from the SAME document but DIFFERENT template
+    # instances (different page_range), they are DIFFERENT people.
+    # Each template instance boundary = one unique individual.
+    # Return 0.0 immediately to prevent any merging.
+    if (
+        r1.source_document_id
+        and r1.source_document_id == r2.source_document_id
+        and r1.page_range and r2.page_range
+        and r1.page_range != r2.page_range
+    ):
+        return 0.0
+
     score = 0.0
 
     # --- Same-document same-name safety net (+0.95) ---
-    # If two records come from the same document AND have the same name,
-    # they almost certainly refer to the same individual (e.g. per-detection
-    # records from template grouping that didn't fully merge).
+    # If two records come from the same document AND have the same name
+    # AND the same page_range, they almost certainly refer to the same
+    # individual (e.g. per-detection records from template grouping
+    # that didn't fully merge).
     # Only triggers when source_document_id looks like a real reference
     # (UUID, file path, or 8+ char identifier — not short test stubs).
     if (

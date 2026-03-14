@@ -506,8 +506,13 @@ class TestAlwaysExtractIfPresent:
 # ---------------------------------------------------------------------------
 
 class TestBatchDedup:
-    def test_three_identical_names_produce_one_record(self):
-        """3 identical names in batch → 1 record with merged fields."""
+    def test_same_name_different_instances_not_merged(self):
+        """3 identical names from DIFFERENT template instances → 3 separate records.
+
+        Each template instance = one unique person.  Cross-instance merging
+        must NEVER happen, even if names are identical (e.g., "John Smith"
+        appearing in 3 different pension statement sections).
+        """
         from app.structure.llm_template_extractor import _deduplicate_records
 
         rec1 = PIIRecord(
@@ -532,14 +537,11 @@ class TestBatchDedup:
         )
 
         result = _deduplicate_records([rec1, rec2, rec3])
-        assert len(result) == 1
-        assert result[0].raw_name == "Mr John Smith"
-        # Page ranges should be combined
-        assert "1-8" in result[0].page_range
-        assert "9-16" in result[0].page_range
+        # Each instance is a separate person — never merge across instances
+        assert len(result) == 3
 
-    def test_same_name_different_fields_merges(self):
-        """2 records: one has DOB, other has address → merged has both."""
+    def test_same_name_same_instance_merges(self):
+        """2 records with same name AND same page_range → merged (same instance)."""
         from app.structure.llm_template_extractor import _deduplicate_records
 
         rec_with_dob = PIIRecord(
@@ -553,7 +555,7 @@ class TestBatchDedup:
             record_id="r2", entity_type="PERSON", normalized_value="Jane Doe",
             raw_name="Jane Doe",
             raw_address={"raw": "456 Manchester Ave"},
-            source_document_id="doc1", page_range="4-6",
+            source_document_id="doc1", page_range="1-3",
             entity_types_found=("LOCATION", "PERSON"),
         )
 
@@ -564,6 +566,26 @@ class TestBatchDedup:
         assert merged.raw_address == {"raw": "456 Manchester Ave"}
         assert "DATE_OF_BIRTH" in merged.entity_types_found
         assert "LOCATION" in merged.entity_types_found
+
+    def test_same_name_different_page_range_stays_separate(self):
+        """Same name, different page_range → separate records (different people)."""
+        from app.structure.llm_template_extractor import _deduplicate_records
+
+        rec1 = PIIRecord(
+            record_id="r1", entity_type="PERSON", normalized_value="Jane Doe",
+            raw_name="Jane Doe",
+            raw_dob="10-Aug-1959",
+            source_document_id="doc1", page_range="1-3",
+        )
+        rec2 = PIIRecord(
+            record_id="r2", entity_type="PERSON", normalized_value="Jane Doe",
+            raw_name="Jane Doe",
+            raw_address={"raw": "456 Manchester Ave"},
+            source_document_id="doc1", page_range="4-6",
+        )
+
+        result = _deduplicate_records([rec1, rec2])
+        assert len(result) == 2
 
     def test_different_names_not_merged(self):
         """Different names remain separate records."""
