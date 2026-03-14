@@ -504,6 +504,11 @@ def _pipeline_generator(
                     rec = detection_to_pii_record(det, doc_info["source_path"])
                     all_records.append(rec)
 
+        # --- Pattern validation (Step 20) ---
+        if all_records:
+            from app.pii.pattern_validator import validate_extracted_records
+            all_records = validate_extracted_records(all_records)
+
         yield _sse({
             "stage": "detection", "status": "complete",
             "message": f"Detected {len(all_records)} PII record(s) across {len(docs)} document(s)",

@@ -129,9 +129,11 @@ project-root/
 │   │   ├── dag.py                 # Prefect DAG wiring
 │   │   ├── two_phase.py           # Two-phase pipeline: analyze_generator + extract_generator
 │   │   ├── content_onset.py       # Generalized content onset detection (all file types)
+│   │   ├── instance_detector.py   # Step 20: Marker-based instance boundary detection
 │   │   └── auto_approve.py        # Auto-approve logic for document analysis review
 │   ├── pdf/
 │   │   ├── reader.py              # PyMuPDF streaming wrapper
+│   │   ├── renderer.py            # Step 20: PDF page-to-image for vision models
 │   │   ├── ocr.py                 # PaddleOCR integration
 │   │   ├── classifier.py          # digital/scanned/corrupted detection
 │   │   ├── onset.py               # content onset detection
@@ -143,7 +145,8 @@ project-root/
 │   │   ├── layer2_context.py      # Layer 2 context window logic
 │   │   ├── layer3_positional.py   # Layer 3 header inference
 │   │   ├── context_deny_list.py   # Step 14a: common-word deny-list, reference labels, FP heuristic
-│   │   └── schema_filter.py       # Step 14b: DocumentSchema post-filter for Presidio detections
+│   │   ├── schema_filter.py       # Step 14b: DocumentSchema post-filter for Presidio detections
+│   │   └── pattern_validator.py   # Step 20: Post-extraction pattern validation
 │   ├── normalization/             # phone, email, name, address normalizers
 │   ├── rra/                       # entity resolver, deduplicator, fuzzy matching
 │   ├── protocols/                 # Protocol dataclass, loader, registry
@@ -160,11 +163,11 @@ project-root/
 │   │   ├── llm_entity_analyzer.py # LLM entity relationship analysis (Step 13)
 │   │   ├── document_schema.py     # Step 14a: DocumentSchema, FieldContext, PersonContext, DateContext
 │   │   ├── llm_document_understanding.py  # Step 14b: LLM Document Understanding → DocumentSchema
-│   │   └── llm_template_extractor.py # Step 19: LLM-driven PII extraction for templates
+│   │   ├── llm_template_extractor.py # Step 19: LLM-driven PII extraction for templates
+│   │   └── vision_extractor.py    # Step 20: Vision-language model PII extraction
 │   ├── llm/
 │   │   ├── client.py              # OllamaClient — governance-gated LLM wrapper
 │   │   ├── prompts.py             # Prompt templates (classify, assess, suggest, DSA, entity relationships, document understanding)
-│   │   ├── extraction_prompts.py  # Step 19: Schema-driven extraction prompt generator
 │   │   └── audit.py               # LLM call logging (log_llm_call, get_llm_calls)
 │   ├── core/
 │   │   ├── constants.py           # ENTITY_CATEGORY_MAP, DATA_CATEGORIES (8 categories)
@@ -193,7 +196,7 @@ project-root/
 │       ├── components/            # Shared components (ShadCN + custom)
 │       └── App.tsx                # Routes + sidebar + Forentis AI branding
 ├── alembic/
-│   └── versions/                  # 0001–0012
+│   └── versions/                  # 0001–0010
 ├── tests/
 │   ├── test_schema.py
 │   ├── test_repositories.py
@@ -331,14 +334,15 @@ These are detailed in [docs/SCHEMA.md](docs/SCHEMA.md). Summary:
 | 11. Document Structure Analysis | COMPLETE | Heuristic doc type classification (9 types), section detection (13 section types), entity role attribution (5 roles), protocol relevance mapping (8 protocols), LLM-assisted analysis (additive, governance-gated), cross-role merge prevention in RRA, migration 0006, 64 new tests |
 | 12. Two-Phase Pipeline | COMPLETE | Analyze → Review → Extract workflow. Content onset detection (all file types), sample PII extraction from first content page, document-level analysis review (approve/reject/approve-all), auto-approve (confidence-based + protocol-configurable), Phase 2 full extraction on approved docs, migration 0007, `DocumentAnalysisReview` table (18 total), frontend pipeline mode toggle + analysis review panel, 28 new tests |
 | 13. LLM Entity Relationship Analysis | COMPLETE | PII-verified onset detection (two-pass: heuristic candidates → Presidio verification). LLM entity relationship analysis: reads onset page + PII detections, proposes entity groups with confidence + rationale. New analyze stages: `verified_onset` + `entity_analysis`. `EntityRelationshipAnalysis` dataclass, `LLMEntityAnalyzer`, `ANALYZE_ENTITY_RELATIONSHIPS` prompt. API returns entity groups/relationships/guidance. Frontend entity group cards with role badges, relationship display, extraction guidance. Migration 0008 (`documents.entity_analysis` JSON column). 20 new tests. |
-| 14. LLM Document Understanding & Detection Quality | IN PROGRESS | **14a DONE** — context deny-lists, tighter Presidio patterns (38→23 detections). **14a-ii DONE** — protocol-driven recognizer filtering (only jurisdiction-relevant recognizers run). **14b DONE** — LLM Document Understanding (DocumentSchema + SchemaFilter + TableSchema), Boosey 23→8, Washington CMD 68→16. **14c PENDING** — detection tuning (min confidence 10% floor, currency pattern filter, detection dedup), integration (schema→entity analysis, suppression audit trail, API returns suppression log), Catalog tab UX fix (state-driven layout: upload→run→results). Target: Boosey→~4, CMD→~6-7 clean detections. |
-| 15. Field-Level Review + Protocol Mapping | PENDING | Two-tier detection toggle (type-level bulk + individual override) before extraction approval. Protocol field mapping shows required vs detected vs missing fields with completeness percentage. Detection decisions stored in `detection_review_decisions` table (migration 0009). Phase 2 extraction only runs on included types. Frontend: protocol mapping section + detection controls with toggles + "Approve with selections" button. |
-| 16. UX Consolidation: Dashboard, Jobs, Sidebar, Density | PENDING | Four-area UX overhaul. Dashboard: command center with stat cards, needs attention, running jobs, active projects, recent activity feed (GET /dashboard/summary). Jobs tab: filename column, cancel/kill button, status filter, pagination, soft delete, run button, sort controls. Sidebar: consolidate 8→5 items (merge 4 review queues into ReviewQueue page, remove Submit Job, absorb Diagnostic into Settings). Density tab: state-driven display with clear empty state and visual category bars. |
-| 17. Cross-Page Template Linking + FP Cleanup + Auto-Export | COMPLETE | Handle multi-page documents where one individual's PII spans pages. LLM reads N pages (configurable per protocol) to detect repeating templates (e.g., 3 pages per person in pension statements). DocumentTemplate dataclass groups pages into per-individual record sets. build_composite_record() merges cross-page detections into single rich PIIRecord. Financial term deny-list ("Lump Sum" ≠ PERSON). Cross-type suppression (same text as PERSON+LOCATION → heuristic pick). Auto-CSV-export on pipeline completion. |
-| 18. Auditor-Ready CSV Export with Lineage | COMPLETE | Restructure CSV from per-detection rows to per-individual rows. PII types as columns (name, address, DOB, gov ID, email, phone), not JSON array in one column. Source document + page range for audit lineage. Government ID type column (SSN vs NI_NUMBER vs Aadhaar). Three export schemas: auditor (15 cols, default), minimal (3 cols), full (raw values, INVESTIGATION only). Gov ID masking (NE7****2D). Migration 0010 adds lineage columns to NotificationSubject. Export preview endpoint + inline preview in Exports tab. |
-| 19. Schema-Driven LLM Extraction for Templates | COMPLETE | LLM extracts structured fields from template documents, prompt generated from DocumentSchema (not hardcoded). `LLMTemplateExtractor` reads each instance's pages, returns JSON (name, address, DOB, gov ID). 3-path extraction: Path A (template+LLM via `LLMTemplateExtractor`), Path B (template+no-LLM via `extract_with_template`), Path C (non-template per-detection). **Exclusive paths**: Path A skips Presidio entirely; Presidio only runs for Path B fallback or Path C. `ALWAYS_EXTRACT_IF_PRESENT` ensures NI_NUMBER/US_SSN/DOB always in prompts even if schema omits them. Cross-batch deduplication merges same-name records, fills field gaps. Batching (3 instances/call default). `ENTITY_EXTRACTION_GUIDE` maps 17 entity types. Presidio validation. **19b**: Extraction preview in analysis phase — runs LLM on first template instance during analyze, stores preview on `DocumentAnalysisReview.extraction_preview` (migration 0011), API returns preview, frontend shows fields found/missing card. **19c**: Defensive LLM response parsing — `_safe_parse_list()`, partial schema, NI splitting. **19d**: analyze_generator now passes total_pages/protocol_name/protocol_config to LLM understand (was missing → single-page mode, no template detected). Subject cleanup — each pipeline run deletes old NotificationSubjects for the project before dedup. `canonical_dob` + `canonical_government_id` columns on NotificationSubject (migration 0012). `IDENTIFICATION_NUMBER` mapped to `raw_government_id` in LLMTemplateExtractor. DOB/gov_id surfaced through deduplicator → SubjectRow → CSV export. **19e**: Marker-based instance boundary detection — `DocumentTemplate.instance_marker` field, `find_instance_boundaries()` scans pages for heading text (e.g., "IN RESPECT OF:") to find variable-length instances instead of fixed-stride paging. LLM prompt updated to return `instance_marker`. Falls back to fixed stride if marker not found or <2 boundaries. 50 tests. |
+| 14. LLM Document Understanding & Detection Quality | COMPLETE | Context deny-lists, tighter Presidio patterns, protocol-driven recognizer filtering, LLM Document Understanding (DocumentSchema + SchemaFilter + TableSchema), detection tuning, Catalog tab UX. |
+| 15. Field-Level Review + Protocol Mapping | COMPLETE | Two-tier detection toggle, protocol field mapping, `detection_review_decisions` table (migration 0009, 19 tables). |
+| 16. UX Consolidation: Dashboard, Jobs, Sidebar, Density | COMPLETE | Dashboard command center, Jobs tab (cancel/archive/filter/pagination), Sidebar 8→5 items, Density state-driven display. |
+| 17. Cross-Page Template Linking + FP Cleanup + Auto-Export | COMPLETE | DocumentTemplate, PageRole, multi-page LLM reading, build_composite_record, financial term deny-list, cross-type suppression, auto-CSV-export. |
+| 18. Auditor-Ready CSV Export with Lineage | COMPLETE | Schema-driven CSV (auditor/minimal/full), +5 lineage columns on NotificationSubject (migration 0010), gov ID masking, preview endpoint. |
+| 19. Schema-Driven LLM Extraction for Templates | COMPLETE | LLMTemplateExtractor, ENTITY_EXTRACTION_GUIDE (17 types), ALWAYS_EXTRACT_IF_PRESENT, 3-path extraction (exclusive), cross-batch dedup, marker-based instance boundaries, 24 tests. |
+| 20. Vision-First Extraction Architecture | COMPLETE | Vision-language model as primary extractor. VisionDocumentExtractor, PDF page renderer, instance boundary detector, OllamaClient.generate_with_images. 3 priority paths: vision→text+LLM→Presidio (exclusive). Pattern validation (NI/SSN/date/email format checks, financial term + org name suppression). Per-protocol vision_model + vision_page_dpi config. 56 new tests. |
 
-**2047 tests passing.**
+**2103 tests passing after Steps 1–20.**
 
 See [docs/PLAN.md](docs/PLAN.md) for active steps and [docs/PLAN_COMPLETED.md](docs/PLAN_COMPLETED.md) for completed reference.
 
@@ -357,3 +361,23 @@ See [docs/PLAN.md](docs/PLAN.md) for active steps and [docs/PLAN_COMPLETED.md](d
 - STRICT mode tests: assert `raw_value_encrypted IS NULL` on every write
 - INVESTIGATION mode tests: assert `retention_until IS NOT NULL` on every write
 - Cross-page tests: assert `spans_pages` is set correctly for stitched extractions
+
+
+## 11) Persistent Working Memory
+
+Claude Code sub-agents use `docs/WORKSTATE.md` as external memory for tasks modifying more than 2 files.
+
+### Rules
+- **Read first:** Before any work, read `docs/WORKSTATE.md` if it exists
+- **Write often:** After every file modification or finding, update WORKSTATE.md
+- **Trust the file:** After compaction, WORKSTATE.md is the source of truth
+- **Don't redo:** If WORKSTATE.md says a file is modified ✓, skip it
+
+### Scripts
+```
+./scripts/run-with-metrics.sh 'task description'   # New task with memory + metrics
+./scripts/resume.sh                                  # Continue interrupted task
+./scripts/clean.sh                                   # Archive and reset
+./scripts/metrics-dashboard.sh                       # View aggregate stats
+```
+EOF

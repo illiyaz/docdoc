@@ -514,12 +514,18 @@ def analyze_generator(
 
                     # Extract ONLY the first instance as preview
                     first_instance = instances[0]
+                    # Limit page_texts to just the first instance's pages
+                    # to prevent extract_all_instances from finding ALL
+                    # instances via marker scan (149 LLM calls!)
+                    preview_page_texts = {
+                        p: page_texts.get(p, "") for p in first_instance
+                    }
                     try:
                         preview_records = extractor.extract_all_instances(
                             schema,
-                            page_texts,
+                            preview_page_texts,
                             str(doc.id),
-                            total_pages=len(first_instance),  # limit to first instance
+                            total_pages=len(first_instance),
                         )
                     except Exception:
                         logger.warning(
@@ -922,85 +928,139 @@ def extract_generator(
                     except Exception:
                         pass
 
-                # 3-path extraction (Step 19 — exclusive, no dual records):
-                #   Path A: template + LLM → LLMTemplateExtractor (ONLY these records)
-                #   Path B: template + no LLM → Presidio composite
-                #   Path C: non-template → Presidio per-detection records
+                # 3-path extraction (Step 20 — exclusive, clear priority):
+                #   Path 1: Vision model (primary for ALL documents)
+                #   Path 2: Text + LLM (fallback when vision unavailable)
+                #   Path 3: Presidio only (last resort, no LLM)
                 is_template = (
                     schema is not None
                     and schema.template
                     and schema.template.pages_per_instance >= 2
                 )
+                doc_pages = set(b.page_or_sheet for b in blocks)
+                total_pg = len(doc_pages)
 
+                records: list[PIIRecord] = []
+                extraction_path = "3"  # default: Presidio
+
+                # Resolve batch size from protocol config
+                batch_size = DEFAULT_EXTRACTION_BATCH_SIZE
+                base_key = protocol_id.lower().replace("-", "_").replace(" ", "_")
+                if base_key in PROTOCOL_LLM_CONFIG:
+                    batch_size = int(PROTOCOL_LLM_CONFIG[base_key].get(
+                        "extraction_batch_size", batch_size,
+                    ))
+
+                # Resolve vision model: user override → protocol default → global
+                vision_model = None
+                vision_dpi = settings.vision_page_dpi
+                if protocol_config and isinstance(protocol_config, dict):
+                    vision_model = protocol_config.get("vision_model")
+                    if "vision_page_dpi" in protocol_config:
+                        vision_dpi = int(protocol_config["vision_page_dpi"])
+                if not vision_model and base_key in PROTOCOL_LLM_CONFIG:
+                    vision_model = PROTOCOL_LLM_CONFIG[base_key].get("vision_model")
+                    if not vision_dpi and "vision_page_dpi" in PROTOCOL_LLM_CONFIG[base_key]:
+                        vision_dpi = int(PROTOCOL_LLM_CONFIG[base_key]["vision_page_dpi"])
+
+                # Detect instance boundaries (for template docs)
+                instances: list[list[int]] | None = None
                 if is_template:
-                    doc_pages = set(b.page_or_sheet for b in blocks)
-                    total_pg = len(doc_pages)
-
-                    records: list[PIIRecord] = []
-                    extraction_path = "B"
-
-                    # Path A: LLM extraction — skip Presidio entirely
-                    if settings.llm_assist_enabled:
+                    # Prefer file-based marker scan over text-based
+                    if doc.source_path:
                         try:
-                            from app.llm.client import OllamaClient
-                            from app.structure.llm_template_extractor import LLMTemplateExtractor
-
-                            batch_size = DEFAULT_EXTRACTION_BATCH_SIZE
-                            base_key = protocol_id.lower().replace("-", "_").replace(" ", "_")
-                            if base_key in PROTOCOL_LLM_CONFIG:
-                                batch_size = int(PROTOCOL_LLM_CONFIG[base_key].get("extraction_batch_size", batch_size))
-
-                            page_texts: dict[int, str] = {}
-                            for b in blocks:
-                                pg = b.page_or_sheet
-                                if pg not in page_texts:
-                                    page_texts[pg] = ""
-                                page_texts[pg] += b.text + "\n"
-
-                            client = OllamaClient(db_session=db)
-                            extractor = LLMTemplateExtractor(client, batch_size=batch_size)
-                            llm_records = extractor.extract_all_instances(
-                                schema, page_texts, str(doc.id), total_pg,
-                            )
-
-                            if llm_records:
-                                records = llm_records
-                                extraction_path = "A"
-                                logger.info(
-                                    "Path A (LLM) for %s: %d pages, %d-page template → %d records",
-                                    doc.file_name, total_pg, schema.template.pages_per_instance, len(records),
-                                )
+                            from app.pipeline.instance_detector import find_instance_boundaries as _find_bounds
+                            marker = getattr(schema.template, "instance_marker", None)
+                            instances = _find_bounds(doc.source_path, marker)
                         except Exception:
-                            logger.warning(
-                                "Path A (LLM) failed for %s, falling back to Path B",
-                                doc.file_name, exc_info=True,
-                            )
+                            pass
+                    # Fall back to text-based boundaries from template
+                    if not instances:
+                        page_texts_for_bounds: dict[int, str] = {}
+                        for b in blocks:
+                            pg = b.page_or_sheet
+                            if pg not in page_texts_for_bounds:
+                                page_texts_for_bounds[pg] = ""
+                            page_texts_for_bounds[pg] += b.text + "\n"
+                        if schema.template.instance_marker:
+                            instances = schema.template.find_instance_boundaries(page_texts_for_bounds)
+                        else:
+                            instances = schema.template.get_instance_pages(total_pg)
 
-                    # Path B fallback: need Presidio detections for composite
-                    if not records:
-                        detections = engine.analyze(blocks, target_entity_types=doc_targets)
-                        if schema is not None and schema_filter_cls is not None:
-                            try:
-                                sf = schema_filter_cls(schema)
-                                result = sf.filter_detections(detections)
-                                detections = result.kept
-                            except Exception:
-                                pass
-                        records = extract_with_template(detections, schema, str(doc.id), total_pg)
-                        logger.info(
-                            "Path B (Presidio composite) for %s: %d pages → %d records (from %d detections)",
-                            doc.file_name, total_pg, len(records), len(detections),
+                # --- Path 1: Vision (primary) ---
+                if (
+                    settings.use_vision_extraction
+                    and settings.llm_assist_enabled
+                    and doc.source_path
+                    and (doc.file_type or "").lower() in ("pdf", ".pdf", "application/pdf")
+                ):
+                    try:
+                        from app.llm.client import OllamaClient
+                        from app.structure.vision_extractor import VisionDocumentExtractor
+
+                        client = OllamaClient(db_session=db)
+                        if client.is_vision_available():
+                            vision_ext = VisionDocumentExtractor(
+                                client,
+                                batch_size=batch_size,
+                                dpi=vision_dpi,
+                                vision_model=vision_model,
+                            )
+                            if is_template and instances:
+                                records = vision_ext.extract_template_instances(
+                                    doc.source_path, schema, instances, str(doc.id),
+                                )
+                            else:
+                                all_page_nums = sorted(doc_pages)
+                                records = vision_ext.extract_pages(
+                                    doc.source_path, all_page_nums, str(doc.id), schema,
+                                )
+                            if records:
+                                extraction_path = "1"
+                                logger.info(
+                                    "Path 1 (Vision) for %s: %d records",
+                                    doc.file_name, len(records),
+                                )
+                    except Exception:
+                        logger.warning(
+                            "Path 1 (Vision) failed for %s, trying Path 2",
+                            doc.file_name, exc_info=True,
                         )
 
-                    all_records.extend(records)
+                # --- Path 2: Text + LLM (fallback) ---
+                if not records and settings.llm_assist_enabled and is_template and instances:
+                    try:
+                        from app.llm.client import OllamaClient
+                        from app.structure.llm_template_extractor import LLMTemplateExtractor
 
-                    yield _sse({
-                        "stage": "detection", "status": "running",
-                        "message": f"Extracted {len(records)} record(s) from {doc.file_name} (Path {extraction_path})",
-                        "detail": {"extraction_path": extraction_path, "records": len(records)},
-                    })
-                else:
-                    # Path C: non-template — run Presidio, create per-detection records
+                        page_texts: dict[int, str] = {}
+                        for b in blocks:
+                            pg = b.page_or_sheet
+                            if pg not in page_texts:
+                                page_texts[pg] = ""
+                            page_texts[pg] += b.text + "\n"
+
+                        client = OllamaClient(db_session=db)
+                        text_extractor = LLMTemplateExtractor(client, batch_size=batch_size)
+                        llm_records = text_extractor.extract_all_instances(
+                            schema, page_texts, str(doc.id), total_pg,
+                        )
+
+                        if llm_records:
+                            records = llm_records
+                            extraction_path = "2"
+                            logger.info(
+                                "Path 2 (Text+LLM) for %s: %d records",
+                                doc.file_name, len(records),
+                            )
+                    except Exception:
+                        logger.warning(
+                            "Path 2 (Text+LLM) failed for %s, falling back to Path 3",
+                            doc.file_name, exc_info=True,
+                        )
+
+                # --- Path 3: Presidio only (last resort) ---
+                if not records:
                     detections = engine.analyze(blocks, target_entity_types=doc_targets)
                     if schema is not None and schema_filter_cls is not None:
                         try:
@@ -1009,9 +1069,34 @@ def extract_generator(
                             detections = result.kept
                         except Exception:
                             pass
-                    for det in detections:
-                        rec = detection_to_pii_record(det, str(doc.id))
-                        all_records.append(rec)
+                    if is_template and instances:
+                        records = extract_with_template(detections, schema, str(doc.id), total_pg)
+                    else:
+                        records = [detection_to_pii_record(det, str(doc.id)) for det in detections]
+                    extraction_path = "3"
+                    logger.info(
+                        "Path 3 (Presidio) for %s: %d records",
+                        doc.file_name, len(records),
+                    )
+
+                # --- Pattern validation (Step 20) ---
+                if records:
+                    from app.pii.pattern_validator import validate_extracted_records
+                    pre_count = len(records)
+                    records = validate_extracted_records(records)
+                    if len(records) < pre_count:
+                        logger.info(
+                            "Validation suppressed %d/%d records for %s",
+                            pre_count - len(records), pre_count, doc.file_name,
+                        )
+
+                all_records.extend(records)
+
+                yield _sse({
+                    "stage": "detection", "status": "running",
+                    "message": f"Extracted {len(records)} record(s) from {doc.file_name} (Path {extraction_path})",
+                    "detail": {"extraction_path": extraction_path, "records": len(records)},
+                })
             except Exception as e:
                 logger.warning("Detection failed for doc %s: %s", doc.file_name, type(e).__name__)
 

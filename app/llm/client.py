@@ -217,6 +217,106 @@ class OllamaClient:
 
         return response_text
 
+    def generate_with_images(
+        self,
+        prompt: str,
+        images: list[str],
+        *,
+        use_case: str = "vision_extraction",
+        document_id=None,
+        model_override: str | None = None,
+    ) -> str:
+        """Send a prompt with base64-encoded images to a vision-language model.
+
+        Parameters
+        ----------
+        prompt:
+            The user prompt describing what to extract.
+        images:
+            List of base64-encoded PNG images (one per page).
+        use_case:
+            Label for audit logging.
+        document_id:
+            Optional document FK for audit logging.
+        model_override:
+            Use a specific model instead of the default vision model.
+
+        Returns
+        -------
+        str
+            The model's response text.
+        """
+        settings = get_settings()
+        if not settings.llm_assist_enabled:
+            raise LLMDisabledError(
+                "LLM assist is disabled (LLM_ASSIST_ENABLED=false)."
+            )
+
+        model = model_override or settings.ollama_vision_model
+
+        payload: dict = {
+            "model": model,
+            "prompt": prompt,
+            "images": images,
+            "stream": False,
+        }
+
+        start = time.monotonic()
+        try:
+            response = httpx.post(
+                f"{self.base_url}/api/generate",
+                json=payload,
+                timeout=self.timeout_s * 2,  # vision calls take longer
+            )
+            response.raise_for_status()
+        except httpx.TimeoutException as exc:
+            self._last_latency_ms = int((time.monotonic() - start) * 1000)
+            raise LLMTimeoutError(
+                f"Vision request timed out after {self.timeout_s * 2}s"
+            ) from exc
+        except httpx.ConnectError as exc:
+            self._last_latency_ms = int((time.monotonic() - start) * 1000)
+            raise LLMConnectionError(
+                f"Cannot connect to Ollama at {self.base_url}"
+            ) from exc
+        except httpx.HTTPError as exc:
+            self._last_latency_ms = int((time.monotonic() - start) * 1000)
+            raise LLMConnectionError(f"Ollama HTTP error: {exc}") from exc
+
+        elapsed_ms = int((time.monotonic() - start) * 1000)
+        self._last_latency_ms = elapsed_ms
+
+        data = response.json()
+        response_text = data.get("response", "")
+        token_count = data.get("eval_count")
+
+        if self.db_session is not None:
+            log_llm_call(
+                self.db_session,
+                document_id=document_id,
+                use_case=use_case,
+                model=model,
+                prompt_text=f"[vision: {len(images)} images] {prompt[:500]}",
+                response_text=response_text,
+                latency_ms=elapsed_ms,
+                token_count=token_count,
+            )
+
+        return response_text
+
+    def is_vision_available(self) -> bool:
+        """Check if the configured vision model is loaded in Ollama."""
+        settings = get_settings()
+        try:
+            resp = httpx.get(f"{self.base_url}/api/tags", timeout=5)
+            if resp.status_code != 200:
+                return False
+            models = [m.get("name", "") for m in resp.json().get("models", [])]
+            vision_base = settings.ollama_vision_model.split(":")[0]
+            return any(vision_base in m for m in models)
+        except Exception:
+            return False
+
     def is_available(self) -> bool:
         """Check whether Ollama is reachable.
 

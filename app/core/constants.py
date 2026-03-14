@@ -302,51 +302,67 @@ def get_entity_categories(entity_type: str) -> list[str]:
 # and whether to expect multi-page repeating templates.
 # User-configured protocol_config overrides → protocol default → fallback (3 pages).
 
-PROTOCOL_LLM_CONFIG: dict[str, dict[str, int | bool]] = {
+PROTOCOL_LLM_CONFIG: dict[str, dict[str, int | bool | str]] = {
     "hipaa": {
         "llm_pages_to_read": 5,
         "expect_multi_page_records": True,
-        "extraction_batch_size": 3,
+        "extraction_batch_size": 5,
+        "vision_model": "qwen2.5vl:32b",
+        "vision_page_dpi": 150,
     },
     "gdpr": {
         "llm_pages_to_read": 3,
         "expect_multi_page_records": True,
-        "extraction_batch_size": 3,
+        "extraction_batch_size": 5,
+        "vision_model": "qwen2.5vl:32b",
+        "vision_page_dpi": 150,
     },
     "ccpa": {
         "llm_pages_to_read": 3,
         "expect_multi_page_records": True,
-        "extraction_batch_size": 3,
+        "extraction_batch_size": 5,
+        "vision_model": "qwen2.5vl:32b",
+        "vision_page_dpi": 150,
     },
     "hitech": {
         "llm_pages_to_read": 5,
         "expect_multi_page_records": True,
-        "extraction_batch_size": 3,
+        "extraction_batch_size": 5,
+        "vision_model": "qwen2.5vl:32b",
+        "vision_page_dpi": 150,
     },
     "ferpa": {
         "llm_pages_to_read": 4,
         "expect_multi_page_records": True,
-        "extraction_batch_size": 3,
+        "extraction_batch_size": 5,
+        "vision_model": "qwen2.5vl:32b",
+        "vision_page_dpi": 150,
     },
     "state_breach_generic": {
         "llm_pages_to_read": 3,
         "expect_multi_page_records": True,
-        "extraction_batch_size": 3,
+        "extraction_batch_size": 5,
+        "vision_model": "qwen2.5vl:32b",
+        "vision_page_dpi": 150,
     },
     "bipa": {
         "llm_pages_to_read": 2,
         "expect_multi_page_records": False,
         "extraction_batch_size": 1,
+        "vision_model": "qwen2.5vl:32b",
+        "vision_page_dpi": 150,
     },
     "dpdpa": {
         "llm_pages_to_read": 3,
         "expect_multi_page_records": True,
-        "extraction_batch_size": 3,
+        "extraction_batch_size": 5,
+        "vision_model": "qwen2.5vl:32b",
+        "vision_page_dpi": 150,
     },
 }
 
 DEFAULT_LLM_PAGES_TO_READ = 3
-DEFAULT_EXTRACTION_BATCH_SIZE = 3
+DEFAULT_EXTRACTION_BATCH_SIZE = 5
 
 
 # ---------------------------------------------------------------------------
