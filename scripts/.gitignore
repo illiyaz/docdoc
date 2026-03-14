@@ -1,0 +1,9 @@
+# Don't commit actual WORKSTATE files (they're project-specific)
+docs/WORKSTATE.md
+docs/workstate_archive/
+
+# OS files
+.DS_Store
+Thumbs.db
+docs/workstate_metrics.jsonl
+docs/workstate_archive/
