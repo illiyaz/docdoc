@@ -2,8 +2,8 @@
 
 Single source of truth for how this codebase is built and maintained. All contributors (human and AI) must follow these rules without exception.
 
-See [docs/PLAN.md](docs/PLAN.md) for active implementation steps (14-16).
-See [docs/PLAN_COMPLETED.md](docs/PLAN_COMPLETED.md) for completed steps (Phases 1-4, Steps 1-13).
+See [docs/PLAN.md](docs/PLAN.md) for active implementation steps (21+).
+See [docs/PLAN_COMPLETED.md](docs/PLAN_COMPLETED.md) for completed steps (Phases 1-4, Steps 1-20).
 See [docs/SCHEMA.md](docs/SCHEMA.md) for detailed technical architecture (PDF processing, PII detection, RRA, protocols, HITL, notifications).
 
 ---
@@ -110,7 +110,7 @@ Every library and model must be resolvable from a local artifact registry. No li
 project-root/
 ├── CLAUDE.md
 ├── docs/
-│   ├── PLAN.md                    # active implementation steps (14-16)
+│   ├── PLAN.md                    # active implementation steps (21+)
 │   ├── PLAN_COMPLETED.md          # completed steps archive (1-13)
 │   └── SCHEMA.md                  # detailed technical architecture
 ├── config/
@@ -299,7 +299,7 @@ These are detailed in [docs/SCHEMA.md](docs/SCHEMA.md). Summary:
 - Do not use Tesseract (use PaddleOCR)
 - Do not use pdfplumber or PyPDF2 (use PyMuPDF)
 - Do not load entire PDFs into memory
-- Do not use fixed coordinates as the primary extraction mechanism
+- Do not use fixed coordinates as the SOLE extraction mechanism (use anchor-relative with LLM-guided field maps — see Step 21)
 - Do not store or log raw PII values anywhere
 - Do not make LLM mandatory for correctness — the deterministic pipeline must work without it
 - Do not introduce runtime network dependencies
@@ -340,7 +340,8 @@ These are detailed in [docs/SCHEMA.md](docs/SCHEMA.md). Summary:
 | 17. Cross-Page Template Linking + FP Cleanup + Auto-Export | COMPLETE | DocumentTemplate, PageRole, multi-page LLM reading, build_composite_record, financial term deny-list, cross-type suppression, auto-CSV-export. |
 | 18. Auditor-Ready CSV Export with Lineage | COMPLETE | Schema-driven CSV (auditor/minimal/full), +5 lineage columns on NotificationSubject (migration 0010), gov ID masking, preview endpoint. |
 | 19. Schema-Driven LLM Extraction for Templates | COMPLETE | LLMTemplateExtractor, ENTITY_EXTRACTION_GUIDE (17 types), ALWAYS_EXTRACT_IF_PRESENT, 3-path extraction (exclusive), cross-batch dedup, marker-based instance boundaries, 24 tests. |
-| 20. Vision-First Extraction Architecture | COMPLETE | Vision-language model as primary extractor. VisionDocumentExtractor, PDF page renderer, instance boundary detector, OllamaClient.generate_with_images. extraction preview with per-field page numbers. 4 extraction strategies: template (1 person/N pages), table (N people/page), vision page, Presidio fallback. Pattern validation (NI/SSN/date/email format checks, financial term + org name suppression). Per-protocol vision_model + vision_page_dpi config. Table extraction: is_tabular + records_per_page_estimate on DocumentSchema, VisionDocumentExtractor.extract_table_pages(), LLMTemplateExtractor.extract_table_pages(), tabular preview with sample rows. 79 new tests. |
+| 20. Vision-First Extraction Architecture | COMPLETE | Vision-language model as primary extractor. VisionDocumentExtractor, PDF page renderer, instance boundary detector, OllamaClient.generate_with_images. 4 extraction strategies: template, table, vision page, Presidio fallback. Pattern validation. Per-protocol model config. Table extraction. Background extraction (SSE decoupling). Configurable dedup anchors. Batch reliability with retry/backoff. 79 new tests. |
+| 21. Coordinate-Based Extraction for Structured Documents | PENDING | For fixed-layout documents (accounting statements, payslips), LLM analyzes layout once → builds field map (anchor text + spatial relationships + coordinates) → Python extracts ALL pages using coordinate-based text extraction in seconds. Auditor reviews/edits field map before extraction. Reconciliation: failed pages sent to LLM fallback. ADDITIVE — existing LLM template/table/page paths unchanged. |
 
 **Bugfix: Extraction preview multi-page read** — Preview now reads ALL pages of instance 0 (not just identity page). `build_preview_extraction_prompt()` asks LLM for per-field page numbers (`{value, page}` format). `_parse_preview_response()` parses LLM output with canonical field mapping. Instance count uses `find_instance_boundaries()` when marker set. 11 net new tests.
 
@@ -403,4 +404,3 @@ Claude Code sub-agents use `docs/WORKSTATE.md` as external memory for tasks modi
 ./scripts/clean.sh                                   # Archive and reset
 ./scripts/metrics-dashboard.sh                       # View aggregate stats
 ```
-EOF

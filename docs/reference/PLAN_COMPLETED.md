@@ -968,3 +968,50 @@ discovery → cataloging → structure_analysis → verified_onset → sample_ex
 - Memory-safe: `_forget_page()` after each page scan during onset verification
 
 ---
+---
+
+## Phase 5 Steps 14-20 (COMPLETE — 2185+ tests)
+
+### Step 14 — LLM Document Understanding & Detection Quality (COMPLETE)
+
+Context deny-lists, tighter Presidio patterns, protocol-driven recognizer filtering (GDPR disables US types, DPDPA disables UK/EU). LLM Document Understanding creates DocumentSchema (field map, people, dates, tables, suppression hints) as semantic pre-filter for Presidio. SchemaFilter applies DocumentSchema to suppress false positives. Detection tuning: min 10% confidence floor, currency pattern filter, cross-type dedup. Boosey & Hawkes: 38→8 detections.
+
+### Step 15 — Field-Level Review + Protocol Mapping (COMPLETE)
+
+Two-tier detection toggle (type-level bulk + individual override). Protocol field mapping shows required vs detected vs missing fields. `detection_review_decisions` table (migration 0009, 19 tables). "Approve with selections" button. Detection Controls UI in analysis review panel.
+
+### Step 16 — UX Consolidation (COMPLETE)
+
+Dashboard command center (stat cards, needs attention, running jobs, active projects, recent activity). Jobs tab (filename column, cancel button, status filter, pagination, soft delete, duration fix). Sidebar 8→5 items (Dashboard, Projects, Review Queue, Jobs, Settings). Merged 4 review queues into single ReviewQueue page with tabs. Density state-driven display.
+
+### Step 17 — Cross-Page Template Linking + FP Cleanup + Auto-Export (COMPLETE)
+
+DocumentTemplate, PageRole, multi-page LLM reading for template documents. build_composite_record for cross-page PIIRecord assembly. Financial term deny-list, cross-type suppression. Auto-CSV-export on pipeline completion.
+
+### Step 18 — Auditor-Ready CSV Export with Lineage (COMPLETE)
+
+Schema-driven CSV (auditor/minimal/full export schemas). +5 lineage columns on NotificationSubject (migration 0010): source_document_name, source_page_range, government_id_type, extraction_confidence, pii_types_list. Government ID masking (NE7****2D). Export preview endpoint.
+
+### Step 19 — Schema-Driven LLM Extraction for Templates (COMPLETE)
+
+LLMTemplateExtractor: extraction prompt GENERATED from DocumentSchema (not hardcoded). ENTITY_EXTRACTION_GUIDE (17 entity types). ALWAYS_EXTRACT_IF_PRESENT supplementary fields. Three exclusive extraction paths: template+LLM (primary), template+no-LLM (Presidio composite fallback), non-template (Presidio per-page). Cross-batch dedup. Marker-based instance boundaries via find_instance_boundaries(). Batch extraction with configurable batch_size. 24 tests.
+
+**Critical bugfix (Step 19c):** `_parse_response()` in llm_document_understanding.py crashed with `AttributeError: 'str' object has no attribute 'get'` when LLM returned date_contexts as strings instead of dicts. This caused DocumentSchema=None for every document, silently disabling all Steps 14-19 improvements. Fixed with `_safe_parse_list()` helper + partial schema fallback (never returns None). Also: NI number splitting in detection_to_pii_record ("Blunt NH828286D" → name + gov ID).
+
+### Step 20 — Vision-First Extraction Architecture (COMPLETE)
+
+Vision-language model as primary extractor for all document types. VisionDocumentExtractor, PDF page renderer (app/pdf/renderer.py), instance boundary detector (app/pipeline/instance_detector.py). OllamaClient.generate_with_images() for vision model calls (single image per call — llama3.2-vision limitation). Four extraction strategies: template (1 person/N pages), table (N people/page), vision page, Presidio fallback. Pattern validation (NI/SSN/date/email format checks, financial term + org name suppression). Per-protocol model config (vision_model, vision_page_dpi, extraction_batch_size, dedup_anchors per protocol). Table extraction: is_tabular + records_per_page_estimate on DocumentSchema.
+
+**Extraction preview multi-page read:** Preview reads ALL pages of instance 0 (not just identity page). Per-field page numbers in preview. Instance count uses find_instance_boundaries().
+
+**Cross-instance dedup fix:** 149 unique individuals were collapsed to 28 rows. Fixed: _deduplicate_records() keys on (name, page_range) for template docs. EntityResolver returns 0.0 confidence for cross-instance same-doc records.
+
+**Configurable dedup anchors:** _build_anchor_key() with 5 anchor types (ssn, name_dob, email, phone, name_address). Per-protocol dedup_anchors in PROTOCOL_LLM_CONFIG. Frontend shows dedup strategy in analysis review panel.
+
+**Batch reliability:** MAX_RETRIES=3, exponential backoff, split-to-individual on batch failure, unload_unused_models(), timeout_override=120s. Extraction summary logging.
+
+**Background extraction (SSE decoupling):** run_extraction_background() in daemon thread with own DB session. Per-doc commit to Document.metadata_json. Progress via IngestionRun.metrics with heartbeat. Resume support (completed_doc_ids). Cancellation check between docs. extract_generator() rewritten as thin SSE relay. Frontend auto-reconnect (max 60 retries, 2s delay).
+
+**Vision prompt reframing:** Changed "extracting personal information" to "document processing assistant for regulatory compliance team" + "transcribe" instead of "extract" to avoid model safety filter refusals.
+
+79 new tests across Steps 20 features. 2185 tests total.
