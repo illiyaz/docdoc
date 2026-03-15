@@ -22,7 +22,7 @@ from app.llm.extraction_prompts import (
     ALWAYS_EXTRACT_IF_PRESENT,
     ENTITY_EXTRACTION_GUIDE,
 )
-from app.pdf.renderer import render_page_to_image, render_pages_to_images
+from app.pdf.renderer import render_page_to_image
 from app.rra.entity_resolver import PIIRecord
 from app.structure.document_schema import DocumentSchema
 from app.structure.llm_template_extractor import (
@@ -83,54 +83,43 @@ class VisionDocumentExtractor:
 
         key_page_offset = self._find_key_page_offset(schema)
         records: list[PIIRecord] = []
-        total_batches = (len(instance_boundaries) + self.batch_size - 1) // self.batch_size
+        total_instances = len(instance_boundaries)
 
-        for batch_start in range(0, len(instance_boundaries), self.batch_size):
-            batch = instance_boundaries[batch_start:batch_start + self.batch_size]
-
-            # Render key page for each instance in batch
-            batch_images: list[str] = []
-            batch_pages: list[list[int]] = []
-            for instance_pages in batch:
-                key_page = instance_pages[min(key_page_offset, len(instance_pages) - 1)]
-                try:
-                    image = render_page_to_image(doc_path, key_page, dpi=self.dpi)
-                    batch_images.append(image)
-                    batch_pages.append(instance_pages)
-                except Exception:
-                    logger.warning(
-                        "Failed to render page %d of %s", key_page, doc_id,
-                        exc_info=True,
-                    )
-                    continue
-
-            if not batch_images:
+        for idx, instance_pages in enumerate(instance_boundaries):
+            key_page = instance_pages[min(key_page_offset, len(instance_pages) - 1)]
+            try:
+                image = render_page_to_image(doc_path, key_page, dpi=self.dpi)
+            except Exception:
+                logger.warning(
+                    "Failed to render page %d of %s", key_page, doc_id,
+                    exc_info=True,
+                )
                 continue
 
-            prompt = self._build_batch_prompt(schema, len(batch_images))
+            # One image per call — vision models only support single image
+            prompt = self._build_batch_prompt(schema, 1)
 
             try:
                 response = self.client.generate_with_images(
                     prompt=prompt,
-                    images=batch_images,
+                    images=[image],
                     use_case="vision_template_extraction",
                     document_id=doc_id,
                     model_override=self.vision_model,
                 )
-                batch_records = self._parse_batch_response(
-                    response, doc_id, batch_pages,
+                instance_records = self._parse_batch_response(
+                    response, doc_id, [instance_pages],
                 )
-                records.extend(batch_records)
+                records.extend(instance_records)
             except Exception:
                 logger.warning(
-                    "Vision batch extraction failed at offset %d of %s",
-                    batch_start, doc_id, exc_info=True,
+                    "Vision extraction failed for instance %d of %s",
+                    idx, doc_id, exc_info=True,
                 )
 
             if progress_callback is not None:
-                batch_idx = batch_start // self.batch_size + 1
                 try:
-                    progress_callback(batch_idx, total_batches, len(records))
+                    progress_callback(idx + 1, total_instances, len(records))
                 except Exception:
                     pass
 
@@ -156,39 +145,34 @@ class VisionDocumentExtractor:
             return []
 
         all_records: list[PIIRecord] = []
-        batch_size = max(1, min(self.batch_size, 5))
 
-        for batch_start in range(0, len(page_numbers), batch_size):
-            batch_page_nums = page_numbers[batch_start:batch_start + batch_size]
+        for page_num in page_numbers:
             try:
-                images = render_pages_to_images(doc_path, batch_page_nums, dpi=self.dpi)
+                image = render_page_to_image(doc_path, page_num, dpi=self.dpi)
             except Exception:
                 logger.warning(
-                    "Failed to render pages %s of %s", batch_page_nums, doc_id,
+                    "Failed to render page %d of %s", page_num, doc_id,
                     exc_info=True,
                 )
                 continue
 
-            if not images:
-                continue
-
-            prompt = self._build_page_extraction_prompt(schema, len(images))
+            # One image per call — vision models only support single image
+            prompt = self._build_page_extraction_prompt(schema, 1)
 
             try:
                 response = self.client.generate_with_images(
                     prompt=prompt,
-                    images=images,
+                    images=[image],
                     use_case="vision_page_extraction",
                     document_id=doc_id,
                     model_override=self.vision_model,
                 )
-                page_groups = [[p] for p in batch_page_nums[:len(images)]]
-                records = self._parse_batch_response(response, doc_id, page_groups)
+                records = self._parse_batch_response(response, doc_id, [[page_num]])
                 all_records.extend(records)
             except Exception:
                 logger.warning(
-                    "Vision page extraction failed for pages %s of %s",
-                    batch_page_nums, doc_id, exc_info=True,
+                    "Vision page extraction failed for page %d of %s",
+                    page_num, doc_id, exc_info=True,
                 )
                 continue
 
@@ -215,36 +199,33 @@ class VisionDocumentExtractor:
 
         all_records: list[PIIRecord] = []
 
-        for batch_start in range(0, len(page_numbers), self.batch_size):
-            batch_page_nums = page_numbers[batch_start:batch_start + self.batch_size]
+        for page_num in page_numbers:
             try:
-                images = render_pages_to_images(doc_path, batch_page_nums, dpi=self.dpi)
+                image = render_page_to_image(doc_path, page_num, dpi=self.dpi)
             except Exception:
                 logger.warning(
-                    "Failed to render table pages %s of %s",
-                    batch_page_nums, doc_id, exc_info=True,
+                    "Failed to render table page %d of %s",
+                    page_num, doc_id, exc_info=True,
                 )
                 continue
 
-            if not images:
-                continue
-
-            prompt = self._build_table_prompt(schema, len(images))
+            # One image per call — vision models only support single image
+            prompt = self._build_table_prompt(schema, 1)
 
             try:
                 response = self.client.generate_with_images(
                     prompt=prompt,
-                    images=images,
+                    images=[image],
                     use_case="vision_table_extraction",
                     document_id=doc_id,
                     model_override=self.vision_model,
                 )
-                records = self._parse_table_response(response, doc_id, batch_page_nums)
+                records = self._parse_table_response(response, doc_id, [page_num])
                 all_records.extend(records)
             except Exception:
                 logger.warning(
-                    "Vision table extraction failed for pages %s of %s",
-                    batch_page_nums, doc_id, exc_info=True,
+                    "Vision table extraction failed for page %d of %s",
+                    page_num, doc_id, exc_info=True,
                 )
                 continue
 

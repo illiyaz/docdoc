@@ -91,7 +91,7 @@ class TestOllamaClientVision:
             from app.llm.client import OllamaClient
             client = OllamaClient()
             result = client.generate_with_images(
-                "Extract PII", ["base64img1", "base64img2"],
+                "Extract PII", ["base64img1"],
                 use_case="test",
             )
 
@@ -99,7 +99,7 @@ class TestOllamaClientVision:
             call_kwargs = mock_post.call_args
             payload = call_kwargs.kwargs.get("json") or call_kwargs[1].get("json")
             assert payload["model"] == "qwen2.5vl:32b"
-            assert payload["images"] == ["base64img1", "base64img2"]
+            assert payload["images"] == ["base64img1"]
             assert payload["stream"] is False
             # Vision timeout is 2x normal
             assert call_kwargs.kwargs.get("timeout") == 120 or call_kwargs[1].get("timeout") == 120
@@ -526,7 +526,7 @@ class TestVisionExtractorIntegration:
         return path
 
     def test_extract_template_with_mock_vision(self):
-        """Full flow: render → vision model → PIIRecords."""
+        """Full flow: render → vision model → PIIRecords (one image per call)."""
         from app.structure.document_schema import (
             DocumentSchema, DocumentTemplate, PageRole,
         )
@@ -535,12 +535,13 @@ class TestVisionExtractorIntegration:
         path = self._make_test_pdf()
         try:
             mock_client = MagicMock()
-            mock_client.generate_with_images.return_value = json.dumps([
-                {"PERSON": "Person 1", "NI_NUMBER": "AB000000C",
-                 "DATE_OF_BIRTH": "01-Jan-1960"},
-                {"PERSON": "Person 2", "NI_NUMBER": "AB000003C",
-                 "DATE_OF_BIRTH": "15-Jun-1975"},
-            ])
+            # One image per call → one record per response
+            mock_client.generate_with_images.side_effect = [
+                json.dumps([{"PERSON": "Person 1", "NI_NUMBER": "AB000000C",
+                             "DATE_OF_BIRTH": "01-Jan-1960"}]),
+                json.dumps([{"PERSON": "Person 2", "NI_NUMBER": "AB000003C",
+                             "DATE_OF_BIRTH": "15-Jun-1975"}]),
+            ]
 
             schema = DocumentSchema(
                 document_type="pension",
@@ -568,9 +569,10 @@ class TestVisionExtractorIntegration:
             assert records[0].raw_government_id == "AB000000C"
             assert records[1].raw_name == "Person 2"
 
-            # Verify vision model was called with images
-            call_args = mock_client.generate_with_images.call_args
-            assert len(call_args.kwargs["images"]) == 2  # batch of 2
+            # Each instance = one call with one image
+            assert mock_client.generate_with_images.call_count == 2
+            for call in mock_client.generate_with_images.call_args_list:
+                assert len(call.kwargs["images"]) == 1
         finally:
             os.unlink(path)
 

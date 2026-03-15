@@ -178,9 +178,9 @@ class TestTablePrompt:
 
 
 class TestVisionTableExtraction:
-    @patch("app.structure.vision_extractor.render_pages_to_images")
+    @patch("app.structure.vision_extractor.render_page_to_image")
     def test_single_page_5_rows(self, mock_render):
-        mock_render.return_value = ["base64img1"]
+        mock_render.return_value = "base64img1"
         mock_client = MagicMock()
         mock_client.generate_with_images.return_value = _make_llm_table_response(5)
 
@@ -193,9 +193,9 @@ class TestVisionTableExtraction:
         assert records[0].raw_name == "Student 1"
         assert records[4].raw_name == "Student 5"
 
-    @patch("app.structure.vision_extractor.render_pages_to_images")
+    @patch("app.structure.vision_extractor.render_page_to_image")
     def test_multi_page_table(self, mock_render):
-        mock_render.return_value = ["base64img1"]
+        mock_render.return_value = "base64img1"
         mock_client = MagicMock()
         # Each call returns 3 records
         mock_client.generate_with_images.return_value = _make_llm_table_response(3)
@@ -211,9 +211,9 @@ class TestVisionTableExtraction:
         assert len(records) == 3  # deduped
         assert mock_client.generate_with_images.call_count == 3
 
-    @patch("app.structure.vision_extractor.render_pages_to_images")
+    @patch("app.structure.vision_extractor.render_page_to_image")
     def test_deduplication_across_pages(self, mock_render):
-        mock_render.return_value = ["base64img1"]
+        mock_render.return_value = "base64img1"
         mock_client = MagicMock()
 
         # Page 1: Alice and Bob
@@ -245,9 +245,9 @@ class TestVisionTableExtraction:
         assert alice.raw_dob == "01/01/2000"
         assert alice.raw_address is not None
 
-    @patch("app.structure.vision_extractor.render_pages_to_images")
+    @patch("app.structure.vision_extractor.render_page_to_image")
     def test_empty_table_returns_empty(self, mock_render):
-        mock_render.return_value = ["base64img1"]
+        mock_render.return_value = "base64img1"
         mock_client = MagicMock()
         mock_client.generate_with_images.return_value = "[]"
 

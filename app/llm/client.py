@@ -254,6 +254,19 @@ class OllamaClient:
 
         model = model_override or settings.ollama_vision_model
 
+        # Many vision models (e.g. llama3.2-vision) only support one image
+        # per call.  Guard against silent failures by truncating with a warning.
+        if len(images) > 1:
+            import logging as _logging
+
+            _logging.getLogger(__name__).warning(
+                "generate_with_images called with %d images but vision models "
+                "typically support only 1 image per call. Sending only the "
+                "first image.",
+                len(images),
+            )
+            images = images[:1]
+
         payload: dict = {
             "model": model,
             "prompt": prompt,
