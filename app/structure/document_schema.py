@@ -70,6 +70,25 @@ class TableSchema:
 
 
 @dataclass
+class FieldMapping:
+    """A coordinate-based field definition for fixed-layout documents.
+
+    The LLM analyzes the document layout once and produces these mappings.
+    Python then uses anchor text + spatial relationships to extract values
+    from every page using PyMuPDF word-level bounding boxes — processing
+    1000+ pages in seconds instead of hours via LLM.
+    """
+
+    field_type: str                     # "PERSON", "GOVERNMENT_ID", "DATE_OF_BIRTH", "LOCATION", etc.
+    anchor_text: str                    # text label to search for: "Client:", "Tax No", "Date of Birth"
+    spatial_relationship: str           # "same_line_right", "line_below", "lines_below_N", "region_right"
+    value_pattern: str | None = None    # optional regex for validation: r"\d{3}-\d{2}-\d{4}"
+    sample_bbox: list[float] = field(default_factory=list)  # [x0, y0, x1, y1] from sample page (reference only)
+    line_count: int = 1                 # for multi-line fields like addresses
+    skip_pattern: str | None = None     # text to skip (e.g., client code in parens)
+
+
+@dataclass
 class PageRole:
     """A single page's role within a repeating multi-page template."""
 
@@ -175,6 +194,11 @@ class DocumentSchema:
     is_tabular: bool = False                    # True if table/list with multiple individuals per page
     records_per_page_estimate: int = 1          # estimated individuals per page (>1 for tabular)
 
+    # Step 21: Coordinate-based extraction for fixed-layout documents
+    layout_type: str = "variable"               # "fixed" | "template_with_drift" | "variable"
+    layout_field_map: list[FieldMapping] | None = None  # coordinate-based field definitions
+    layout_confidence: float = 0.0              # confidence in layout classification
+
     def to_dict(self) -> dict:
         """Serialize to a JSON-compatible dict."""
         return {
@@ -254,6 +278,24 @@ class DocumentSchema:
             ),
             "is_tabular": self.is_tabular,
             "records_per_page_estimate": self.records_per_page_estimate,
+            "layout_type": self.layout_type,
+            "layout_field_map": (
+                [
+                    {
+                        "field_type": fm.field_type,
+                        "anchor_text": fm.anchor_text,
+                        "spatial_relationship": fm.spatial_relationship,
+                        "value_pattern": fm.value_pattern,
+                        "sample_bbox": fm.sample_bbox,
+                        "line_count": fm.line_count,
+                        "skip_pattern": fm.skip_pattern,
+                    }
+                    for fm in self.layout_field_map
+                ]
+                if self.layout_field_map is not None
+                else None
+            ),
+            "layout_confidence": self.layout_confidence,
         }
 
     @classmethod
@@ -317,6 +359,9 @@ class DocumentSchema:
             template=cls._parse_template(data.get("template")),
             is_tabular=bool(data.get("is_tabular", False)),
             records_per_page_estimate=int(data.get("records_per_page_estimate", 1)),
+            layout_type=str(data.get("layout_type", "variable")),
+            layout_field_map=cls._parse_layout_field_map(data.get("layout_field_map")),
+            layout_confidence=float(data.get("layout_confidence", 0.0)),
         )
 
     @staticmethod
@@ -360,3 +405,37 @@ class DocumentSchema:
             )
         except (TypeError, ValueError, KeyError):
             return None
+
+    @staticmethod
+    def _parse_layout_field_map(
+        raw: list[dict] | None,
+    ) -> list[FieldMapping] | None:
+        """Parse a layout_field_map list into FieldMapping objects, or None.
+
+        Handles all possible LLM response formats defensively.
+        """
+        if raw is None or not isinstance(raw, list):
+            return None
+        if not raw:
+            return None
+        mappings: list[FieldMapping] = []
+        for item in raw:
+            if not isinstance(item, dict):
+                continue
+            try:
+                bbox = item.get("sample_bbox", [])
+                if not isinstance(bbox, list):
+                    bbox = []
+                bbox = [float(v) for v in bbox[:4]]
+                mappings.append(FieldMapping(
+                    field_type=str(item.get("field_type", "")),
+                    anchor_text=str(item.get("anchor_text", "")),
+                    spatial_relationship=str(item.get("spatial_relationship", "same_line_right")),
+                    value_pattern=item.get("value_pattern"),
+                    sample_bbox=bbox,
+                    line_count=int(item.get("line_count", 1)),
+                    skip_pattern=item.get("skip_pattern"),
+                ))
+            except (TypeError, ValueError, KeyError):
+                continue
+        return mappings if mappings else None

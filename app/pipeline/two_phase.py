@@ -568,16 +568,99 @@ def analyze_generator(
             },
         })
 
-        # --- Stage 4b: Extraction Preview (LLM template docs only) ---
+        # --- Stage 4b-0: Extraction Preview (coordinate / fixed-layout docs) ---
         doc_previews: dict[UUID, dict] = {}
         preview_count = 0
 
+        fixed_layout_docs = [
+            doc for doc in doc_records
+            if doc.id in doc_schemas
+            and doc_schemas[doc.id] is not None
+            and getattr(doc_schemas[doc.id], "layout_type", "variable") == "fixed"
+            and getattr(doc_schemas[doc.id], "layout_field_map", None)
+        ]
+
+        if fixed_layout_docs:
+            yield _sse({
+                "stage": "extraction_preview", "status": "running",
+                "message": f"Previewing coordinate extraction for {len(fixed_layout_docs)} fixed-layout document(s)...",
+                "detail": {"total": len(fixed_layout_docs), "current": 0},
+            })
+
+            for idx, doc in enumerate(fixed_layout_docs, 1):
+                schema = doc_schemas[doc.id]
+                field_map = schema.layout_field_map
+
+                # Try coordinate extraction on first content page as sample
+                sample_records: list = []
+                if doc.source_path and (doc.file_type or "").lower() in ("pdf", ".pdf", "application/pdf"):
+                    try:
+                        from app.pipeline.coordinate_extractor import CoordinateExtractor
+
+                        onset = doc.sample_onset_page or 0
+                        coord_ext = CoordinateExtractor(field_map, doc.source_path, str(doc.id))
+                        sample_records, _ = coord_ext.extract_all_pages(page_range=[onset])
+                    except Exception:
+                        logger.warning("Coordinate preview failed for %s", doc.file_name, exc_info=True)
+
+                # Build preview dict
+                fields_found: dict[str, dict] = {}
+                if sample_records:
+                    rec = sample_records[0]
+                    onset_pg = (doc.sample_onset_page or 0) + 1
+                    if rec.raw_name:
+                        fields_found["PERSON"] = {"value": rec.raw_name, "page": onset_pg}
+                    if rec.raw_dob:
+                        fields_found["DATE_OF_BIRTH"] = {"value": rec.raw_dob, "page": onset_pg}
+                    if rec.raw_government_id:
+                        fields_found["GOVERNMENT_ID"] = {"value": rec.raw_government_id, "page": onset_pg}
+                    if rec.raw_address and isinstance(rec.raw_address, dict):
+                        fields_found["LOCATION"] = {"value": rec.raw_address.get("full", ""), "page": onset_pg}
+                    if rec.raw_email:
+                        fields_found["EMAIL"] = {"value": rec.raw_email, "page": onset_pg}
+                    if rec.raw_phone:
+                        fields_found["PHONE"] = {"value": rec.raw_phone, "page": onset_pg}
+
+                # Estimate total pages from blocks cache
+                blocks = doc_blocks_cache.get(doc.id, [])
+                total_pages_coord = len(set(b.page_or_sheet for b in blocks)) if blocks else 0
+
+                preview = {
+                    "preview_instance": 0,
+                    "pages": str((doc.sample_onset_page or 0) + 1),
+                    "fields_found": fields_found,
+                    "fields_missing": sorted(
+                        {fm.field_type for fm in field_map} - set(fields_found.keys())
+                    ),
+                    "pages_read": [(doc.sample_onset_page or 0) + 1],
+                    "total_instances_estimate": total_pages_coord,
+                    "extraction_method": "coordinate",
+                    "layout_type": "fixed",
+                    "layout_confidence": schema.layout_confidence,
+                    "field_map_count": len(field_map),
+                }
+                doc_previews[doc.id] = preview
+                preview_count += 1
+
+                logger.info(
+                    "Coordinate preview for %s: %d fields found, %d total pages, layout_confidence=%.2f",
+                    doc.file_name, len(fields_found), total_pages_coord, schema.layout_confidence,
+                )
+
+            yield _sse({
+                "stage": "extraction_preview", "status": "complete",
+                "message": f"Previewed coordinate extraction for {len(fixed_layout_docs)} document(s)",
+                "detail": {"previewed": len(fixed_layout_docs)},
+            })
+
+        # --- Stage 4b: Extraction Preview (LLM template docs only) ---
         template_docs = [
             doc for doc in doc_records
             if doc.id in doc_schemas
             and doc_schemas[doc.id] is not None
             and getattr(doc_schemas[doc.id], "template", None) is not None
             and doc_schemas[doc.id].template.pages_per_instance >= 2
+            and doc.id not in doc_previews  # don't double-preview coordinate docs
         ]
 
         if template_docs and settings.llm_assist_enabled:
@@ -612,12 +695,28 @@ def analyze_generator(
                         else:
                             page_texts[pg] += "\n" + b.text
 
+                    # Filter to content pages (at or after onset) so
+                    # instances don't include header/cover pages.
+                    onset = doc.sample_onset_page or 0
+                    if isinstance(onset, str):
+                        try:
+                            onset = int(onset)
+                        except (ValueError, TypeError):
+                            onset = 0
+                    content_page_texts = {
+                        pg: t for pg, t in page_texts.items() if pg >= onset
+                    }
+
                     # Always prefer marker-based boundaries for accurate count
                     if template.instance_marker:
-                        instances = template.find_instance_boundaries(page_texts)
+                        instances = template.find_instance_boundaries(content_page_texts)
                     else:
-                        total_pages = len(set(b.page_or_sheet for b in blocks))
-                        instances = template.get_instance_pages(total_pages)
+                        content_pages_sorted = sorted(content_page_texts.keys())
+                        ppi = template.pages_per_instance
+                        instances = [
+                            content_pages_sorted[i:i + ppi]
+                            for i in range(0, len(content_pages_sorted), ppi)
+                        ]
 
                     if not instances:
                         continue
@@ -1257,9 +1356,67 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                                 "batch": batch_idx, "total_batches": total_batches},
                     )
 
+                # --- Path 0: Coordinate extraction (fixed-layout docs) ---
+                # Check for auditor-edited field map first (from PUT /field-map)
+                auditor_field_map = None
+                auditor_method = None
+                doc_meta = doc.metadata_json or {}
+                if doc_meta.get("auditor_layout_field_map"):
+                    from app.structure.document_schema import FieldMapping as _FM
+                    auditor_field_map = [
+                        _FM(**fm_dict) for fm_dict in doc_meta["auditor_layout_field_map"]
+                    ]
+                    auditor_method = doc_meta.get("auditor_extraction_method", "coordinate")
+
+                # Use auditor field map if available, otherwise fall back to schema
+                effective_field_map = auditor_field_map or (
+                    getattr(schema, "layout_field_map", None) if schema else None
+                )
+                use_coordinate = auditor_method != "ai" if auditor_method else True
+
+                is_fixed_layout = (
+                    schema is not None
+                    and getattr(schema, "layout_type", "variable") == "fixed"
+                    and effective_field_map is not None
+                    and use_coordinate
+                )
+                if is_fixed_layout and doc.source_path:
+                    try:
+                        from app.pipeline.coordinate_extractor import CoordinateExtractor
+                        from app.pipeline.reconciliation import ExtractionReconciler
+
+                        coord_ext = CoordinateExtractor(
+                            effective_field_map, doc.source_path, str(doc.id),
+                        )
+                        coord_records, failed_pages = coord_ext.extract_all_pages()
+
+                        if failed_pages and settings.llm_assist_enabled:
+                            from app.llm.client import OllamaClient
+                            reconciler = ExtractionReconciler()
+                            client = OllamaClient(db_session=db, timeout_s=120)
+                            recovered = reconciler.reconcile(
+                                failed_pages, doc.source_path, str(doc.id),
+                                effective_field_map, client,
+                            )
+                            coord_records.extend(recovered)
+
+                        if coord_records:
+                            records = coord_records
+                            extraction_path = "0-coord"
+                            logger.info(
+                                "Path 0 (Coordinate) for %s: %d records (%d failed pages)",
+                                doc.file_name, len(records), len(failed_pages),
+                            )
+                    except Exception:
+                        logger.warning(
+                            "Path 0 (Coordinate) failed for %s, trying other paths",
+                            doc.file_name, exc_info=True,
+                        )
+
                 # --- Path 1: Vision ---
                 if (
-                    settings.use_vision_extraction
+                    not records
+                    and settings.use_vision_extraction
                     and settings.llm_assist_enabled
                     and doc.source_path
                     and (doc.file_type or "").lower() in ("pdf", ".pdf", "application/pdf")

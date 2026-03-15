@@ -242,7 +242,10 @@ UNDERSTAND_DOCUMENT = (
     '  "extraction_notes": "brief note about what PII to expect and how it is organized",\n'
     '  "schema_confidence": 0.85,\n'
     '  "is_tabular": false,\n'
-    '  "records_per_page_estimate": 1\n'
+    '  "records_per_page_estimate": 1,\n'
+    '  "layout_type": "variable",\n'
+    '  "layout_confidence": 0.0,\n'
+    '  "layout_field_map": null\n'
     '}}\n'
     "\n"
     "IMPORTANT:\n"
@@ -262,6 +265,28 @@ UNDERSTAND_DOCUMENT = (
     "- Set is_tabular=true if this document is a TABLE or LIST with MULTIPLE "
     "individuals per page (e.g., student roster, employee list, patient log). "
     "Set records_per_page_estimate to the approximate number of people per page.\n"
+    "\n"
+    "LAYOUT ANALYSIS:\n"
+    "- layout_type: Is every page formatted IDENTICALLY with labeled fields at fixed "
+    "positions (\"fixed\"), does it follow a repeating template with slight variations "
+    "(\"template_with_drift\"), or is the content freeform (\"variable\")?\n"
+    "- layout_confidence: your confidence in the layout_type classification (0.0 to 1.0)\n"
+    "- If layout_type is \"fixed\" or \"template_with_drift\", provide layout_field_map:\n"
+    "  a list of coordinate-based field mappings for PII extraction:\n"
+    "  [\n"
+    "    {{\n"
+    "      \"field_type\": \"PERSON | GOVERNMENT_ID | DATE_OF_BIRTH | LOCATION | PHONE_NUMBER | EMAIL_ADDRESS\",\n"
+    "      \"anchor_text\": \"the text label that identifies this field (e.g. 'Client:', 'Tax No')\",\n"
+    "      \"spatial_relationship\": \"same_line_right | line_below | lines_below_N | region_right\",\n"
+    "      \"value_pattern\": \"optional regex for validation (e.g. '\\\\d{{3}}-\\\\d{{2}}-\\\\d{{4}}')\",\n"
+    "      \"sample_bbox\": [x0, y0, x1, y1],\n"
+    "      \"line_count\": 1,\n"
+    "      \"skip_pattern\": \"optional regex for text between label and value to skip\"\n"
+    "    }}\n"
+    "  ]\n"
+    "- Accounting statements, payslips, and labeled forms with identical layout per page "
+    "are typically \"fixed\".\n"
+    "- If layout_type is \"variable\", set layout_field_map to null.\n"
     "\n"
     "Respond ONLY with valid JSON.  No additional text."
 )
@@ -321,7 +346,10 @@ UNDERSTAND_MULTI_PAGE_DOCUMENT = (
     '  "extraction_notes": "brief notes",\n'
     '  "schema_confidence": 0.85,\n'
     '  "is_tabular": false,\n'
-    '  "records_per_page_estimate": 1\n'
+    '  "records_per_page_estimate": 1,\n'
+    '  "layout_type": "variable",\n'
+    '  "layout_confidence": 0.0,\n'
+    '  "layout_field_map": null\n'
     '}}\n'
     "\n"
     "IMPORTANT:\n"
@@ -333,6 +361,30 @@ UNDERSTAND_MULTI_PAGE_DOCUMENT = (
     "- For repeating templates, describe the PATTERN (pages_per_instance), not every instance.\n"
     "- If the document is NOT a repeating template, set template to null.\n"
     "- Be precise about what IS and ISN'T PII.\n"
+    "\n"
+    "LAYOUT ANALYSIS:\n"
+    "- layout_type: Is every page formatted IDENTICALLY with labeled fields at fixed "
+    "positions (\"fixed\"), does it follow a repeating template with slight variations "
+    "(\"template_with_drift\"), or is the content freeform (\"variable\")?\n"
+    "- layout_confidence: your confidence in the layout_type classification (0.0 to 1.0)\n"
+    "- If layout_type is \"fixed\" or \"template_with_drift\", provide layout_field_map:\n"
+    "  a list of coordinate-based field mappings for PII extraction:\n"
+    "  [\n"
+    "    {{\n"
+    "      \"field_type\": \"PERSON | GOVERNMENT_ID | DATE_OF_BIRTH | LOCATION | PHONE_NUMBER | EMAIL_ADDRESS\",\n"
+    "      \"anchor_text\": \"the text label that identifies this field (e.g. 'Client:', 'Tax No')\",\n"
+    "      \"spatial_relationship\": \"same_line_right | line_below | lines_below_N | region_right\",\n"
+    "      \"value_pattern\": \"optional regex for validation (e.g. '\\\\d{{3}}-\\\\d{{2}}-\\\\d{{4}}')\",\n"
+    "      \"sample_bbox\": [x0, y0, x1, y1],\n"
+    "      \"line_count\": 1,\n"
+    "      \"skip_pattern\": \"optional regex for text between label and value to skip\"\n"
+    "    }}\n"
+    "  ]\n"
+    "- Accounting statements, payslips, and labeled forms with identical layout per page "
+    "are typically \"fixed\".\n"
+    "- A repeating template (template_with_drift) with a field map means EACH instance "
+    "has the same labeled fields at the same positions.\n"
+    "- If layout_type is \"variable\", set layout_field_map to null.\n"
     "\n"
     "Respond ONLY with valid JSON.  No additional text."
 )

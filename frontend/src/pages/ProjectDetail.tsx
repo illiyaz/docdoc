@@ -59,6 +59,7 @@ import {
   rejectDocument,
   approveAllDocuments,
   startExtractStreaming,
+  updateFieldMap,
   cancelJob,
   archiveJob,
 } from "@/api/client"
@@ -74,6 +75,7 @@ import type {
   JobSummary,
   DetectionDecision,
   AnalysisReviewDetail,
+  LayoutFieldMapping,
   PaginatedJobs,
 } from "@/api/client"
 
@@ -1187,6 +1189,291 @@ function PipelineProgressView({ jobId }: { jobId: string }) {
 }
 
 // ---------------------------------------------------------------------------
+// Spatial relationship labels for display
+// ---------------------------------------------------------------------------
+
+const SPATIAL_LABELS: Record<string, string> = {
+  same_line_right: "Same line, right",
+  line_below: "Line below",
+  region_right: "Region right",
+}
+
+function spatialLabel(rel: string): string {
+  if (SPATIAL_LABELS[rel]) return SPATIAL_LABELS[rel]
+  if (rel.startsWith("lines_below_")) {
+    const n = rel.split("_").pop()
+    return `${n} lines below`
+  }
+  return rel
+}
+
+// ---------------------------------------------------------------------------
+// Field Map Editor
+// ---------------------------------------------------------------------------
+
+const FIELD_TYPES = [
+  "PERSON", "GOVERNMENT_ID", "DATE_OF_BIRTH", "LOCATION",
+  "EMAIL", "PHONE", "NATIONAL_INSURANCE_UK", "US_SSN",
+  "IDENTIFICATION_NUMBER",
+]
+
+const SPATIAL_OPTIONS = [
+  "same_line_right", "line_below", "lines_below_2", "lines_below_3",
+  "lines_below_4", "region_right",
+]
+
+function FieldMapEditor({
+  jobId,
+  docId,
+  initialMappings,
+  layoutConfidence,
+  totalPages,
+  onSaved,
+}: {
+  jobId: string
+  docId: string
+  initialMappings: LayoutFieldMapping[]
+  layoutConfidence: number | null
+  totalPages: number | null
+  onSaved: () => void
+}) {
+  const [mappings, setMappings] = useState<LayoutFieldMapping[]>(initialMappings)
+  const [extractionMethod, setExtractionMethod] = useState<"coordinate" | "ai">("coordinate")
+  const [editIdx, setEditIdx] = useState<number | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const updateMapping = (idx: number, updates: Partial<LayoutFieldMapping>) => {
+    setMappings(prev => prev.map((m, i) => i === idx ? { ...m, ...updates } : m))
+  }
+
+  const removeMapping = (idx: number) => {
+    setMappings(prev => prev.filter((_, i) => i !== idx))
+    if (editIdx === idx) setEditIdx(null)
+  }
+
+  const addMapping = () => {
+    const newMapping: LayoutFieldMapping = {
+      field_type: "PERSON",
+      anchor_text: "",
+      spatial_relationship: "same_line_right",
+      value_pattern: null,
+      sample_bbox: [],
+      line_count: 1,
+      skip_pattern: null,
+    }
+    setMappings(prev => [...prev, newMapping])
+    setEditIdx(mappings.length)
+  }
+
+  const handleSave = async () => {
+    setSaving(true)
+    setError(null)
+    try {
+      await updateFieldMap(jobId, {
+        document_id: docId,
+        field_mappings: mappings,
+        extraction_method: extractionMethod,
+      })
+      onSaved()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to save")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const estTimeCoord = totalPages ? `~${Math.max(1, Math.ceil(totalPages / 100))}s` : "seconds"
+  const estTimeAI = totalPages ? `~${Math.ceil(totalPages * 12)}s` : "hours"
+
+  return (
+    <div className="bg-emerald-50 border border-emerald-200 rounded p-3 space-y-3">
+      <div className="flex items-center justify-between">
+        <p className="text-xs font-medium text-emerald-800">
+          Coordinate Extraction — Field Map Editor
+        </p>
+        {layoutConfidence != null && (
+          <span className={`text-[10px] px-1.5 py-0.5 rounded ${
+            layoutConfidence >= 0.85 ? "bg-green-100 text-green-800" :
+            layoutConfidence >= 0.6 ? "bg-yellow-100 text-yellow-800" :
+            "bg-red-100 text-red-800"
+          }`}>
+            Layout confidence: {(layoutConfidence * 100).toFixed(0)}%
+          </span>
+        )}
+      </div>
+
+      {/* Extraction method radio */}
+      <div className="flex gap-4">
+        <label className="flex items-center gap-2 text-xs cursor-pointer">
+          <input
+            type="radio"
+            name={`method-${docId}`}
+            checked={extractionMethod === "coordinate"}
+            onChange={() => setExtractionMethod("coordinate")}
+            className="h-3 w-3"
+          />
+          <span className="font-medium">Coordinate extraction</span>
+          <span className="text-muted-foreground">({estTimeCoord})</span>
+        </label>
+        <label className="flex items-center gap-2 text-xs cursor-pointer">
+          <input
+            type="radio"
+            name={`method-${docId}`}
+            checked={extractionMethod === "ai"}
+            onChange={() => setExtractionMethod("ai")}
+            className="h-3 w-3"
+          />
+          <span className="font-medium">AI-assisted extraction</span>
+          <span className="text-muted-foreground">({estTimeAI})</span>
+        </label>
+      </div>
+
+      {extractionMethod === "coordinate" && (
+        <>
+          {/* Mapping list */}
+          <div className="space-y-1.5">
+            {mappings.map((m, idx) => (
+              <div key={idx} className="bg-white border border-emerald-100 rounded p-2">
+                {editIdx === idx ? (
+                  /* Edit mode */
+                  <div className="space-y-2">
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="text-[10px] text-muted-foreground">Field Type</label>
+                        <select
+                          value={m.field_type}
+                          onChange={e => updateMapping(idx, { field_type: e.target.value })}
+                          className="w-full text-xs border rounded px-1.5 py-1"
+                        >
+                          {FIELD_TYPES.map(ft => <option key={ft} value={ft}>{ft}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="text-[10px] text-muted-foreground">Anchor Text</label>
+                        <input
+                          type="text"
+                          value={m.anchor_text}
+                          onChange={e => updateMapping(idx, { anchor_text: e.target.value })}
+                          className="w-full text-xs border rounded px-1.5 py-1"
+                          placeholder='e.g. "Client:"'
+                        />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2">
+                      <div>
+                        <label className="text-[10px] text-muted-foreground">Position</label>
+                        <select
+                          value={m.spatial_relationship}
+                          onChange={e => updateMapping(idx, { spatial_relationship: e.target.value })}
+                          className="w-full text-xs border rounded px-1.5 py-1"
+                        >
+                          {SPATIAL_OPTIONS.map(s => <option key={s} value={s}>{spatialLabel(s)}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="text-[10px] text-muted-foreground">Lines</label>
+                        <input
+                          type="number"
+                          min={1}
+                          max={10}
+                          value={m.line_count}
+                          onChange={e => updateMapping(idx, { line_count: parseInt(e.target.value) || 1 })}
+                          className="w-full text-xs border rounded px-1.5 py-1"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] text-muted-foreground">Pattern</label>
+                        <input
+                          type="text"
+                          value={m.value_pattern ?? ""}
+                          onChange={e => updateMapping(idx, { value_pattern: e.target.value || null })}
+                          className="w-full text-xs border rounded px-1.5 py-1"
+                          placeholder="regex"
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-muted-foreground">Skip Pattern</label>
+                      <input
+                        type="text"
+                        value={m.skip_pattern ?? ""}
+                        onChange={e => updateMapping(idx, { skip_pattern: e.target.value || null })}
+                        className="w-full text-xs border rounded px-1.5 py-1"
+                        placeholder="regex to skip"
+                      />
+                    </div>
+                    <button
+                      onClick={() => setEditIdx(null)}
+                      className="text-[10px] text-emerald-700 hover:underline"
+                    >
+                      Done editing
+                    </button>
+                  </div>
+                ) : (
+                  /* Display mode */
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-xs">
+                      <span className="font-medium text-emerald-800">{m.field_type}</span>
+                      <span className="text-muted-foreground">anchor: "{m.anchor_text}"</span>
+                      <span className="text-[10px] bg-emerald-100 text-emerald-700 px-1 py-0.5 rounded">
+                        {spatialLabel(m.spatial_relationship)}
+                      </span>
+                      {m.line_count > 1 && (
+                        <span className="text-[10px] text-muted-foreground">{m.line_count} lines</span>
+                      )}
+                      {m.value_pattern && (
+                        <span className="text-[10px] text-muted-foreground font-mono">/{m.value_pattern}/</span>
+                      )}
+                    </div>
+                    <div className="flex gap-1">
+                      <button
+                        onClick={() => setEditIdx(idx)}
+                        className="text-[10px] text-blue-600 hover:underline"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        onClick={() => removeMapping(idx)}
+                        className="text-[10px] text-red-600 hover:underline"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+
+          <button
+            onClick={addMapping}
+            className="text-xs text-emerald-700 hover:text-emerald-800 flex items-center gap-1"
+          >
+            <Plus className="h-3 w-3" /> Add field mapping
+          </button>
+        </>
+      )}
+
+      {error && (
+        <p className="text-xs text-red-600">{error}</p>
+      )}
+
+      <div className="flex gap-2 pt-1">
+        <button
+          onClick={handleSave}
+          disabled={saving || (extractionMethod === "coordinate" && mappings.length === 0)}
+          className="px-3 py-1.5 text-xs font-medium bg-emerald-600 text-white rounded hover:bg-emerald-700 disabled:opacity-50 flex items-center gap-1"
+        >
+          {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
+          Save field mappings
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Analysis Review Panel (two-phase pipeline)
 // ---------------------------------------------------------------------------
 
@@ -1650,6 +1937,20 @@ function AnalysisReviewPanel({ jobId, onExtractionComplete }: { jobId: string; o
                 </p>
               )}
             </div>
+          )}
+
+          {/* Field Map Editor (Step 21d) — for fixed-layout coordinate extraction */}
+          {(doc.layout_type === "fixed" || doc.layout_type === "template_with_drift") &&
+            doc.layout_field_map && doc.layout_field_map.length > 0 &&
+            doc.review_status === "pending_review" && (
+            <FieldMapEditor
+              jobId={jobId}
+              docId={doc.document_id}
+              initialMappings={doc.layout_field_map}
+              layoutConfidence={doc.layout_confidence}
+              totalPages={doc.extraction_preview?.total_instances_estimate ?? null}
+              onSaved={() => queryClient.invalidateQueries({ queryKey: ["analysis-reviews", jobId] })}
+            />
           )}
 
           {/* Detection Controls — type toggles + individual detections */}

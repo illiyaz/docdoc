@@ -491,3 +491,32 @@ class TestAnalysisApiDedupAnchors:
         assert data["dedup_anchors"] == ["ssn", "email"]
         assert data["protocol_name"] == "state_breach"
         assert "documents" in data
+
+    def test_analysis_falls_back_to_protocol_llm_config(self):
+        """When no ProtocolConfig exists, dedup_anchors should come from PROTOCOL_LLM_CONFIG."""
+        from uuid import uuid4
+
+        from fastapi.testclient import TestClient
+        from fastapi import FastAPI
+        from app.api.routes.analysis_review import router, get_db
+
+        app = FastAPI()
+        job_id = str(uuid4())
+
+        mock_run = MagicMock()
+        mock_run.config_snapshot = {"protocol_id": "hipaa"}
+
+        mock_db = MagicMock()
+        mock_db.get = MagicMock(return_value=mock_run)
+        mock_db.query.return_value.filter.return_value.all.return_value = []
+
+        app.dependency_overrides[get_db] = lambda: mock_db
+        app.include_router(router)
+
+        with patch("app.api.routes.analysis_review.get_settings") as mock_settings:
+            mock_settings.return_value.pii_masking_enabled = True
+            resp = TestClient(app).get(f"/jobs/{job_id}/analysis")
+
+        data = resp.json()
+        assert data["dedup_anchors"] == ["ssn", "name_dob"]
+        assert data["protocol_name"] == "hipaa"

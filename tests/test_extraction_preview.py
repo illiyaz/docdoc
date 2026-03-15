@@ -345,6 +345,41 @@ class TestPreviewInstanceCount:
         assert instances[1] == [4, 5]          # 2 pages
         assert instances[2] == [6, 7, 8]       # 3 pages
 
+    def test_onset_filtering_stride_based(self):
+        """Stride instances start from onset page, not page 0."""
+        schema = _make_template_schema(instances=3, pages_per=3)
+        # Pages 0-4 are headers, content starts at page 5
+        all_page_texts = {i: f"Page {i}" for i in range(14)}
+        onset = 5
+        content_page_texts = {pg: t for pg, t in all_page_texts.items() if pg >= onset}
+        content_pages_sorted = sorted(content_page_texts.keys())
+        ppi = schema.template.pages_per_instance
+        instances = [
+            content_pages_sorted[i:i + ppi]
+            for i in range(0, len(content_pages_sorted), ppi)
+        ]
+        assert instances[0] == [5, 6, 7]
+        assert instances[1] == [8, 9, 10]
+        assert instances[2] == [11, 12, 13]
+
+    def test_onset_filtering_marker_based(self):
+        """Marker instances only from content pages after onset."""
+        schema = _make_template_schema(instances=2, pages_per=3, instance_marker="IN RESPECT OF:")
+        page_texts = {
+            0: "Cover page",
+            1: "Table of contents",
+            2: "IN RESPECT OF: Person 1\nName details",
+            3: "Address: 123 Main St",
+            4: "IN RESPECT OF: Person 2\nName details",
+            5: "Address: 456 Oak Rd",
+        }
+        onset = 2
+        content_page_texts = {pg: t for pg, t in page_texts.items() if pg >= onset}
+        instances = schema.template.find_instance_boundaries(content_page_texts)
+        assert len(instances) == 2
+        assert instances[0] == [2, 3]
+        assert instances[1] == [4, 5]
+
 
 # ---------------------------------------------------------------------------
 # Tests: DB Storage

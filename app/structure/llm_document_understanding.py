@@ -31,6 +31,7 @@ from app.structure.document_schema import (
     DocumentSchema,
     DocumentTemplate,
     FieldContext,
+    FieldMapping,
     PageRole,
     PersonContext,
     TableColumn,
@@ -415,6 +416,23 @@ class LLMDocumentUnderstanding:
         is_tabular = bool(data.get("is_tabular", False))
         records_per_page_estimate = max(1, int(data.get("records_per_page_estimate", 1)))
 
+        # Parse layout assessment (Step 21)
+        raw_layout_type = str(data.get("layout_type", "variable")).lower().strip()
+        if raw_layout_type not in ("fixed", "template_with_drift", "variable"):
+            raw_layout_type = "variable"
+        layout_confidence = 0.0
+        try:
+            layout_confidence = max(0.0, min(1.0, float(data.get("layout_confidence", 0.0))))
+        except (TypeError, ValueError):
+            pass
+        layout_field_map = DocumentSchema._parse_layout_field_map(
+            data.get("layout_field_map")
+        )
+        # Safety: if layout_type is fixed/template_with_drift but no field map, downgrade
+        if raw_layout_type != "variable" and not layout_field_map:
+            raw_layout_type = "variable"
+            layout_confidence = 0.0
+
         try:
             return DocumentSchema(
                 document_type=str(data.get("document_type", "unknown")),
@@ -432,6 +450,9 @@ class LLMDocumentUnderstanding:
                 template=template,
                 is_tabular=is_tabular,
                 records_per_page_estimate=records_per_page_estimate,
+                layout_type=raw_layout_type,
+                layout_field_map=layout_field_map,
+                layout_confidence=layout_confidence,
             )
         except Exception as e:
             logger.warning("Partial schema parse failure: %s", e)

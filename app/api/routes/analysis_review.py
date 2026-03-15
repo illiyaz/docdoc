@@ -5,6 +5,7 @@ before full extraction begins.
 
 GET  /jobs/{job_id}/analysis                              — analysis results for all docs
 GET  /jobs/{job_id}/documents/{doc_id}/protocol-mapping   — protocol field mapping
+PUT  /jobs/{job_id}/field-map                              — auditor edits field mappings
 POST /jobs/{job_id}/documents/{doc_id}/approve             — approve a document (with detection decisions)
 POST /jobs/{job_id}/documents/{doc_id}/reject              — reject a document
 POST /jobs/{job_id}/approve-all                            — batch approve all pending
@@ -19,7 +20,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db
-from app.core.constants import PROTOCOL_REQUIRED_FIELDS
+from app.core.constants import PROTOCOL_LLM_CONFIG, PROTOCOL_REQUIRED_FIELDS
 from app.core.settings import get_settings
 from app.db.models import (
     DetectionReviewDecision,
@@ -35,6 +36,22 @@ router = APIRouter(prefix="/jobs", tags=["analysis-review"])
 # ---------------------------------------------------------------------------
 # Request bodies
 # ---------------------------------------------------------------------------
+
+class FieldMappingBody(BaseModel):
+    field_type: str
+    anchor_text: str
+    spatial_relationship: str
+    value_pattern: str | None = None
+    sample_bbox: list[float] = []
+    line_count: int = 1
+    skip_pattern: str | None = None
+
+
+class UpdateFieldMapBody(BaseModel):
+    document_id: str
+    field_mappings: list[FieldMappingBody]
+    extraction_method: str = "coordinate"  # "coordinate" or "ai"
+
 
 class DetectionDecision(BaseModel):
     entity_type: str
@@ -80,6 +97,11 @@ def get_analysis_results(job_id: str, db: Session = Depends(get_db)):
         except Exception:
             pass
 
+    # Fallback to PROTOCOL_LLM_CONFIG defaults if no dedup_anchors from config
+    if dedup_anchors is None and protocol_name:
+        llm_cfg = PROTOCOL_LLM_CONFIG.get(protocol_name, {})
+        dedup_anchors = llm_cfg.get("dedup_anchors")
+
     docs = db.query(Document).filter(Document.ingestion_run_id == run_uuid).all()
 
     results = []
@@ -122,6 +144,19 @@ def get_analysis_results(job_id: str, db: Session = Depends(get_db)):
         if doc_schema is None and hasattr(doc, "structure_analysis") and isinstance(dsa, dict):
             doc_schema = dsa.get("document_schema")
 
+        # Extract layout info from extraction_preview or document_schema
+        preview = review.extraction_preview if review else None
+        layout_type = None
+        layout_field_map = None
+        layout_confidence = None
+        if preview and isinstance(preview, dict):
+            layout_type = preview.get("layout_type")
+            layout_confidence = preview.get("layout_confidence")
+        if doc_schema and isinstance(doc_schema, dict):
+            layout_type = layout_type or doc_schema.get("layout_type")
+            layout_field_map = doc_schema.get("layout_field_map")
+            layout_confidence = layout_confidence or doc_schema.get("layout_confidence")
+
         results.append({
             "document_id": str(doc.id),
             "file_name": doc.file_name,
@@ -145,14 +180,96 @@ def get_analysis_results(job_id: str, db: Session = Depends(get_db)):
             "extraction_guidance": ea.get("extraction_guidance"),
             # Document schema from LLM Document Understanding (Phase 14b/14c)
             "document_schema": doc_schema,
+            # Layout info for coordinate extraction (Step 21)
+            "layout_type": layout_type,
+            "layout_field_map": layout_field_map,
+            "layout_confidence": layout_confidence,
             # LLM extraction preview (Step 19b)
-            "extraction_preview": review.extraction_preview if review else None,
+            "extraction_preview": preview,
         })
 
     return {
         "documents": results,
         "dedup_anchors": dedup_anchors,
         "protocol_name": protocol_name,
+    }
+
+
+# ---------------------------------------------------------------------------
+# PUT /jobs/{job_id}/field-map
+# ---------------------------------------------------------------------------
+
+@router.put("/{job_id}/field-map")
+def update_field_map(job_id: str, body: UpdateFieldMapBody, db: Session = Depends(get_db)):
+    """Auditor edits field mappings before approving coordinate extraction."""
+    try:
+        run_uuid = UUID(job_id)
+        doc_uuid = UUID(body.document_id)
+    except ValueError:
+        raise HTTPException(400, "Invalid UUID")
+
+    run = db.get(IngestionRun, run_uuid)
+    if not run:
+        raise HTTPException(404, "Job not found")
+
+    doc = db.get(Document, doc_uuid)
+    if not doc or doc.ingestion_run_id != run_uuid:
+        raise HTTPException(404, "Document not found in this job")
+
+    # Validate field mappings
+    if not body.field_mappings:
+        raise HTTPException(422, "field_mappings cannot be empty")
+
+    valid_relationships = {
+        "same_line_right", "line_below", "region_right",
+    }
+    # Also allow "lines_below_N" pattern
+    for fm in body.field_mappings:
+        rel = fm.spatial_relationship
+        if rel not in valid_relationships and not rel.startswith("lines_below_"):
+            raise HTTPException(
+                422,
+                f"Invalid spatial_relationship '{rel}'. "
+                f"Must be one of {sorted(valid_relationships)} or 'lines_below_N'.",
+            )
+
+    # Build serializable field map list
+    field_map_dicts = [
+        {
+            "field_type": fm.field_type,
+            "anchor_text": fm.anchor_text,
+            "spatial_relationship": fm.spatial_relationship,
+            "value_pattern": fm.value_pattern,
+            "sample_bbox": fm.sample_bbox,
+            "line_count": fm.line_count,
+            "skip_pattern": fm.skip_pattern,
+        }
+        for fm in body.field_mappings
+    ]
+
+    # Store on document metadata_json so extraction can pick it up
+    meta = doc.metadata_json or {}
+    meta["auditor_layout_field_map"] = field_map_dicts
+    meta["auditor_extraction_method"] = body.extraction_method
+    doc.metadata_json = meta
+
+    # Also update the extraction_preview on the review record
+    review = db.query(DocumentAnalysisReview).filter(
+        DocumentAnalysisReview.document_id == doc_uuid,
+        DocumentAnalysisReview.ingestion_run_id == run_uuid,
+    ).first()
+
+    if review and review.extraction_preview and isinstance(review.extraction_preview, dict):
+        preview = dict(review.extraction_preview)
+        preview["field_map_count"] = len(field_map_dicts)
+        preview["extraction_method"] = body.extraction_method
+        review.extraction_preview = preview
+
+    db.flush()
+    return {
+        "document_id": body.document_id,
+        "field_mappings_count": len(field_map_dicts),
+        "extraction_method": body.extraction_method,
     }
 
 

@@ -341,7 +341,7 @@ These are detailed in [docs/SCHEMA.md](docs/SCHEMA.md). Summary:
 | 18. Auditor-Ready CSV Export with Lineage | COMPLETE | Schema-driven CSV (auditor/minimal/full), +5 lineage columns on NotificationSubject (migration 0010), gov ID masking, preview endpoint. |
 | 19. Schema-Driven LLM Extraction for Templates | COMPLETE | LLMTemplateExtractor, ENTITY_EXTRACTION_GUIDE (17 types), ALWAYS_EXTRACT_IF_PRESENT, 3-path extraction (exclusive), cross-batch dedup, marker-based instance boundaries, 24 tests. |
 | 20. Vision-First Extraction Architecture | COMPLETE | Vision-language model as primary extractor. VisionDocumentExtractor, PDF page renderer, instance boundary detector, OllamaClient.generate_with_images. 4 extraction strategies: template, table, vision page, Presidio fallback. Pattern validation. Per-protocol model config. Table extraction. Background extraction (SSE decoupling). Configurable dedup anchors. Batch reliability with retry/backoff. 79 new tests. |
-| 21. Coordinate-Based Extraction for Structured Documents | PENDING | For fixed-layout documents (accounting statements, payslips), LLM analyzes layout once → builds field map (anchor text + spatial relationships + coordinates) → Python extracts ALL pages using coordinate-based text extraction in seconds. Auditor reviews/edits field map before extraction. Reconciliation: failed pages sent to LLM fallback. ADDITIVE — existing LLM template/table/page paths unchanged. |
+| 21. Coordinate-Based Extraction for Structured Documents | IN PROGRESS | For fixed-layout documents (accounting statements, payslips), LLM analyzes layout once → builds field map (anchor text + spatial relationships + coordinates) → Python extracts ALL pages using coordinate-based text extraction in seconds. Auditor reviews/edits field map before extraction. Reconciliation: failed pages sent to LLM fallback. ADDITIVE — existing LLM template/table/page paths unchanged. |
 
 **Bugfix: Extraction preview multi-page read** — Preview now reads ALL pages of instance 0 (not just identity page). `build_preview_extraction_prompt()` asks LLM for per-field page numbers (`{value, page}` format). `_parse_preview_response()` parses LLM output with canonical field mapping. Instance count uses `find_instance_boundaries()` when marker set. 11 net new tests.
 
@@ -366,7 +366,88 @@ These are detailed in [docs/SCHEMA.md](docs/SCHEMA.md). Summary:
   - Frontend: "Reconnecting to extraction..." amber status indicator
   - 8 new tests in `test_two_phase.py` (serialize/deserialize, progress, relay, reconnect)
 
-**2185 tests passing after Steps 1–20.**
+**Step 21a (Run 1): Layout Assessment + FieldMapping Model** ✅
+  - `FieldMapping` dataclass in `app/structure/document_schema.py`: field_type, anchor_text, spatial_relationship, value_pattern, sample_bbox, line_count, skip_pattern
+  - `DocumentSchema` extended: +layout_type ("fixed"|"template_with_drift"|"variable"), +layout_field_map (list[FieldMapping]|None), +layout_confidence
+  - to_dict()/from_dict() roundtrip support, _parse_layout_field_map() defensive parser
+  - LLM prompts (UNDERSTAND_DOCUMENT + UNDERSTAND_MULTI_PAGE_DOCUMENT) updated with layout analysis instructions
+  - `_parse_response()` parses layout_type/layout_field_map/layout_confidence; safety downgrade if fixed without field_map
+  - `tests/test_layout_assessment.py`: 25 tests (FieldMapping defaults, schema layout fields, to_dict/from_dict roundtrip, parse fixed/variable/drift, safety downgrade, bad data handling, prompt content)
+
+**2210 tests passing after Step 21a (Run 1). (1 pre-existing failure in test_template_detection unrelated.)**
+
+**Step 21b (Run 2): Coordinate Extractor + Reconciliation** ✅
+  - `app/pipeline/coordinate_extractor.py` NEW: `CoordinateExtractor` class — fast extraction for fixed-layout docs using PyMuPDF word-level bounding boxes
+    - `extract_all_pages(page_range?)` → `(list[PIIRecord], list[int])` (records + failed page numbers)
+    - Anchor-based: `_find_anchor()` handles single/multi-word anchors (case-insensitive)
+    - Region computation: `same_line_right`, `line_below`, `lines_below_N`, `region_right` + unknown fallback
+    - Skip pattern + value pattern filtering per field
+    - PERSON field mandatory — missing → page added to `failed_pages`
+    - Page streaming: `doc._forget_page()` for memory efficiency
+  - `app/pipeline/reconciliation.py` NEW: `ExtractionReconciler` class — LLM fallback for failed pages
+    - `reconcile(failed_pages, doc_path, doc_id, field_map, ollama_client)` → `list[PIIRecord]`
+    - Builds reconciliation prompt from field map (field types + anchor labels + patterns)
+    - Parses LLM JSON response (handles code fences, embedded JSON, partial responses)
+    - Graceful failure: LLM errors → page silently dropped (logged as warning)
+  - `tests/test_coordinate_extraction.py`: 51 tests (anchor finding, region computation, words-to-text, field extraction with skip/value patterns, in-region check, merge bboxes, full PDF integration with PyMuPDF, reconciliation prompt building, JSON response parsing, LLM integration, error handling, field mapping coverage)
+
+**2262 tests passing after Step 21b (Run 2). (1 pre-existing failure in test_template_detection unrelated.)**
+
+**Step 21c (Run 3): Pipeline Wiring** ✅
+  - `app/pipeline/two_phase.py`: `run_extraction_background()` — Coordinate extraction as **Path 0** (before Vision/LLM/Presidio)
+    - If `schema.layout_type == "fixed"` and `schema.layout_field_map` populated: use `CoordinateExtractor`
+    - Failed pages sent to `ExtractionReconciler` (LLM fallback) when `llm_assist_enabled`
+    - `extraction_path = "0-coord"` for tracking
+    - Existing paths (Vision=1, LLM table=2a, LLM template=2b, Presidio=3) unchanged; Path 1 now guarded by `not records`
+  - `app/pipeline/two_phase.py`: `analyze_generator()` — Coordinate extraction preview for fixed-layout docs
+    - Identifies docs with `layout_type == "fixed"` + `layout_field_map`
+    - Runs sample coordinate extraction on onset page
+    - Builds preview dict with `extraction_method: "coordinate"`, `layout_type`, `layout_confidence`, `field_map_count`
+    - Preview stored on `DocumentAnalysisReview.extraction_preview` (same as template/table previews)
+    - Runs before template and table previews (docs with coordinate preview skip later preview stages)
+  - `app/api/routes/analysis_review.py`: GET `/jobs/{id}/analysis` response extended
+    - New fields: `layout_type`, `layout_field_map`, `layout_confidence` (extracted from preview or document_schema)
+  - `tests/test_two_phase.py`: 8 new tests (TestCoordinatePipelineWiring)
+    - Schema eligibility checks (requires both layout_type=="fixed" and field_map)
+    - Preview dict structure validation
+    - Path ordering verification (Path 0 < Path 1 < Path 2 < Path 3)
+    - Path 1 guard check (`not records` after coordinate path)
+    - Reconciliation wiring check
+    - Path label verification ("0-coord")
+    - Analyze generator coordinate preview check
+    - Analysis API layout fields check
+
+**2271 tests passing after Step 21c (Run 3). (1 pre-existing failure in test_template_detection unrelated.)**
+
+**Step 21d (Run 4): Frontend Field Map Editor** ✅
+  - `app/api/routes/analysis_review.py`: PUT `/jobs/{id}/field-map` endpoint
+    - `UpdateFieldMapBody` + `FieldMappingBody` pydantic models
+    - Validates spatial_relationship values (same_line_right, line_below, region_right, lines_below_N)
+    - Stores auditor-edited field map on `Document.metadata_json["auditor_layout_field_map"]`
+    - Stores extraction method preference (`"coordinate"` or `"ai"`) on `metadata_json["auditor_extraction_method"]`
+    - Updates extraction_preview on DocumentAnalysisReview record
+  - `app/pipeline/two_phase.py`: `run_extraction_background()` — Auditor field map override
+    - Checks `metadata_json["auditor_layout_field_map"]` before `schema.layout_field_map`
+    - If auditor selected `"ai"` method, coordinate path is skipped (falls through to Vision/LLM paths)
+    - `effective_field_map` used for both CoordinateExtractor and ExtractionReconciler
+  - `frontend/src/api/client.ts`:
+    - `LayoutFieldMapping` interface (field_type, anchor_text, spatial_relationship, value_pattern, sample_bbox, line_count, skip_pattern)
+    - `UpdateFieldMapBody` interface
+    - `updateFieldMap()` API function (PUT /jobs/{id}/field-map)
+    - `AnalysisReviewDetail` extended with layout_type, layout_field_map, layout_confidence, document_schema
+  - `frontend/src/pages/ProjectDetail.tsx`:
+    - `FieldMapEditor` component — full CRUD for field mappings when layout_type is "fixed" or "template_with_drift"
+    - Radio: Coordinate extraction vs AI-assisted extraction with estimated time display
+    - Per-mapping display: field type, anchor text, spatial relationship, line count, pattern
+    - Edit mode: dropdowns for field type + spatial relationship, inputs for anchor/pattern/skip/lines
+    - Add/Remove/Edit buttons per mapping
+    - Save button calls `updateFieldMap()` API
+    - Integrated into AnalysisReviewPanel per-document card (shown for pending_review docs with fixed layout)
+  - `tests/test_two_phase.py`: 7 new tests (TestCoordinatePipelineWiring, now 15 total)
+    - PUT endpoint existence, body validation, defaults, spatial validation, metadata_json storage
+    - Extraction uses auditor field map, AI method skips coordinate path
+
+**2279 tests collected after Step 21d (Run 4). (1 pre-existing failure in test_template_detection unrelated.)**
 
 See [docs/PLAN.md](docs/PLAN.md) for active steps and [docs/PLAN_COMPLETED.md](docs/PLAN_COMPLETED.md) for completed reference.
 

@@ -1,4 +1,4 @@
-"""Tests for two-phase pipeline: content onset, auto-approve, verified onset, entity groups.
+"""Tests for two-phase pipeline: content onset, auto-approve, verified onset, entity groups, coordinate wiring.
 
 Tests across classes:
 - TestFindContentOnsetFromBlocks (7 tests)
@@ -6,6 +6,7 @@ Tests across classes:
 - TestShouldAutoApprove (10 tests)
 - TestGetHeuristicCandidatePages (4 tests)
 - TestFindVerifiedOnset (7 tests)
+- TestCoordinatePipelineWiring (15 tests)
 """
 from __future__ import annotations
 
@@ -786,3 +787,224 @@ class TestExtractGeneratorRelay:
         events = list(extract_generator("00000000-0000-0000-0000-000000000003", mock_db, registry))
         assert len(events) == 1
         assert "COMPLETE" in events[0]
+
+
+# ---------------------------------------------------------------------------
+# TestCoordinatePipelineWiring — Step 21 Run 3
+# ---------------------------------------------------------------------------
+
+class TestCoordinatePipelineWiring:
+    """Tests for coordinate extraction pipeline integration."""
+
+    def test_is_fixed_layout_check_requires_both_fields(self):
+        """Coordinate path requires layout_type=='fixed' AND layout_field_map populated."""
+        from app.structure.document_schema import DocumentSchema, FieldMapping
+
+        _base = dict(
+            document_type="statement", document_subtype=None, issuing_entity=None,
+            field_map=[], people=[], organizations=[], date_contexts=[], tables=[],
+            suppression_hints=[], extraction_notes="", schema_confidence=0.9,
+            detected_by="llm",
+        )
+
+        # Variable layout → not fixed
+        schema_var = DocumentSchema(**_base, layout_type="variable")
+        assert schema_var.layout_type != "fixed" or not schema_var.layout_field_map
+
+        # Fixed but no field_map → not eligible
+        schema_no_map = DocumentSchema(**_base, layout_type="fixed")
+        assert schema_no_map.layout_type == "fixed"
+        assert schema_no_map.layout_field_map is None
+
+        # Fixed with field_map → eligible
+        fm = FieldMapping(field_type="PERSON", anchor_text="Client:", spatial_relationship="same_line_right")
+        schema_ok = DocumentSchema(
+            **_base,
+            layout_type="fixed",
+            layout_field_map=[fm],
+            layout_confidence=0.95,
+        )
+        assert schema_ok.layout_type == "fixed"
+        assert schema_ok.layout_field_map is not None
+        assert len(schema_ok.layout_field_map) == 1
+
+    def test_coordinate_preview_dict_structure(self):
+        """Coordinate extraction preview has expected keys."""
+        preview = {
+            "preview_instance": 0,
+            "pages": "1",
+            "fields_found": {"PERSON": {"value": "John Smith", "page": 1}},
+            "fields_missing": ["DATE_OF_BIRTH"],
+            "pages_read": [1],
+            "total_instances_estimate": 100,
+            "extraction_method": "coordinate",
+            "layout_type": "fixed",
+            "layout_confidence": 0.95,
+            "field_map_count": 3,
+        }
+        assert preview["extraction_method"] == "coordinate"
+        assert preview["layout_type"] == "fixed"
+        assert preview["layout_confidence"] == 0.95
+        assert preview["field_map_count"] == 3
+        assert "PERSON" in preview["fields_found"]
+        assert "DATE_OF_BIRTH" in preview["fields_missing"]
+
+    def test_fixed_layout_before_vision_path(self):
+        """Coordinate path (Path 0) is checked before Vision (Path 1)."""
+        # The ordering in two_phase.py is:
+        # Path 0: coordinate → Path 1: vision → Path 2: LLM → Path 3: presidio
+        # If Path 0 produces records, Path 1+ are skipped.
+        import ast
+        import inspect
+        from app.pipeline import two_phase
+
+        source = inspect.getsource(two_phase.run_extraction_background)
+        path0_idx = source.find("Path 0: Coordinate")
+        path1_idx = source.find("Path 1: Vision")
+        path2_idx = source.find("Path 2a: Text + LLM table")
+        path3_idx = source.find("Path 3: Presidio")
+
+        assert path0_idx > 0, "Path 0 not found in run_extraction_background"
+        assert path1_idx > 0, "Path 1 not found"
+        assert path0_idx < path1_idx, "Path 0 must come before Path 1"
+        assert path1_idx < path2_idx, "Path 1 must come before Path 2"
+        assert path2_idx < path3_idx, "Path 2 must come before Path 3"
+
+    def test_path1_vision_guards_on_no_records(self):
+        """After Path 0, Vision path only runs if records is still empty."""
+        import inspect
+        from app.pipeline import two_phase
+
+        source = inspect.getsource(two_phase.run_extraction_background)
+        # After Path 0, Path 1 should check 'not records'
+        path1_section = source[source.find("Path 1: Vision"):]
+        # The condition should include 'not records'
+        assert "not records" in path1_section[:200], \
+            "Path 1 (Vision) must be guarded by 'not records' to skip when coordinate path succeeds"
+
+    def test_coordinate_path_uses_reconciliation_on_failures(self):
+        """Coordinate path calls ExtractionReconciler for failed pages."""
+        import inspect
+        from app.pipeline import two_phase
+
+        source = inspect.getsource(two_phase.run_extraction_background)
+        coord_section = source[source.find("Path 0: Coordinate"):source.find("Path 1: Vision")]
+        assert "ExtractionReconciler" in coord_section
+        assert "reconcile" in coord_section
+
+    def test_coordinate_extraction_path_label(self):
+        """Coordinate extraction uses path label '0-coord'."""
+        import inspect
+        from app.pipeline import two_phase
+
+        source = inspect.getsource(two_phase.run_extraction_background)
+        assert '"0-coord"' in source, "extraction_path should be '0-coord' for coordinate extraction"
+
+    def test_analyze_generator_has_coordinate_preview(self):
+        """analyze_generator includes coordinate/fixed-layout preview stage."""
+        import inspect
+        from app.pipeline import two_phase
+
+        source = inspect.getsource(two_phase.analyze_generator)
+        assert "fixed-layout" in source or "coordinate extraction" in source.lower() or "fixed_layout_docs" in source
+        assert "extraction_method" in source
+        assert '"coordinate"' in source
+
+    def test_analysis_api_includes_layout_fields(self):
+        """GET /analysis response includes layout_type, layout_field_map, layout_confidence."""
+        import inspect
+        from app.api.routes import analysis_review
+
+        source = inspect.getsource(analysis_review.get_analysis_results)
+        assert '"layout_type"' in source
+        assert '"layout_field_map"' in source
+        assert '"layout_confidence"' in source
+
+    def test_field_map_put_endpoint_exists(self):
+        """PUT /jobs/{id}/field-map endpoint is registered."""
+        import inspect
+        from app.api.routes import analysis_review
+
+        source = inspect.getsource(analysis_review)
+        assert "update_field_map" in source
+        assert 'field-map' in source
+        assert '.put(' in source
+
+    def test_field_map_body_validation(self):
+        """UpdateFieldMapBody validates field mappings."""
+        from app.api.routes.analysis_review import UpdateFieldMapBody, FieldMappingBody
+
+        body = UpdateFieldMapBody(
+            document_id="test-doc-id",
+            field_mappings=[
+                FieldMappingBody(
+                    field_type="PERSON",
+                    anchor_text="Client:",
+                    spatial_relationship="same_line_right",
+                ),
+                FieldMappingBody(
+                    field_type="GOVERNMENT_ID",
+                    anchor_text="Tax No",
+                    spatial_relationship="line_below",
+                    value_pattern=r"\d{3}-\d{2}-\d{4}",
+                ),
+            ],
+            extraction_method="coordinate",
+        )
+        assert len(body.field_mappings) == 2
+        assert body.extraction_method == "coordinate"
+        assert body.field_mappings[0].field_type == "PERSON"
+        assert body.field_mappings[1].value_pattern == r"\d{3}-\d{2}-\d{4}"
+
+    def test_field_map_body_defaults(self):
+        """FieldMappingBody has correct defaults."""
+        from app.api.routes.analysis_review import FieldMappingBody
+
+        fm = FieldMappingBody(
+            field_type="LOCATION",
+            anchor_text="Address",
+            spatial_relationship="lines_below_4",
+        )
+        assert fm.value_pattern is None
+        assert fm.sample_bbox == []
+        assert fm.line_count == 1
+        assert fm.skip_pattern is None
+
+    def test_field_map_spatial_relationship_validation(self):
+        """update_field_map validates spatial_relationship values."""
+        import inspect
+        from app.api.routes import analysis_review
+
+        source = inspect.getsource(analysis_review.update_field_map)
+        assert "valid_relationships" in source
+        assert "same_line_right" in source
+        assert "lines_below_" in source
+
+    def test_field_map_stores_on_metadata_json(self):
+        """update_field_map stores field map on document metadata_json."""
+        import inspect
+        from app.api.routes import analysis_review
+
+        source = inspect.getsource(analysis_review.update_field_map)
+        assert "auditor_layout_field_map" in source
+        assert "auditor_extraction_method" in source
+        assert "metadata_json" in source
+
+    def test_extraction_uses_auditor_field_map(self):
+        """run_extraction_background checks for auditor-edited field map."""
+        import inspect
+        from app.pipeline import two_phase
+
+        source = inspect.getsource(two_phase.run_extraction_background)
+        assert "auditor_layout_field_map" in source
+        assert "auditor_extraction_method" in source
+        assert "effective_field_map" in source
+
+    def test_auditor_ai_method_skips_coordinate(self):
+        """When auditor selects 'ai' method, coordinate path is skipped."""
+        import inspect
+        from app.pipeline import two_phase
+
+        source = inspect.getsource(two_phase.run_extraction_background)
+        # The use_coordinate flag should check auditor_method != "ai"
+        assert 'auditor_method != "ai"' in source

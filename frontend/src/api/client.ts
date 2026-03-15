@@ -826,6 +826,12 @@ export interface AnalysisReviewDetail {
   extraction_guidance: string | null
   // LLM extraction preview (Step 19b)
   extraction_preview: ExtractionPreview | null
+  // Layout info for coordinate extraction (Step 21)
+  layout_type: string | null
+  layout_field_map: LayoutFieldMapping[] | null
+  layout_confidence: number | null
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  document_schema: Record<string, any> | null
 }
 
 export interface ExtractionPreview {
@@ -840,6 +846,22 @@ export interface ExtractionPreview {
   is_tabular?: boolean
   records_per_page_estimate?: number
   sample_rows?: Record<string, string>[]
+}
+
+export interface LayoutFieldMapping {
+  field_type: string
+  anchor_text: string
+  spatial_relationship: string
+  value_pattern: string | null
+  sample_bbox: number[]
+  line_count: number
+  skip_pattern: string | null
+}
+
+export interface UpdateFieldMapBody {
+  document_id: string
+  field_mappings: LayoutFieldMapping[]
+  extraction_method: string
 }
 
 export interface AnalysisResults {
@@ -938,6 +960,19 @@ export async function approveAllDocuments(
     body: JSON.stringify(body),
   })
   if (!res.ok) throw new Error(`Failed to approve all: ${res.status}`)
+  return res.json()
+}
+
+export async function updateFieldMap(
+  jobId: string,
+  body: UpdateFieldMapBody,
+): Promise<{ document_id: string; field_mappings_count: number; extraction_method: string }> {
+  const res = await fetch(`${BASE_URL}/jobs/${jobId}/field-map`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) throw new Error(`Failed to update field map: ${res.status}`)
   return res.json()
 }
 

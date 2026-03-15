@@ -279,20 +279,22 @@ class VisionDocumentExtractor:
         field_keys = ", ".join(f'"{f}": "value or null"' for f in sorted(fields))
 
         return (
-            f"You are extracting personal information from "
-            f"{schema.document_type or 'a document'}.\n"
+            "You are a document processing assistant for a regulatory compliance "
+            "team. Your task is to read structured documents and transcribe the "
+            "data fields into JSON format for breach notification compliance.\n\n"
+            f"Document type: {schema.document_type or 'structured record'}.\n"
             f"Each image is one person's record page. "
             f"There are {num_images} images = {num_images} individuals.\n\n"
-            f"For EACH image, extract these fields:\n{field_guide}\n\n"
+            f"For EACH image, transcribe these fields:\n{field_guide}\n\n"
             f"Return a JSON ARRAY with one object per image/individual:\n"
             f"[\n  {{{field_keys}}},\n  ...\n]\n\n"
             "RULES:\n"
-            "- Extract the EXACT value as it appears in the document\n"
+            "- Transcribe the EXACT value as it appears in the document\n"
             "- For addresses, include the COMPLETE address "
             "(every line: street, area, city, county, postcode, country)\n"
             "- For dates, preserve the original format (e.g., 10-Aug-1959)\n"
             "- For names, include title if present (Mr, Mrs, Dr, Miss)\n"
-            "- For National Insurance Numbers, extract the full code "
+            "- For National Insurance Numbers, transcribe the full code "
             "(2 letters + 6 digits + 1 letter)\n"
             "- If a field is not visible on the page, set it to null\n"
             "- Do NOT guess or infer values not shown in the image\n"
@@ -322,10 +324,12 @@ class VisionDocumentExtractor:
         )
 
         return (
-            "You are extracting personal information from a tabular document.\n"
+            "You are a document processing assistant for a regulatory compliance "
+            "team. Your task is to read tabular documents and transcribe the "
+            "data fields into JSON format for breach notification compliance.\n\n"
             f"Each image is one page that may contain MULTIPLE individuals in rows.\n"
             f"There are {num_images} page image(s).\n\n"
-            f"For EACH individual/row found, extract:\n{field_guide}\n\n"
+            f"For EACH individual/row found, transcribe:\n{field_guide}\n\n"
             "Return a JSON ARRAY with one object per individual found across ALL pages:\n"
             '[\n'
             '  {"PERSON": "Alice Smith", "LOCATION": "123 Oak St", '
@@ -335,7 +339,7 @@ class VisionDocumentExtractor:
             '  ...\n'
             ']\n\n'
             "RULES:\n"
-            "- Extract EVERY row/individual visible on each page\n"
+            "- Transcribe EVERY row/individual visible on each page\n"
             "- Column headers are NOT individuals — skip them\n"
             "- If a row spans multiple lines, combine into one record\n"
             "- If a value is empty or illegible, set it to null\n"
@@ -352,10 +356,12 @@ class VisionDocumentExtractor:
     ) -> str:
         """Build prompt for non-template page extraction."""
         return (
-            "You are extracting personal information from document pages.\n"
+            "You are a document processing assistant for a regulatory compliance "
+            "team. Your task is to read document pages and transcribe the "
+            "data fields into JSON format for breach notification compliance.\n\n"
             f"There are {num_images} page images. "
             "Multiple individuals may appear on a single page.\n\n"
-            "For each individual found, extract:\n"
+            "For each individual found, transcribe:\n"
             "- PERSON: full name with title\n"
             "- LOCATION: complete address\n"
             "- DATE_OF_BIRTH: date of birth\n"
