@@ -730,7 +730,7 @@ class TestRotationAwareness:
         assert region[3] >= anchor[3]
 
     def test_rotation_270_same_line_right_y_increasing(self):
-        """Rotation 270: same_line_right → region below in y (+y) at same x band."""
+        """Rotation 270: same_line_right → region below in y (+y) at tight x band."""
         anchor = (50, 100, 70, 200)  # narrow x band, tall y
         fm = FieldMapping(field_type="PERSON", anchor_text="X", spatial_relationship="same_line_right")
         page = self._mock_page(rotation=270)
@@ -738,12 +738,12 @@ class TestRotationAwareness:
         assert region is not None
         # Region y starts after anchor y1
         assert region[1] > anchor[3]
-        # Region x band overlaps anchor x band
-        assert region[0] <= anchor[0]
-        assert region[2] >= anchor[2]
+        # Region x band is tight around anchor (within ~2pt padding)
+        assert region[0] >= anchor[0] - 3
+        assert region[2] <= anchor[2] + 3
 
     def test_rotation_90_same_line_right_y_decreasing(self):
-        """Rotation 90: same_line_right → region above in y (-y) at same x band."""
+        """Rotation 90: same_line_right → region above in y (-y) at tight x band."""
         anchor = (50, 400, 70, 500)
         fm = FieldMapping(field_type="PERSON", anchor_text="X", spatial_relationship="same_line_right")
         page = self._mock_page(rotation=90)
@@ -751,9 +751,9 @@ class TestRotationAwareness:
         assert region is not None
         # Region y ends before anchor y0
         assert region[3] < anchor[1]
-        # Region x band overlaps anchor x band
-        assert region[0] <= anchor[0]
-        assert region[2] >= anchor[2]
+        # Region x band is tight around anchor (within ~2pt padding)
+        assert region[0] >= anchor[0] - 3
+        assert region[2] <= anchor[2] + 3
 
     def test_rotation_180_same_line_right_x_decreasing(self):
         """Rotation 180: same_line_right → region to the left (-x)."""
@@ -766,14 +766,14 @@ class TestRotationAwareness:
         assert region[2] < anchor[0]
 
     def test_rotation_270_line_below(self):
-        """Rotation 270: line_below → region shifts in +x direction."""
+        """Rotation 270: line_below → region shifts in -x direction (visual below)."""
         anchor = (50, 100, 70, 200)
         fm = FieldMapping(field_type="GOVERNMENT_ID", anchor_text="X", spatial_relationship="line_below")
         page = self._mock_page(rotation=270)
         region = CoordinateExtractor._compute_region(anchor, fm, page, rotation=270)
         assert region is not None
-        # Region x0 starts at anchor x1 (shifted right = "below" for 270)
-        assert region[0] >= anchor[2]
+        # Region x1 ends at anchor x0 (shifted left = visual "below" for 270)
+        assert region[2] <= anchor[0]
 
     def test_rotation_0_lines_below_n(self):
         """Rotation 0: lines_below_3 produces a region below anchor."""
@@ -852,6 +852,51 @@ class TestPersonValuePatternSkip:
         value = ext._extract_field(words, fm, page, rotation=0)
         assert value is not None
         assert "ADELINE" in value or "CHANDLER" in value
+
+    def test_person_default_cleanup_strips_client_code(self):
+        """PERSON fields auto-strip parenthesized client codes even without skip_pattern."""
+        fm = FieldMapping(
+            field_type="PERSON",
+            anchor_text="Client",
+            spatial_relationship="same_line_right",
+            # No skip_pattern set — built-in cleanup should handle it
+        )
+        words = [
+            _make_word(50, 100, 100, 115, "Client:"),
+            _make_word(110, 100, 180, 115, "(001968)"),
+            _make_word(185, 100, 280, 115, "ADELINE"),
+            _make_word(285, 100, 380, 115, "CHANDLER"),
+        ]
+        ext = CoordinateExtractor([], "", "")
+        page = MagicMock()
+        page.rect = MagicMock()
+        page.rect.width = 600
+        page.rect.height = 800
+        value = ext._extract_field(words, fm, page, rotation=0)
+        assert value is not None
+        assert "(001968)" not in value
+        assert "ADELINE" in value
+        assert "CHANDLER" in value
+
+    def test_person_cleanup_no_code_unaffected(self):
+        """PERSON values without client codes are not modified by cleanup."""
+        fm = FieldMapping(
+            field_type="PERSON",
+            anchor_text="Client",
+            spatial_relationship="same_line_right",
+        )
+        words = [
+            _make_word(50, 100, 100, 115, "Client:"),
+            _make_word(110, 100, 200, 115, "Jane"),
+            _make_word(205, 100, 290, 115, "Doe"),
+        ]
+        ext = CoordinateExtractor([], "", "")
+        page = MagicMock()
+        page.rect = MagicMock()
+        page.rect.width = 600
+        page.rect.height = 800
+        value = ext._extract_field(words, fm, page, rotation=0)
+        assert value == "Jane Doe"
 
     def test_gov_id_still_validates_pattern(self):
         """Non-PERSON fields should still use value_pattern."""

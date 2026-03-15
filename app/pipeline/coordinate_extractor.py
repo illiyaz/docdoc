@@ -92,6 +92,10 @@ _GOV_ID_TYPES: frozenset[str] = frozenset({
 
 # Tolerance in points for anchor word matching (nearby lines)
 _LINE_TOLERANCE = 5
+_ANCHOR_STRIP_CHARS = ":.,;!?"  # trailing punctuation stripped during anchor match
+
+# Common noise patterns stripped from PERSON values (client codes, ref numbers)
+_PERSON_CLEANUP_RE = re.compile(r"\(\d+\)\s*")
 
 
 # ---------------------------------------------------------------------------
@@ -247,8 +251,11 @@ class CoordinateExtractor:
         if region is None:
             return None
 
-        # Collect words in the region
-        region_words_raw = [w for w in words if self._in_region(w, region)]
+        # Collect words in the region, excluding standalone punctuation
+        region_words_raw = [
+            w for w in words
+            if self._in_region(w, region) and w[4].strip(_ANCHOR_STRIP_CHARS + " ")
+        ]
 
         # Sort order depends on rotation
         if rotation == 270:
@@ -273,9 +280,13 @@ class CoordinateExtractor:
             except re.error:
                 pass
 
-        # Skip value_pattern validation for PERSON fields — names are too
-        # variable for regex validation (e.g. "(001968) ADELINE CHANDLER").
+        # Strip common noise from PERSON values (e.g. "(001968) ADELINE CHANDLER")
         effective_type = norm_type or _normalize_field_type(field.field_type)
+        if effective_type == "PERSON" and value:
+            value = _PERSON_CLEANUP_RE.sub("", value).strip()
+
+        # Skip value_pattern validation for PERSON fields — names are too
+        # variable for regex validation.
         if effective_type != "PERSON" and field.value_pattern and value:
             try:
                 if not re.search(field.value_pattern, value):
@@ -313,15 +324,15 @@ class CoordinateExtractor:
 
         # Single-word anchor
         if len(anchor_parts) == 1:
-            target = anchor_parts[0].lower().rstrip(":")
+            target = anchor_parts[0].lower().rstrip(_ANCHOR_STRIP_CHARS)
             for w in words:
-                word_text = w[4].lower().rstrip(":")
+                word_text = w[4].lower().rstrip(_ANCHOR_STRIP_CHARS)
                 if word_text == target:
                     return [w]
             return None
 
         # Multi-word anchor: find consecutive words on the same line
-        target_parts = [p.lower().rstrip(":") for p in anchor_parts]
+        target_parts = [p.lower().rstrip(_ANCHOR_STRIP_CHARS) for p in anchor_parts]
         for i in range(len(words) - len(target_parts) + 1):
             candidate = words[i : i + len(target_parts)]
             # Check all words are on roughly the same line
@@ -330,7 +341,7 @@ class CoordinateExtractor:
                 for c in candidate
             ):
                 continue
-            texts = [c[4].lower().rstrip(":") for c in candidate]
+            texts = [c[4].lower().rstrip(_ANCHOR_STRIP_CHARS) for c in candidate]
             if texts == target_parts:
                 return list(candidate)
 
@@ -391,38 +402,45 @@ class CoordinateExtractor:
 
         # --- Rotation 270 ---
         # Visual "right" = increasing y at same x band
+        # Visual "below" = decreasing x
         elif rotation == 270:
             line_height = (ax1 - ax0) or 15  # "line height" is x-extent
+            # Tight x-band padding (< 0.5 line_height) to avoid adjacent lines
+            xpad = min(2, line_height * 0.3)
 
             if rel == "same_line_right":
-                return (ax0 - 5, ay1 + 5, ax1 + 5, page_height - 20)
+                return (ax0 - xpad, ay1 + 5, ax1 + xpad, page_height - 20)
             if rel == "same_line_left":
-                return (ax0 - 5, 20, ax1 + 5, ay0 - 5)
+                return (ax0 - xpad, 20, ax1 + xpad, ay0 - 5)
             if rel == "line_below":
-                return (ax1, ay0 - 50, ax1 + line_height * 1.8, page_height - 20)
+                # Visual "below" = decreasing x for rotation 270
+                return (ax0 - line_height * 1.8, ay0 - 50, ax0, page_height - 20)
             if lines_n is not None:
-                return (ax1, ay0 - 50, ax1 + line_height * lines_n * 1.5, page_height - 20)
+                return (ax0 - line_height * lines_n * 1.5, ay0 - 50, ax0, page_height - 20)
             if rel == "region_right":
-                return (ax0 - 5, ay1 + 5,
+                return (ax0 - xpad, ay1 + 5,
                         ax1 + line_height * max(field.line_count, 1) * 1.5,
                         page_height - 20)
 
         # --- Rotation 90 ---
         # Visual "right" = decreasing y at same x band
+        # Visual "below" = increasing x
         elif rotation == 90:
             line_height = (ax1 - ax0) or 15
+            xpad = min(2, line_height * 0.3)
 
             if rel == "same_line_right":
-                return (ax0 - 5, 20, ax1 + 5, ay0 - 5)
+                return (ax0 - xpad, 20, ax1 + xpad, ay0 - 5)
             if rel == "same_line_left":
-                return (ax0 - 5, ay1 + 5, ax1 + 5, page_height - 20)
+                return (ax0 - xpad, ay1 + 5, ax1 + xpad, page_height - 20)
             if rel == "line_below":
-                return (ax0 - line_height * 1.8, ay0 - 50, ax0, page_height - 20)
+                # Visual "below" = increasing x for rotation 90
+                return (ax1, ay0 - 50, ax1 + line_height * 1.8, page_height - 20)
             if lines_n is not None:
-                return (ax0 - line_height * lines_n * 1.5, ay0 - 50, ax0, page_height - 20)
+                return (ax1, ay0 - 50, ax1 + line_height * lines_n * 1.5, page_height - 20)
             if rel == "region_right":
                 return (ax0 - line_height * max(field.line_count, 1) * 1.5,
-                        20, ax1 + 5, ay0 - 5)
+                        20, ax1 + xpad, ay0 - 5)
 
         # --- Rotation 180 ---
         # Visual "right" = -x, "below" = -y
@@ -485,6 +503,10 @@ class CoordinateExtractor:
         Groups words by vertical position (or x-position for rotated pages)
         and joins with spaces (within line) and newlines (between lines).
         Limits output to ``line_count`` lines.
+
+        Large gaps (>50pt) in the reading direction within a line are
+        treated as line breaks to avoid capturing unrelated text from
+        the same row on rotated pages.
         """
         if not region_words:
             return ""
@@ -499,15 +521,34 @@ class CoordinateExtractor:
             group_idx = 1   # group by y
             sort_idx = 0    # sort within line by x
 
-        lines: list[list[tuple]] = []
+        # Group by cross-line axis
+        raw_lines: list[list[tuple]] = []
         current_line: list[tuple] = [region_words[0]]
         for w in region_words[1:]:
             if abs(w[group_idx] - current_line[0][group_idx]) > _LINE_TOLERANCE:
-                lines.append(current_line)
+                raw_lines.append(current_line)
                 current_line = [w]
             else:
                 current_line.append(w)
-        lines.append(current_line)
+        raw_lines.append(current_line)
+
+        # Split each line at large gaps in the reading direction.
+        # On rotated pages, a single x-band can span the full page height,
+        # so a 50pt+ gap indicates unrelated text (e.g., a second section).
+        _GAP_THRESHOLD = 50
+        lines: list[list[tuple]] = []
+        for raw_line in raw_lines:
+            sorted_words = sorted(raw_line, key=lambda w: w[sort_idx])
+            current: list[tuple] = [sorted_words[0]]
+            for w in sorted_words[1:]:
+                # gap = start of next word - end of previous word
+                gap = w[sort_idx] - current[-1][sort_idx + 2]
+                if gap > _GAP_THRESHOLD:
+                    lines.append(current)
+                    current = [w]
+                else:
+                    current.append(w)
+            lines.append(current)
 
         # Sort words within each line by reading-order axis
         text_lines = []
