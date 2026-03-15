@@ -57,6 +57,9 @@ async def _sweep_expired_uploads() -> None:
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     setup_logging()
+    # Ensure upload directory exists (persistent, survives restarts)
+    upload_root = Path(get_settings().upload_dir)
+    upload_root.mkdir(parents=True, exist_ok=True)
     task = asyncio.create_task(_sweep_expired_uploads())
     yield
     task.cancel()

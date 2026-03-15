@@ -221,7 +221,7 @@ def update_field_map(job_id: str, body: UpdateFieldMapBody, db: Session = Depend
         raise HTTPException(422, "field_mappings cannot be empty")
 
     valid_relationships = {
-        "same_line_right", "line_below", "region_right",
+        "same_line_right", "same_line_left", "line_below", "region_right",
     }
     # Also allow "lines_below_N" pattern
     for fm in body.field_mappings:

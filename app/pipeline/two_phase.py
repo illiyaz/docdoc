@@ -539,6 +539,10 @@ def analyze_generator(
 
                     if schema is not None:
                         understanding_count += 1
+                        # Persist schema to metadata_json for extraction phase
+                        doc.metadata_json = doc.metadata_json or {}
+                        doc.metadata_json["document_schema"] = schema.to_dict()
+                        flag_modified(doc, "metadata_json")
                         # Apply SchemaFilter to this doc's detections
                         detections = doc_detections.get(doc.id, [])
                         if detections:
@@ -576,7 +580,7 @@ def analyze_generator(
             doc for doc in doc_records
             if doc.id in doc_schemas
             and doc_schemas[doc.id] is not None
-            and getattr(doc_schemas[doc.id], "layout_type", "variable") == "fixed"
+            and getattr(doc_schemas[doc.id], "layout_type", "variable") in ("fixed", "template_with_drift")
             and getattr(doc_schemas[doc.id], "layout_field_map", None)
         ]
 
@@ -1264,7 +1268,18 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                 blocks = reader.read()
 
                 schema = None
-                if doc_understanding_cls is not None and schema_filter_cls is not None:
+                # Try loading schema persisted during analysis phase
+                doc_meta = doc.metadata_json or {}
+                schema_dict = doc_meta.get("document_schema")
+                if schema_dict:
+                    try:
+                        from app.structure.document_schema import DocumentSchema as _DS
+                        schema = _DS.from_dict(schema_dict)
+                    except Exception:
+                        logger.warning("Failed to load persisted schema for %s", doc.file_name)
+
+                # Fall back to LLM re-computation if no persisted schema
+                if schema is None and doc_understanding_cls is not None and schema_filter_cls is not None:
                     try:
                         onset_page = doc.sample_onset_page or 0
                         heuristic_doc_type = "unknown"
@@ -1376,7 +1391,7 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
 
                 is_fixed_layout = (
                     schema is not None
-                    and getattr(schema, "layout_type", "variable") == "fixed"
+                    and getattr(schema, "layout_type", "variable") in ("fixed", "template_with_drift")
                     and effective_field_map is not None
                     and use_coordinate
                 )

@@ -1008,3 +1008,50 @@ class TestCoordinatePipelineWiring:
         source = inspect.getsource(two_phase.run_extraction_background)
         # The use_coordinate flag should check auditor_method != "ai"
         assert 'auditor_method != "ai"' in source
+
+    def test_schema_persisted_to_metadata_json_during_analysis(self):
+        """analyze_generator persists schema to Document.metadata_json['document_schema']."""
+        import inspect
+        from app.pipeline import two_phase
+
+        source = inspect.getsource(two_phase.analyze_generator)
+        assert '"document_schema"' in source
+        assert "schema.to_dict()" in source
+        assert "flag_modified" in source
+
+    def test_schema_loaded_from_metadata_json_during_extraction(self):
+        """run_extraction_background loads schema from metadata_json before LLM re-computation."""
+        import inspect
+        from app.pipeline import two_phase
+
+        source = inspect.getsource(two_phase.run_extraction_background)
+        assert '"document_schema"' in source
+        assert "from_dict" in source
+        # Schema load must come BEFORE LLM re-computation fallback
+        # Use the per-doc schema loading section (not the top-level class init)
+        load_idx = source.find('schema_dict = doc_meta.get("document_schema")')
+        fallback_idx = source.find("Fall back to LLM re-computation")
+        assert load_idx > 0, "Schema load from metadata_json not found"
+        assert fallback_idx > 0, "LLM fallback not found"
+        assert load_idx < fallback_idx, "Schema load from metadata_json must precede LLM fallback"
+
+    def test_schema_roundtrip_via_metadata_json(self):
+        """DocumentSchema can roundtrip through to_dict/from_dict."""
+        from app.structure.document_schema import DocumentSchema, FieldMapping
+
+        fm = FieldMapping(field_type="PERSON", anchor_text="Client:", spatial_relationship="same_line_right")
+        schema = DocumentSchema(
+            document_type="statement", document_subtype=None, issuing_entity=None,
+            field_map=[], people=[], organizations=[], date_contexts=[], tables=[],
+            suppression_hints=[], extraction_notes="", schema_confidence=0.9,
+            detected_by="llm",
+            layout_type="fixed",
+            layout_field_map=[fm],
+            layout_confidence=0.95,
+        )
+        d = schema.to_dict()
+        restored = DocumentSchema.from_dict(d)
+        assert restored.layout_type == "fixed"
+        assert len(restored.layout_field_map) == 1
+        assert restored.layout_field_map[0].field_type == "PERSON"
+        assert restored.layout_confidence == 0.95

@@ -140,10 +140,19 @@ class TestAnchorFinding:
 class TestRegionComputation:
     """Tests for _compute_region()."""
 
+    @staticmethod
+    def _mock_page(width=600, height=800, rotation=0):
+        page = MagicMock()
+        page.rotation = rotation
+        page.rect = MagicMock()
+        page.rect.width = width
+        page.rect.height = height
+        return page
+
     def test_same_line_right(self):
         anchor = (50, 100, 100, 115)
         fm = FieldMapping(field_type="PERSON", anchor_text="X", spatial_relationship="same_line_right")
-        region = CoordinateExtractor._compute_region(anchor, fm, 600)
+        region = CoordinateExtractor._compute_region(anchor, fm, self._mock_page())
         assert region is not None
         # Region should start to the right of anchor
         assert region[0] > anchor[2]
@@ -154,7 +163,7 @@ class TestRegionComputation:
     def test_line_below(self):
         anchor = (50, 100, 100, 115)
         fm = FieldMapping(field_type="GOVERNMENT_ID", anchor_text="X", spatial_relationship="line_below")
-        region = CoordinateExtractor._compute_region(anchor, fm, 600)
+        region = CoordinateExtractor._compute_region(anchor, fm, self._mock_page())
         assert region is not None
         # Region should start below anchor
         assert region[1] >= anchor[3]
@@ -165,7 +174,7 @@ class TestRegionComputation:
             field_type="LOCATION", anchor_text="X",
             spatial_relationship="lines_below_4", line_count=4,
         )
-        region = CoordinateExtractor._compute_region(anchor, fm, 600)
+        region = CoordinateExtractor._compute_region(anchor, fm, self._mock_page())
         assert region is not None
         # Region should extend further below for 4 lines
         line_height = (anchor[3] - anchor[1]) or 15
@@ -177,14 +186,14 @@ class TestRegionComputation:
             field_type="LOCATION", anchor_text="X",
             spatial_relationship="region_right", line_count=3,
         )
-        region = CoordinateExtractor._compute_region(anchor, fm, 600)
+        region = CoordinateExtractor._compute_region(anchor, fm, self._mock_page())
         assert region is not None
         assert region[0] > anchor[2]
 
     def test_unknown_relationship_fallback(self):
         anchor = (50, 100, 100, 115)
         fm = FieldMapping(field_type="PERSON", anchor_text="X", spatial_relationship="unknown_type")
-        region = CoordinateExtractor._compute_region(anchor, fm, 600)
+        region = CoordinateExtractor._compute_region(anchor, fm, self._mock_page())
         # Falls back to same_line_right
         assert region is not None
         assert region[0] > anchor[2]
@@ -243,6 +252,14 @@ class TestInRegion:
 class TestFieldExtraction:
     """Tests for _extract_field() with various patterns."""
 
+    @staticmethod
+    def _mock_page(width=600, height=800):
+        page = MagicMock()
+        page.rect = MagicMock()
+        page.rect.width = width
+        page.rect.height = height
+        return page
+
     def test_extract_with_skip_pattern(self):
         """Skip pattern should remove matching text from the extracted value."""
         fm = FieldMapping(
@@ -257,7 +274,7 @@ class TestFieldExtraction:
             _make_word(180, 100, 280, 115, "Smith"),
         ]
         ext = CoordinateExtractor([], "", "")
-        value = ext._extract_field(words, fm, 600)
+        value = ext._extract_field(words, fm, self._mock_page())
         assert value is not None
         assert "(001968)" not in value
         assert "Smith" in value
@@ -274,7 +291,7 @@ class TestFieldExtraction:
             _make_word(110, 100, 220, 115, "123-45-6789"),
         ]
         ext = CoordinateExtractor([], "", "")
-        value = ext._extract_field(words, fm, 600)
+        value = ext._extract_field(words, fm, self._mock_page())
         assert value == "123-45-6789"
 
     def test_extract_with_value_pattern_no_match(self):
@@ -289,7 +306,7 @@ class TestFieldExtraction:
             _make_word(110, 100, 220, 115, "N/A"),
         ]
         ext = CoordinateExtractor([], "", "")
-        value = ext._extract_field(words, fm, 600)
+        value = ext._extract_field(words, fm, self._mock_page())
         assert value is None
 
 
@@ -680,3 +697,178 @@ class TestFieldMapping:
     def test_dob_types_mapped(self):
         for t in ["DATE_OF_BIRTH", "DATE_OF_BIRTH_DMY", "DATE_OF_BIRTH_MDY", "DATE_OF_BIRTH_ISO"]:
             assert _FIELD_TO_RAW[t] == "raw_dob"
+
+
+# ---------------------------------------------------------------------------
+# Rotation awareness tests (BUG 1 fix)
+# ---------------------------------------------------------------------------
+
+
+class TestRotationAwareness:
+    """Tests for rotation-aware region computation and anchor finding."""
+
+    def _mock_page(self, width: float = 612, height: float = 792, rotation: int = 0):
+        """Create a mock page with rect and rotation."""
+        page = MagicMock()
+        page.rotation = rotation
+        page.rect = MagicMock()
+        page.rect.width = width
+        page.rect.height = height
+        return page
+
+    def test_rotation_0_same_line_right_standard(self):
+        """Rotation 0: same_line_right → region to the right (+x)."""
+        anchor = (50, 100, 100, 115)
+        fm = FieldMapping(field_type="PERSON", anchor_text="X", spatial_relationship="same_line_right")
+        page = self._mock_page(rotation=0)
+        region = CoordinateExtractor._compute_region(anchor, fm, page, rotation=0)
+        assert region is not None
+        # Region starts to the right of anchor
+        assert region[0] > anchor[2]
+        # Region y roughly matches anchor y
+        assert region[1] <= anchor[1]
+        assert region[3] >= anchor[3]
+
+    def test_rotation_270_same_line_right_y_increasing(self):
+        """Rotation 270: same_line_right → region below in y (+y) at same x band."""
+        anchor = (50, 100, 70, 200)  # narrow x band, tall y
+        fm = FieldMapping(field_type="PERSON", anchor_text="X", spatial_relationship="same_line_right")
+        page = self._mock_page(rotation=270)
+        region = CoordinateExtractor._compute_region(anchor, fm, page, rotation=270)
+        assert region is not None
+        # Region y starts after anchor y1
+        assert region[1] > anchor[3]
+        # Region x band overlaps anchor x band
+        assert region[0] <= anchor[0]
+        assert region[2] >= anchor[2]
+
+    def test_rotation_90_same_line_right_y_decreasing(self):
+        """Rotation 90: same_line_right → region above in y (-y) at same x band."""
+        anchor = (50, 400, 70, 500)
+        fm = FieldMapping(field_type="PERSON", anchor_text="X", spatial_relationship="same_line_right")
+        page = self._mock_page(rotation=90)
+        region = CoordinateExtractor._compute_region(anchor, fm, page, rotation=90)
+        assert region is not None
+        # Region y ends before anchor y0
+        assert region[3] < anchor[1]
+        # Region x band overlaps anchor x band
+        assert region[0] <= anchor[0]
+        assert region[2] >= anchor[2]
+
+    def test_rotation_180_same_line_right_x_decreasing(self):
+        """Rotation 180: same_line_right → region to the left (-x)."""
+        anchor = (300, 100, 400, 115)
+        fm = FieldMapping(field_type="PERSON", anchor_text="X", spatial_relationship="same_line_right")
+        page = self._mock_page(rotation=180)
+        region = CoordinateExtractor._compute_region(anchor, fm, page, rotation=180)
+        assert region is not None
+        # Region x1 < anchor x0 (to the left)
+        assert region[2] < anchor[0]
+
+    def test_rotation_270_line_below(self):
+        """Rotation 270: line_below → region shifts in +x direction."""
+        anchor = (50, 100, 70, 200)
+        fm = FieldMapping(field_type="GOVERNMENT_ID", anchor_text="X", spatial_relationship="line_below")
+        page = self._mock_page(rotation=270)
+        region = CoordinateExtractor._compute_region(anchor, fm, page, rotation=270)
+        assert region is not None
+        # Region x0 starts at anchor x1 (shifted right = "below" for 270)
+        assert region[0] >= anchor[2]
+
+    def test_rotation_0_lines_below_n(self):
+        """Rotation 0: lines_below_3 produces a region below anchor."""
+        anchor = (50, 100, 100, 115)
+        fm = FieldMapping(field_type="LOCATION", anchor_text="X", spatial_relationship="lines_below_3", line_count=3)
+        page = self._mock_page(rotation=0)
+        region = CoordinateExtractor._compute_region(anchor, fm, page, rotation=0)
+        assert region is not None
+        assert region[1] >= anchor[3]  # starts below
+        line_height = (anchor[3] - anchor[1]) or 15
+        assert region[3] > anchor[3] + line_height * 2  # extends for multiple lines
+
+    def test_rotation_270_region_right(self):
+        """Rotation 270: region_right extends in +y and +x."""
+        anchor = (50, 100, 70, 200)
+        fm = FieldMapping(field_type="LOCATION", anchor_text="X", spatial_relationship="region_right", line_count=3)
+        page = self._mock_page(rotation=270)
+        region = CoordinateExtractor._compute_region(anchor, fm, page, rotation=270)
+        assert region is not None
+        # Should extend in y direction (past anchor y1)
+        assert region[1] > anchor[3]
+
+    def test_anchor_finding_uses_x_for_same_line_on_270(self):
+        """On 270-rotated pages, multi-word anchors match by x proximity (not y)."""
+        # Words on same x band but different y (which is "same visual line" for 270)
+        words = [
+            _make_word(50, 100, 70, 150, "Tax"),   # same x ≈ 50-70
+            _make_word(50, 160, 70, 210, "No"),     # same x ≈ 50-70
+        ]
+        result = CoordinateExtractor._find_anchor(words, "Tax No", rotation=270)
+        assert result is not None
+        assert len(result) == 2
+
+    def test_anchor_finding_uses_y_for_same_line_on_0(self):
+        """On standard pages, multi-word anchors match by y proximity."""
+        words = [
+            _make_word(50, 100, 80, 115, "Tax"),
+            _make_word(85, 100, 110, 115, "No"),
+        ]
+        result = CoordinateExtractor._find_anchor(words, "Tax No", rotation=0)
+        assert result is not None
+
+    def test_words_to_text_groups_by_x_on_270(self):
+        """On 270-rotated pages, lines are grouped by x, sorted within by y."""
+        words = [
+            _make_word(50, 100, 70, 130, "John"),
+            _make_word(50, 140, 70, 170, "Smith"),
+        ]
+        result = CoordinateExtractor._words_to_text(words, line_count=1, rotation=270)
+        assert "John" in result
+        assert "Smith" in result  # same x band → same line
+
+
+class TestPersonValuePatternSkip:
+    """Tests that PERSON fields skip value_pattern validation (BUG 3 fix)."""
+
+    def test_person_field_ignores_value_pattern(self):
+        """PERSON field with value_pattern should still extract names."""
+        fm = FieldMapping(
+            field_type="PERSON",
+            anchor_text="Client",
+            spatial_relationship="same_line_right",
+            value_pattern=r"[A-Z]+ [A-Z]+",  # would reject "(001968) ADELINE CHANDLER"
+        )
+        words = [
+            _make_word(50, 100, 100, 115, "Client:"),
+            _make_word(110, 100, 180, 115, "(001968)"),
+            _make_word(185, 100, 280, 115, "ADELINE"),
+            _make_word(285, 100, 380, 115, "CHANDLER"),
+        ]
+        ext = CoordinateExtractor([], "", "")
+        page = MagicMock()
+        page.rect = MagicMock()
+        page.rect.width = 600
+        page.rect.height = 800
+        value = ext._extract_field(words, fm, page, rotation=0)
+        assert value is not None
+        assert "ADELINE" in value or "CHANDLER" in value
+
+    def test_gov_id_still_validates_pattern(self):
+        """Non-PERSON fields should still use value_pattern."""
+        fm = FieldMapping(
+            field_type="GOVERNMENT_ID",
+            anchor_text="SSN",
+            spatial_relationship="same_line_right",
+            value_pattern=r"\d{3}-\d{2}-\d{4}",
+        )
+        words = [
+            _make_word(50, 100, 100, 115, "SSN:"),
+            _make_word(110, 100, 220, 115, "N/A"),
+        ]
+        ext = CoordinateExtractor([], "", "")
+        page = MagicMock()
+        page.rect = MagicMock()
+        page.rect.width = 600
+        page.rect.height = 800
+        value = ext._extract_field(words, fm, page, rotation=0)
+        assert value is None  # "N/A" doesn't match SSN pattern

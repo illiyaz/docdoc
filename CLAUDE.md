@@ -449,6 +449,23 @@ These are detailed in [docs/SCHEMA.md](docs/SCHEMA.md). Summary:
 
 **2279 tests collected after Step 21d (Run 4). (1 pre-existing failure in test_template_detection unrelated.)**
 
+**Step 21e (Run 5): Rotation Awareness + Schema Persistence + PERSON Pattern Fix** ✅
+  - `app/pipeline/coordinate_extractor.py`: Rotation-aware coordinate extraction
+    - `_compute_region()` now accepts `page` object + `rotation` parameter; handles 0°/90°/180°/270° layouts
+    - For rotation=270 (e.g., Boosey & Hawkes PDF): "same_line_right" → +y at same x band, "line_below" → +x shift
+    - For rotation=90: mirror of 270 (visual "right" = decreasing y)
+    - For rotation=180: visual "right" = decreasing x, "below" = decreasing y
+    - `_find_anchor()` uses x-axis proximity for same-line detection on 90°/270° pages (not y-axis)
+    - `_words_to_text()` groups by x on rotated pages, sorts within line by y
+    - `_extract_field()` skips `value_pattern` validation for PERSON fields — names too variable for regex
+  - `app/pipeline/two_phase.py`: Schema persistence between analysis and extraction phases
+    - `analyze_generator()`: persists `DocumentSchema` to `Document.metadata_json["document_schema"]` via `schema.to_dict()` + `flag_modified()`
+    - `run_extraction_background()`: loads schema from `metadata_json["document_schema"]` via `DocumentSchema.from_dict()` before falling back to LLM re-computation
+  - `tests/test_coordinate_extraction.py`: 14 new tests (TestRotationAwareness: 11 tests for 0°/90°/180°/270° regions, anchor finding, word grouping; TestPersonValuePatternSkip: 2 tests for PERSON skip + GOV_ID enforcement)
+  - `tests/test_two_phase.py`: 4 new tests (schema persistence to metadata_json, schema loading during extraction, schema roundtrip, load-before-LLM ordering)
+
+**2293 tests passing after Step 21e (Run 5). (1 pre-existing failure in test_template_detection unrelated.)**
+
 See [docs/PLAN.md](docs/PLAN.md) for active steps and [docs/PLAN_COMPLETED.md](docs/PLAN_COMPLETED.md) for completed reference.
 
 ---
