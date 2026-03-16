@@ -603,7 +603,6 @@ def analyze_generator(
             doc for doc in doc_records
             if doc.id in doc_schemas
             and doc_schemas[doc.id] is not None
-            and getattr(doc_schemas[doc.id], "layout_type", "variable") in ("fixed", "template_with_drift")
             and getattr(doc_schemas[doc.id], "layout_field_map", None)
         ]
 
@@ -1452,11 +1451,14 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                 )
                 use_coordinate = auditor_method != "ai" if auditor_method else True
 
+                # Try coordinate extraction if a field map exists — regardless
+                # of layout_type.  The LLM sometimes returns "variable" even
+                # for fixed-layout docs; having a field_map is the stronger
+                # signal that coordinate extraction should be attempted.
                 is_fixed_layout = (
-                    schema is not None
-                    and getattr(schema, "layout_type", "variable") in ("fixed", "template_with_drift")
-                    and effective_field_map is not None
+                    effective_field_map is not None
                     and use_coordinate
+                    and doc.source_path
                 )
                 if is_fixed_layout and doc.source_path:
                     try:
