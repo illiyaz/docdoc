@@ -97,6 +97,55 @@ _ANCHOR_STRIP_CHARS = ":.,;!?"  # trailing punctuation stripped during anchor ma
 # Common noise patterns stripped from PERSON values (client codes, ref numbers)
 _PERSON_CLEANUP_RE = re.compile(r"\(\d+\)\s*")
 
+# Address validation: US state abbreviations (2-letter), ZIP codes, country names
+_US_STATE_ABBRS = frozenset({
+    "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA",
+    "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD",
+    "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ",
+    "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC",
+    "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY",
+    "DC",
+})
+_ZIP_RE = re.compile(r"\b\d{5}(?:-\d{4})?\b")
+_UK_POSTCODE_RE = re.compile(r"\b[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}\b", re.IGNORECASE)
+_STREET_RE = re.compile(
+    r"\b(?:ROAD|RD|STREET|ST|AVENUE|AVE|DRIVE|DR|LANE|LN|COURT|CT|"
+    r"BOULEVARD|BLVD|WAY|PLACE|PL|CIRCLE|CIR|TERRACE|TER)\b",
+    re.IGNORECASE,
+)
+_COUNTRY_NAMES = frozenset({
+    "USA", "US", "UNITED STATES", "UK", "UNITED KINGDOM",
+    "CANADA", "AUSTRALIA", "IRELAND", "INDIA",
+})
+
+
+def _looks_like_address(text: str) -> bool:
+    """Check if text looks like it contains address content."""
+    if not text:
+        return False
+    upper = text.upper()
+    # Check for street-number start (e.g., "3708 GRAHAM ROAD")
+    if re.search(r"^\d+\s+\w+", text, re.MULTILINE):
+        return True
+    # Check for ZIP code
+    if _ZIP_RE.search(text):
+        return True
+    # Check for UK postcode
+    if _UK_POSTCODE_RE.search(text):
+        return True
+    # Check for street type keywords
+    if _STREET_RE.search(text):
+        return True
+    # Check for US state abbreviation as a standalone word
+    for word in upper.split():
+        if word.strip(",. ") in _US_STATE_ABBRS:
+            return True
+    # Check for country names
+    for country in _COUNTRY_NAMES:
+        if country in upper:
+            return True
+    return False
+
 
 # ---------------------------------------------------------------------------
 # CoordinateExtractor
@@ -161,6 +210,7 @@ class CoordinateExtractor:
             fields: dict[str, str | dict] = {}
             entity_types_found: list[str] = []
             success = True
+            person_anchor_fm: FieldMapping | None = None
 
             for fm in self.field_map:
                 norm_type = _normalize_field_type(fm.field_type)
@@ -173,9 +223,28 @@ class CoordinateExtractor:
                         else:
                             fields[raw_field] = value
                         entity_types_found.append(norm_type)
+                    # Remember the PERSON anchor for address fallback
+                    if norm_type == "PERSON":
+                        person_anchor_fm = fm
                 elif norm_type == "PERSON":
                     # PERSON is mandatory — page fails without it
                     success = False
+
+            # Address fallback: if PERSON found but no LOCATION in field_map,
+            # look for address lines below the PERSON anchor.  Common in
+            # accounting statements where "In Account with : NAME\nADDRESS".
+            if (
+                success
+                and "raw_address" not in fields
+                and person_anchor_fm is not None
+                and not self._has_location_field()
+            ):
+                addr = self._extract_address_below_person(
+                    words, person_anchor_fm, page, rotation,
+                )
+                if addr:
+                    fields["raw_address"] = {"full": addr}
+                    entity_types_found.append("LOCATION")
 
             raw_name = fields.get("raw_name")
             if success and raw_name and isinstance(raw_name, str):
@@ -295,6 +364,73 @@ class CoordinateExtractor:
                 pass
 
         return value or None
+
+    # -- Address fallback ---------------------------------------------------
+
+    def _has_location_field(self) -> bool:
+        """Check if the field map already has a LOCATION field."""
+        return any(
+            _normalize_field_type(fm.field_type) == "LOCATION"
+            for fm in self.field_map
+        )
+
+    def _extract_address_below_person(
+        self,
+        words: list[tuple],
+        person_fm: FieldMapping,
+        page: object,
+        rotation: int,
+    ) -> str | None:
+        """Extract address lines below the PERSON anchor.
+
+        Many fixed-layout documents (accounting statements, royalty reports)
+        have a single labeled section like "In Account with : NAME" followed
+        by address lines underneath.  When the LLM doesn't create a separate
+        LOCATION field mapping, this fallback extracts 4 lines below the
+        PERSON anchor and validates them as address content.
+        """
+        anchor_words = self._find_anchor(words, person_fm.anchor_text, rotation)
+        if not anchor_words:
+            return None
+
+        anchor_bbox = self._merge_bboxes(anchor_words)
+
+        # Create a synthetic field for "lines_below_4" (up to 4 address lines)
+        synth = FieldMapping(
+            field_type="LOCATION",
+            anchor_text=person_fm.anchor_text,
+            spatial_relationship="lines_below_4",
+            line_count=4,
+        )
+        region = self._compute_region(anchor_bbox, synth, page, rotation)
+        if region is None:
+            return None
+
+        region_words_raw = [
+            w for w in words
+            if self._in_region(w, region) and w[4].strip(_ANCHOR_STRIP_CHARS + " ")
+        ]
+
+        # Sort by reading order
+        if rotation == 270:
+            region_words = sorted(region_words_raw, key=lambda w: (w[0], w[1]))
+        elif rotation == 90:
+            region_words = sorted(region_words_raw, key=lambda w: (-w[0], -w[1]))
+        elif rotation == 180:
+            region_words = sorted(region_words_raw, key=lambda w: (-w[1], -w[0]))
+        else:
+            region_words = sorted(region_words_raw, key=lambda w: (w[1], w[0]))
+
+        text = self._words_to_text(region_words, 4, rotation)
+        if not text:
+            return None
+
+        # Validate: at least one line should look like address content
+        # (digit-starting street, state abbreviation, ZIP, country name)
+        if _looks_like_address(text):
+            return text
+
+        return None
 
     # -- Anchor finding -----------------------------------------------------
 

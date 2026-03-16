@@ -16,7 +16,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from app.llm.client import OllamaClient
-from app.pipeline.coordinate_extractor import CoordinateExtractor, _FIELD_TO_RAW
+from app.pipeline.coordinate_extractor import CoordinateExtractor, _FIELD_TO_RAW, _normalize_field_type
 from app.pipeline.reconciliation import (
     ExtractionReconciler,
     _build_reconciliation_prompt,
@@ -917,3 +917,223 @@ class TestPersonValuePatternSkip:
         page.rect.height = 800
         value = ext._extract_field(words, fm, page, rotation=0)
         assert value is None  # "N/A" doesn't match SSN pattern
+
+
+# ---------------------------------------------------------------------------
+# Address fallback tests
+# ---------------------------------------------------------------------------
+
+
+class TestAddressFallback:
+    """Tests for address extraction when LOCATION is missing from field_map."""
+
+    def _make_page_words_with_address(self):
+        """Page with 'In Account with' anchor, name on same line, address below."""
+        return [
+            # Anchor: "In Account with :"
+            _make_word(50, 100, 80, 115, "In"),
+            _make_word(85, 100, 130, 115, "Account"),
+            _make_word(135, 100, 165, 115, "with"),
+            _make_word(170, 100, 180, 115, ":"),
+            # Name on same line (after colon)
+            _make_word(185, 100, 230, 115, "(001968)"),
+            _make_word(235, 100, 310, 115, "ADELINE"),
+            _make_word(315, 100, 400, 115, "CHANDLER"),
+            # Address lines below
+            _make_word(50, 130, 100, 145, "3708"),
+            _make_word(105, 130, 160, 145, "GRAHAM"),
+            _make_word(165, 130, 210, 145, "ROAD"),
+            _make_word(50, 150, 110, 165, "ROCK"),
+            _make_word(115, 150, 165, 165, "CREEK"),
+            _make_word(50, 170, 70, 185, "OH"),
+            _make_word(75, 170, 120, 185, "44084"),
+            _make_word(50, 190, 80, 205, "USA"),
+        ]
+
+    def test_address_fallback_when_no_location_field(self):
+        """Address extracted below PERSON anchor when field_map has no LOCATION."""
+        field_map = [
+            FieldMapping(
+                field_type="PERSON",
+                anchor_text="In Account with",
+                spatial_relationship="same_line_right",
+            ),
+            FieldMapping(
+                field_type="US_SSN",
+                anchor_text="Tax No",
+                spatial_relationship="same_line_right",
+                value_pattern=r"\d{3}-\d{2}-\d{4}",
+            ),
+        ]
+        ext = CoordinateExtractor(field_map, "", "doc1")
+        words = self._make_page_words_with_address()
+        page = MagicMock()
+        page.rect = MagicMock()
+        page.rect.width = 600
+        page.rect.height = 800
+        page.rotation = 0
+
+        # Simulate extraction on one page
+        rotation = 0
+        fields: dict = {}
+        entity_types: list = []
+        person_anchor_fm = None
+        for fm in field_map:
+            norm_type = _normalize_field_type(fm.field_type)
+            value = ext._extract_field(words, fm, page, rotation, norm_type)
+            if value:
+                raw_field = _FIELD_TO_RAW.get(norm_type)
+                if raw_field:
+                    fields[raw_field] = value
+                    entity_types.append(norm_type)
+                if norm_type == "PERSON":
+                    person_anchor_fm = fm
+
+        # Name should be extracted
+        assert "raw_name" in fields
+        assert "ADELINE" in fields["raw_name"]
+
+        # Address should NOT be in fields yet (no LOCATION in field_map)
+        assert "raw_address" not in fields
+
+        # Now test the fallback
+        assert person_anchor_fm is not None
+        assert not ext._has_location_field()
+        addr = ext._extract_address_below_person(words, person_anchor_fm, page, rotation)
+        assert addr is not None
+        assert "GRAHAM" in addr
+        assert "ROAD" in addr
+
+    def test_no_fallback_when_location_field_exists(self):
+        """No fallback when field_map already has a LOCATION field."""
+        field_map = [
+            FieldMapping(
+                field_type="PERSON",
+                anchor_text="Client",
+                spatial_relationship="same_line_right",
+            ),
+            FieldMapping(
+                field_type="LOCATION",
+                anchor_text="Address",
+                spatial_relationship="lines_below_4",
+                line_count=4,
+            ),
+        ]
+        ext = CoordinateExtractor(field_map, "", "doc1")
+        assert ext._has_location_field()
+
+    def test_no_fallback_when_text_is_not_address(self):
+        """No fallback when content below PERSON anchor doesn't look like an address."""
+        field_map = [
+            FieldMapping(
+                field_type="PERSON",
+                anchor_text="Client",
+                spatial_relationship="same_line_right",
+            ),
+        ]
+        ext = CoordinateExtractor(field_map, "", "doc1")
+        words = [
+            _make_word(50, 100, 100, 115, "Client:"),
+            _make_word(110, 100, 200, 115, "Jane"),
+            _make_word(205, 100, 290, 115, "Doe"),
+            # Below: transaction data, not an address
+            _make_word(50, 130, 120, 145, "Invoice"),
+            _make_word(125, 130, 180, 145, "Number:"),
+            _make_word(185, 130, 260, 145, "INV-9876"),
+        ]
+        page = MagicMock()
+        page.rect = MagicMock()
+        page.rect.width = 600
+        page.rect.height = 800
+        fm = field_map[0]
+        addr = ext._extract_address_below_person(words, fm, page, rotation=0)
+        assert addr is None
+
+    def test_address_fallback_with_uk_postcode(self):
+        """Fallback detects UK postcodes as address content."""
+        field_map = [
+            FieldMapping(
+                field_type="PERSON",
+                anchor_text="Client",
+                spatial_relationship="same_line_right",
+            ),
+        ]
+        ext = CoordinateExtractor(field_map, "", "doc1")
+        words = [
+            _make_word(50, 100, 100, 115, "Client:"),
+            _make_word(110, 100, 200, 115, "John"),
+            _make_word(205, 100, 290, 115, "Smith"),
+            _make_word(50, 130, 150, 145, "14"),
+            _make_word(155, 130, 250, 145, "Harrow"),
+            _make_word(255, 130, 330, 145, "Road"),
+            _make_word(50, 150, 120, 165, "London"),
+            _make_word(50, 170, 120, 185, "SW1A"),
+            _make_word(125, 170, 170, 185, "2AA"),
+        ]
+        page = MagicMock()
+        page.rect = MagicMock()
+        page.rect.width = 600
+        page.rect.height = 800
+        fm = field_map[0]
+        addr = ext._extract_address_below_person(words, fm, page, rotation=0)
+        assert addr is not None
+        assert "Harrow" in addr
+
+    def test_address_fallback_alias_field_type(self):
+        """Fallback works when field_map has ADDRESS alias (normalizes to LOCATION)."""
+        field_map = [
+            FieldMapping(
+                field_type="PERSON",
+                anchor_text="Client",
+                spatial_relationship="same_line_right",
+            ),
+            FieldMapping(
+                field_type="ADDRESS",  # alias for LOCATION
+                anchor_text="Address",
+                spatial_relationship="lines_below_4",
+                line_count=4,
+            ),
+        ]
+        ext = CoordinateExtractor(field_map, "", "doc1")
+        # ADDRESS normalizes to LOCATION, so _has_location_field should be True
+        assert ext._has_location_field()
+
+
+class TestLooksLikeAddress:
+    """Tests for the _looks_like_address helper."""
+
+    def test_us_street_address(self):
+        from app.pipeline.coordinate_extractor import _looks_like_address
+        assert _looks_like_address("3708 GRAHAM ROAD\nROCK CREEK\nOH 44084\nUSA")
+
+    def test_zip_code(self):
+        from app.pipeline.coordinate_extractor import _looks_like_address
+        assert _looks_like_address("Some Place\n12345")
+
+    def test_uk_postcode(self):
+        from app.pipeline.coordinate_extractor import _looks_like_address
+        assert _looks_like_address("London\nSW1A 2AA")
+
+    def test_state_abbreviation(self):
+        from app.pipeline.coordinate_extractor import _looks_like_address
+        assert _looks_like_address("SPRINGFIELD\nIL")
+
+    def test_country_name(self):
+        from app.pipeline.coordinate_extractor import _looks_like_address
+        assert _looks_like_address("Some Place\nUnited Kingdom")
+
+    def test_street_keyword(self):
+        from app.pipeline.coordinate_extractor import _looks_like_address
+        assert _looks_like_address("14 Harrow Avenue")
+
+    def test_not_address(self):
+        from app.pipeline.coordinate_extractor import _looks_like_address
+        assert not _looks_like_address("Invoice Number: INV-9876")
+
+    def test_empty_string(self):
+        from app.pipeline.coordinate_extractor import _looks_like_address
+        assert not _looks_like_address("")
+
+    def test_none(self):
+        from app.pipeline.coordinate_extractor import _looks_like_address
+        assert not _looks_like_address(None)
