@@ -11,9 +11,11 @@ import pytest
 
 from app.pii.pattern_validator import (
     _build_entity_types_found,
+    _looks_like_business,
     validate_dob,
     validate_email,
     validate_extracted_records,
+    validate_person_name,
 )
 from app.rra.entity_resolver import PIIRecord
 
@@ -409,3 +411,236 @@ class TestLLMTemplateDataToRecordValidation:
         assert rec is not None
         assert rec.raw_email is None
         assert "EMAIL_ADDRESS" not in rec.entity_types_found
+
+
+# ---------------------------------------------------------------------------
+# _looks_like_business() — Layer 1 heuristic
+# ---------------------------------------------------------------------------
+
+
+class TestLooksLikeBusiness:
+    """Tests for _looks_like_business heuristic."""
+
+    # --- Clear businesses ---
+
+    def test_suffix_inc(self):
+        assert _looks_like_business("Apple Inc.") is True
+
+    def test_suffix_llc(self):
+        assert _looks_like_business("Smith Holdings LLC") is True
+
+    def test_suffix_ltd(self):
+        assert _looks_like_business("Barclays Ltd") is True
+
+    def test_suffix_corp(self):
+        assert _looks_like_business("Mega Corp") is True
+
+    def test_suffix_plc(self):
+        assert _looks_like_business("British Telecom PLC") is True
+
+    def test_keyword_technologies(self):
+        assert _looks_like_business("Daikin Comfort Technologies") is True
+
+    def test_keyword_supply(self):
+        assert _looks_like_business("JOHNSTONE SUPPLY") is True
+
+    def test_keyword_hospital(self):
+        assert _looks_like_business("St Mary Hospital") is True
+
+    def test_keyword_services(self):
+        assert _looks_like_business("Allied Health Services") is True
+
+    def test_keyword_university(self):
+        assert _looks_like_business("Stanford University") is True
+
+    def test_keyword_bank(self):
+        assert _looks_like_business("First National Bank") is True
+
+    def test_keyword_insurance(self):
+        assert _looks_like_business("State Farm Insurance") is True
+
+    def test_store_number(self):
+        assert _looks_like_business("JOHNSTONE SUPPLY #576") is True
+
+    def test_store_number_with_space(self):
+        assert _looks_like_business("STORE # 4521") is True
+
+    def test_ampersand_pattern(self):
+        assert _looks_like_business("Smith & Wesson Firearms") is True
+
+    def test_multi_word_credit_union(self):
+        assert _looks_like_business("Pacific Credit Union") is True
+
+    def test_multi_word_comfort_technologies(self):
+        assert _looks_like_business("Daikin Comfort Technologies North America") is True
+
+    def test_alfred_knopf_inc(self):
+        """'ALFRED A. KNOPF, INC.' should be ORG."""
+        assert _looks_like_business("ALFRED A. KNOPF, INC.") is True
+
+    # --- Clear persons (should NOT be business) ---
+
+    def test_person_simple(self):
+        assert _looks_like_business("Karen Craft") is False
+
+    def test_person_three_names(self):
+        assert _looks_like_business("John Michael Smith") is False
+
+    def test_person_single_name(self):
+        assert _looks_like_business("Madonna") is False
+
+    def test_person_with_middle_initial(self):
+        assert _looks_like_business("James T. Kirk") is False
+
+    def test_estate_of_person(self):
+        """'Estate of Karen Craft' should NOT be flagged as business."""
+        assert _looks_like_business("Estate of Karen Craft") is False
+
+    def test_in_the_matter_of(self):
+        assert _looks_like_business("In the Matter of John Doe") is False
+
+    # --- Edge cases ---
+
+    def test_empty_string(self):
+        assert _looks_like_business("") is False
+
+    def test_whitespace_only(self):
+        assert _looks_like_business("   ") is False
+
+    def test_trailing_period_suffix(self):
+        """'Inc.' with trailing period should still match."""
+        assert _looks_like_business("Acme Inc.") is True
+
+
+# ---------------------------------------------------------------------------
+# validate_person_name() — combined Layer 1 + Layer 2
+# ---------------------------------------------------------------------------
+
+
+class TestValidatePersonName:
+    """Tests for validate_person_name (heuristic + optional spaCy)."""
+
+    def test_valid_person(self):
+        is_valid, reason = validate_person_name("Karen Craft")
+        assert is_valid is True
+        assert reason == ""
+
+    def test_valid_person_three_names(self):
+        is_valid, reason = validate_person_name("John Michael Smith")
+        assert is_valid is True
+        assert reason == ""
+
+    def test_business_suffix(self):
+        is_valid, reason = validate_person_name("Apple Inc.")
+        assert is_valid is False
+        assert reason == "name_is_business"
+
+    def test_business_keyword(self):
+        is_valid, reason = validate_person_name("Daikin Comfort Technologies")
+        assert is_valid is False
+        assert reason == "name_is_business"
+
+    def test_business_store_number(self):
+        is_valid, reason = validate_person_name("JOHNSTONE SUPPLY #576")
+        assert is_valid is False
+        assert reason == "name_is_business"
+
+    def test_estate_of_is_person(self):
+        is_valid, reason = validate_person_name("Estate of Karen Craft")
+        assert is_valid is True
+        assert reason == ""
+
+    def test_empty_name(self):
+        is_valid, reason = validate_person_name("")
+        assert is_valid is False
+        assert reason == "empty_name"
+
+    def test_none_like_empty(self):
+        is_valid, reason = validate_person_name("   ")
+        assert is_valid is False
+        assert reason == "empty_name"
+
+    def test_knopf_inc(self):
+        is_valid, reason = validate_person_name("ALFRED A. KNOPF, INC.")
+        assert is_valid is False
+        assert reason == "name_is_business"
+
+    def test_manufacturing(self):
+        is_valid, reason = validate_person_name("Acme Manufacturing")
+        assert is_valid is False
+        assert reason == "name_is_business"
+
+    def test_foundation(self):
+        is_valid, reason = validate_person_name("Bill Gates Foundation")
+        assert is_valid is False
+        assert reason == "name_is_business"
+
+
+# ---------------------------------------------------------------------------
+# validate_extracted_records — organization name suppression
+# ---------------------------------------------------------------------------
+
+
+class TestValidateExtractedRecordsOrgSuppression:
+    """Tests for validate_extracted_records with business name suppression."""
+
+    @staticmethod
+    def _make_record(**kwargs) -> PIIRecord:
+        defaults = dict(
+            record_id="r1",
+            entity_type="PERSON",
+            normalized_value="Test",
+            raw_name="Test",
+            entity_types_found=("PERSON",),
+        )
+        defaults.update(kwargs)
+        return PIIRecord(**defaults)
+
+    def test_business_name_suppressed(self):
+        """Business name → record dropped."""
+        rec = self._make_record(
+            raw_name="Daikin Comfort Technologies",
+            normalized_value="Daikin Comfort Technologies",
+        )
+        result = validate_extracted_records([rec])
+        assert len(result) == 0
+
+    def test_business_with_other_fields_still_dropped(self):
+        """Business name with address/phone → still dropped (no person name)."""
+        rec = self._make_record(
+            raw_name="JOHNSTONE SUPPLY #576",
+            normalized_value="JOHNSTONE SUPPLY #576",
+            raw_address={"raw": "123 Industrial Blvd"},
+            raw_phone="555-1234",
+        )
+        result = validate_extracted_records([rec])
+        assert len(result) == 0
+
+    def test_real_person_preserved(self):
+        """Real person name → preserved."""
+        rec = self._make_record(
+            raw_name="Karen Craft",
+            normalized_value="Karen Craft",
+        )
+        result = validate_extracted_records([rec])
+        assert len(result) == 1
+        assert result[0].raw_name == "Karen Craft"
+
+    def test_estate_of_preserved(self):
+        """'Estate of John Doe' → preserved as person."""
+        rec = self._make_record(
+            raw_name="Estate of John Doe",
+            normalized_value="Estate of John Doe",
+        )
+        result = validate_extracted_records([rec])
+        assert len(result) == 1
+        assert result[0].raw_name == "Estate of John Doe"
+
+    def test_financial_term_still_suppressed(self):
+        """Financial terms → still suppressed (existing behavior)."""
+        rec = self._make_record(
+            raw_name="lump sum",
+            normalized_value="lump sum",
+        )
+        result = validate_extracted_records([rec])
+        assert len(result) == 0

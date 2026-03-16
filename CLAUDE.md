@@ -480,7 +480,15 @@ These are detailed in [docs/SCHEMA.md](docs/SCHEMA.md). Summary:
   - `validate_extracted_records()` enhanced: strips invalid DOB and email during post-validation, rebuilds entity_types_found.
   - `tests/test_extraction_validation.py`: 40 new tests (DOB context validation: fee slip/statement/service/invoice/due dates rejected, real DOB labels accepted, recency check, DOB label override; email validation: URLs rejected, valid emails pass; entity_types_found accuracy: only populated fields; integration: vision + LLM template extractors)
 
-**2373 tests passing. (1 pre-existing failure in test_template_detection unrelated.)**
+**Bugfix: Organization/business name detection in PERSON validation** ✅
+  - **Enhanced validation**: `validate_person_name()` in `app/pii/pattern_validator.py` — two-layer approach to detect organization/business names misclassified as PERSON.
+  - **Layer 1 (heuristic)**: `_looks_like_business()` checks business suffixes (INC, LLC, LTD, CORP, etc.), business keywords (TECHNOLOGIES, HOSPITAL, SUPPLY, SERVICES, MANUFACTURING, BANK, UNIVERSITY, etc.), multi-word patterns ("credit union", "comfort technologies"), store/branch numbers (#576), and firm patterns (& in name).
+  - **Layer 2 (spaCy NER)**: `_spacy_says_org()` runs spaCy NER for ambiguous cases (4+ word names or ALL-CAPS multi-word names). Cached model load. Graceful fallback when spaCy unavailable.
+  - **Edge cases**: "Estate of John Doe" and "In the Matter of" patterns preserved as PERSON. "ALFRED A. KNOPF, INC." correctly identified as ORG.
+  - **Wired into pipeline**: `validate_extracted_records()` now calls `validate_person_name()` instead of `is_likely_organization()` for broader coverage.
+  - `tests/test_extraction_validation.py`: 43 new tests (TestLooksLikeBusiness: 22 tests for suffixes/keywords/store numbers/persons/edge cases; TestValidatePersonName: 11 tests including estate-of passthrough; TestValidateExtractedRecordsOrgSuppression: 5 integration tests)
+
+**2416 tests passing. (1 pre-existing failure in test_template_detection unrelated.)**
 
 See [docs/PLAN.md](docs/PLAN.md) for active steps and [docs/PLAN_COMPLETED.md](docs/PLAN_COMPLETED.md) for completed reference.
 

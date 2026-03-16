@@ -7,6 +7,7 @@ that are financial terms or organizations.
 Also provides standalone validators for use during record construction:
 - ``validate_dob()``: reject transaction/service dates misclassified as DOB
 - ``validate_email()``: reject URLs and non-email strings
+- ``validate_person_name()``: reject business/org names misclassified as PERSON
 
 Does NOT remove records with flagged fields — only suppresses names that are
 clearly not people (financial terms, org names).  Flagged records continue
@@ -18,7 +19,7 @@ import re
 from dataclasses import replace
 from datetime import datetime, timedelta
 
-from app.pii.context_deny_list import FINANCIAL_TERM_DENY_LIST, is_likely_organization
+from app.pii.context_deny_list import FINANCIAL_TERM_DENY_LIST
 from app.rra.entity_resolver import PIIRecord
 
 # ---------------------------------------------------------------------------
@@ -161,6 +162,185 @@ def validate_email(value: str) -> bool:
     return True
 
 
+# ---------------------------------------------------------------------------
+# Business / organization name detection (enhanced PERSON validation)
+# ---------------------------------------------------------------------------
+
+_BUSINESS_SUFFIXES = frozenset({
+    "inc", "llc", "ltd", "corp", "co", "lp", "llp", "plc",
+    "gmbh", "ag", "sa", "sarl", "srl", "bv", "nv", "pty",
+    "incorporated", "limited", "corporation", "company",
+})
+
+_BUSINESS_KEYWORDS = frozenset({
+    # Industry terms
+    "technologies", "technology", "enterprises", "industries",
+    "manufacturing", "logistics", "distribution", "distributors",
+    "construction", "contractors", "builders",
+    "pharmaceuticals", "automotive", "motors",
+    # Service terms
+    "supply", "supplies", "services", "solutions", "systems",
+    "consulting", "consultants", "associates", "advisors",
+    # Financial
+    "holdings", "group", "partners", "partnership",
+    "bank", "banking", "insurance", "underwriters", "reinsurance",
+    "investments", "capital", "properties", "realty",
+    # Healthcare / education
+    "hospital", "hospitals", "healthcare", "medical",
+    "university", "college", "school",
+    # Government / institutional
+    "association", "foundation", "institute", "council",
+    "authority", "commission", "department", "ministry",
+    "agency", "bureau", "board", "committee",
+    # Telecom / media
+    "communications", "telecom", "telecommunications",
+    "electric", "electrical",
+    # Scope
+    "international", "national", "global", "worldwide",
+})
+
+# Multi-word business keywords
+_MULTI_WORD_BUSINESS = [
+    "comfort technologies",
+    "credit union",
+    "savings bank",
+    "mutual fund",
+    "trust company",
+    "real estate",
+]
+
+# Store / branch number pattern: "#576", "# 4521"
+_STORE_NUMBER_RE = re.compile(r"#\s*\d{2,}")
+
+# "ESTATE OF" prefix — should be treated as PERSON, not filtered
+_ESTATE_OF_RE = re.compile(
+    r"^(?:estate\s+of|in\s+(?:the\s+)?(?:matter|estate)\s+of)\s+",
+    re.IGNORECASE,
+)
+
+# Cached spaCy model for Layer 2 NER
+_spacy_nlp = None
+_spacy_load_attempted = False
+
+
+def _looks_like_business(name: str) -> bool:
+    """Layer 1: Heuristic check if name looks like a business/organization.
+
+    Checks business suffixes (last word), business keywords (any word),
+    multi-word patterns, store number patterns, and firm patterns (& in name).
+    Returns True if the name matches business patterns.
+    """
+    if not name or not name.strip():
+        return False
+
+    clean = name.strip()
+
+    # "ESTATE OF John Doe" → PERSON, not business
+    if _ESTATE_OF_RE.match(clean):
+        return False
+
+    lower = clean.lower()
+
+    # Store number pattern: "JOHNSTONE SUPPLY #576"
+    if _STORE_NUMBER_RE.search(clean):
+        return True
+
+    # Strip trailing punctuation for word analysis
+    words = lower.rstrip(".,;:").split()
+    if not words:
+        return False
+
+    # Check last word against business suffixes (handles "Inc.", "Ltd.")
+    last_word = words[-1].rstrip(".,;:")
+    if last_word in _BUSINESS_SUFFIXES:
+        return True
+
+    # Check any word against business keywords
+    for word in words:
+        word_clean = word.rstrip(".,;:")
+        if word_clean in _BUSINESS_KEYWORDS:
+            return True
+
+    # Check multi-word patterns
+    for pattern in _MULTI_WORD_BUSINESS:
+        if pattern in lower:
+            return True
+
+    # "Foo & Bar" firm pattern (3+ words with &)
+    if len(words) >= 3 and "&" in words:
+        return True
+
+    return False
+
+
+def _spacy_says_org(name: str) -> bool | None:
+    """Layer 2: Use spaCy NER to check if name is an organization.
+
+    Returns True if spaCy classifies as ORG, False if PERSON,
+    None if spaCy unavailable or inconclusive.
+    """
+    global _spacy_nlp, _spacy_load_attempted
+
+    if not _spacy_load_attempted:
+        _spacy_load_attempted = True
+        try:
+            import spacy
+            _spacy_nlp = spacy.load("en_core_web_sm")
+        except (ImportError, OSError):
+            _spacy_nlp = None
+
+    if _spacy_nlp is None:
+        return None
+
+    doc = _spacy_nlp(name)
+    for ent in doc.ents:
+        if ent.label_ == "ORG":
+            return True
+        if ent.label_ == "PERSON":
+            return False
+    return None
+
+
+def validate_person_name(name: str) -> tuple[bool, str]:
+    """Validate that a PERSON name is actually a person, not an organization.
+
+    Two-layer approach:
+    1. Heuristic: business suffixes, keywords, store numbers
+    2. spaCy NER: for ambiguous 4+ word names or ALL-CAPS multi-word names
+
+    Returns (is_valid, reason):
+    - (True, "") if the name should be kept as a person
+    - (False, "reason") if the name is likely an organization
+    """
+    if not name or not name.strip():
+        return False, "empty_name"
+
+    clean = name.strip()
+
+    # "ESTATE OF John Doe" → always person
+    if _ESTATE_OF_RE.match(clean):
+        return True, ""
+
+    # Layer 1: heuristic
+    if _looks_like_business(clean):
+        return False, "name_is_business"
+
+    # Layer 2: spaCy for ambiguous cases
+    # Trigger on: 4+ words, or ALL-CAPS multi-word names
+    words = clean.split()
+    is_ambiguous = (
+        len(words) >= 4
+        or (len(words) >= 2 and clean == clean.upper())
+    )
+
+    if is_ambiguous:
+        spacy_result = _spacy_says_org(clean)
+        if spacy_result is True:
+            return False, "name_is_organization_spacy"
+
+    return True, ""
+
+
 def validate_extracted_records(records: list[PIIRecord]) -> list[PIIRecord]:
     """Validate LLM/vision-extracted values against known patterns.
 
@@ -214,9 +394,11 @@ def validate_extracted_records(records: list[PIIRecord]) -> list[PIIRecord]:
             if lower_name in FINANCIAL_TERM_DENY_LIST:
                 flags.append("name_is_financial_term")
                 raw_name = None
-            elif is_likely_organization(raw_name):
-                flags.append("name_is_organization")
-                raw_name = None
+            else:
+                name_valid, name_reason = validate_person_name(raw_name)
+                if not name_valid and name_reason:
+                    flags.append(name_reason)
+                    raw_name = None
 
         # Build updated record with cleaned fields
         if raw_name is not None:
