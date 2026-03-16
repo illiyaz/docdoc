@@ -41,8 +41,8 @@ def _make_field_map() -> list[FieldMapping]:
         FieldMapping(
             field_type="GOVERNMENT_ID",
             anchor_text="Tax No",
-            spatial_relationship="line_below",
-            value_pattern=r"\d{3}-\d{2}-\d{4}",
+            spatial_relationship="same_line_right",
+            value_pattern=r"\d{2,3}-\d{2,7}",
         ),
         FieldMapping(
             field_type="DATE_OF_BIRTH",
@@ -67,10 +67,10 @@ def _make_page_words_with_person() -> list[tuple]:
         _make_word(50, 100, 100, 115, "Client:"),
         _make_word(110, 100, 170, 115, "John"),
         _make_word(175, 100, 250, 115, "Smith"),
-        # "Tax No" label at (50, 140, 110, 155), value "123-45-6789" below
+        # "Tax No" label at (50, 140, 110, 155), value "123-45-6789" same line right
         _make_word(50, 140, 80, 155, "Tax"),
         _make_word(85, 140, 110, 155, "No"),
-        _make_word(50, 160, 150, 175, "123-45-6789"),
+        _make_word(120, 140, 220, 155, "123-45-6789"),
         # "DOB:" label at (300, 100, 340, 115) + value "15/03/1980"
         _make_word(300, 100, 340, 115, "DOB:"),
         _make_word(345, 100, 440, 115, "15/03/1980"),
@@ -82,7 +82,7 @@ def _make_page_words_without_person() -> list[tuple]:
     return [
         _make_word(50, 140, 80, 155, "Tax"),
         _make_word(85, 140, 110, 155, "No"),
-        _make_word(50, 160, 150, 175, "123-45-6789"),
+        _make_word(120, 140, 220, 155, "123-45-6789"),
         _make_word(300, 100, 340, 115, "DOB:"),
         _make_word(345, 100, 440, 115, "15/03/1980"),
     ]
@@ -376,8 +376,7 @@ class TestExtractAllPages:
             [
                 ("Client: John Smith", 50, 120),
                 ("DOB: 15/03/1980", 300, 120),
-                ("Tax No", 50, 160),
-                ("123-45-6789", 50, 180),
+                ("Tax No : 123-45-6789", 50, 160),
             ],
         ])
         try:
@@ -697,6 +696,83 @@ class TestFieldMapping:
     def test_dob_types_mapped(self):
         for t in ["DATE_OF_BIRTH", "DATE_OF_BIRTH_DMY", "DATE_OF_BIRTH_MDY", "DATE_OF_BIRTH_ISO"]:
             assert _FIELD_TO_RAW[t] == "raw_dob"
+
+    def test_ein_mapped(self):
+        assert _FIELD_TO_RAW["US_EIN"] == "raw_government_id"
+
+    def test_ein_in_gov_id_types(self):
+        from app.pipeline.coordinate_extractor import _GOV_ID_TYPES
+        assert "US_EIN" in _GOV_ID_TYPES
+
+
+class TestEINSupport:
+    """Tests for EIN (Employer Identification Number) extraction."""
+
+    def test_ein_alias_normalization(self):
+        assert _normalize_field_type("EIN") == "US_EIN"
+        assert _normalize_field_type("EMPLOYER_ID") == "US_EIN"
+        assert _normalize_field_type("EMPLOYER_IDENTIFICATION") == "US_EIN"
+
+    def test_ein_value_pattern_match(self):
+        """EIN format XX-XXXXXXX should match combined SSN|EIN pattern."""
+        fm = FieldMapping(
+            field_type="US_EIN",
+            anchor_text="EIN",
+            spatial_relationship="same_line_right",
+            value_pattern=r"\d{2,3}-\d{2,7}",
+        )
+        words = [
+            _make_word(50, 100, 100, 115, "EIN:"),
+            _make_word(110, 100, 220, 115, "28-5075085"),
+        ]
+        ext = CoordinateExtractor([], "", "")
+        page = MagicMock()
+        page.rect = MagicMock()
+        page.rect.width = 600
+        page.rect.height = 800
+        value = ext._extract_field(words, fm, page, rotation=0)
+        assert value == "28-5075085"
+
+    def test_ssn_still_matches_combined_pattern(self):
+        """SSN format XXX-XX-XXXX should also match combined SSN|EIN pattern."""
+        fm = FieldMapping(
+            field_type="US_SSN",
+            anchor_text="SSN",
+            spatial_relationship="same_line_right",
+            value_pattern=r"\d{2,3}-\d{2,7}",
+        )
+        words = [
+            _make_word(50, 100, 100, 115, "SSN:"),
+            _make_word(110, 100, 220, 115, "123-45-6789"),
+        ]
+        ext = CoordinateExtractor([], "", "")
+        page = MagicMock()
+        page.rect = MagicMock()
+        page.rect.width = 600
+        page.rect.height = 800
+        value = ext._extract_field(words, fm, page, rotation=0)
+        assert value == "123-45-6789"
+
+    def test_tax_no_same_line_right_extraction(self):
+        """Tax No with value on same line should extract correctly."""
+        fm = FieldMapping(
+            field_type="US_SSN",
+            anchor_text="Tax No",
+            spatial_relationship="same_line_right",
+            value_pattern=r"\d{2,3}-\d{2,7}",
+        )
+        words = [
+            _make_word(50, 140, 80, 155, "Tax"),
+            _make_word(85, 140, 110, 155, "No"),
+            _make_word(120, 140, 230, 155, "285-07-5085"),
+        ]
+        ext = CoordinateExtractor([], "", "")
+        page = MagicMock()
+        page.rect = MagicMock()
+        page.rect.width = 600
+        page.rect.height = 800
+        value = ext._extract_field(words, fm, page, rotation=0)
+        assert value == "285-07-5085"
 
 
 # ---------------------------------------------------------------------------

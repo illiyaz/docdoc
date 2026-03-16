@@ -41,6 +41,8 @@ FIELD_TYPE_ALIASES: dict[str, str] = {
     "NAME": "PERSON", "FULL_NAME": "PERSON",
     "TAX_NO": "US_SSN", "TAX_NUMBER": "US_SSN",
     "TAX_ID": "US_SSN", "SSN": "US_SSN",
+    "EIN": "US_EIN", "EMPLOYER_ID": "US_EIN",
+    "EMPLOYER_IDENTIFICATION": "US_EIN",
     "NATIONAL_INSURANCE": "NI_NUMBER", "NI_NO": "NI_NUMBER",
     "ADDRESS": "LOCATION", "ADDR": "LOCATION",
     "DOB": "DATE_OF_BIRTH", "BIRTH_DATE": "DATE_OF_BIRTH",
@@ -73,6 +75,7 @@ _FIELD_TO_RAW: dict[str, str] = {
     "PHONE_US": "raw_phone",
     "PHONE_INTL": "raw_phone",
     "US_SSN": "raw_government_id",
+    "US_EIN": "raw_government_id",
     "NI_NUMBER": "raw_government_id",
     "AADHAAR": "raw_government_id",
     "US_DRIVER_LICENSE": "raw_government_id",
@@ -85,7 +88,7 @@ _FIELD_TO_RAW: dict[str, str] = {
 }
 
 _GOV_ID_TYPES: frozenset[str] = frozenset({
-    "US_SSN", "NI_NUMBER", "AADHAAR", "US_DRIVER_LICENSE",
+    "US_SSN", "US_EIN", "NI_NUMBER", "AADHAAR", "US_DRIVER_LICENSE",
     "US_PASSPORT", "PAN_CARD", "NHS_NUMBER", "GOVERNMENT_ID",
     "IDENTIFICATION_NUMBER", "NATIONAL_INSURANCE_UK",
 })
@@ -204,7 +207,11 @@ class CoordinateExtractor:
 
             page = doc[page_num]
             words = page.get_text("words")
-            rotation = page.rotation % 360
+            # PyMuPDF's get_text("words") returns coordinates in the
+            # derotated visual space (matching page.rect).  page.rotation
+            # reports the raw PDF /Rotate value, but coordinates are already
+            # transformed — so always use rotation=0 for region computation.
+            rotation = 0
 
             # Collect fields into a dict, then construct frozen PIIRecord
             fields: dict[str, str | dict] = {}
@@ -693,4 +700,3 @@ class CoordinateExtractor:
             text_lines.append(" ".join(w[4] for w in sorted_words))
 
         return "\n".join(text_lines).strip()
-
