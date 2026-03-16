@@ -184,6 +184,9 @@ def get_analysis_results(job_id: str, db: Session = Depends(get_db)):
             "layout_type": layout_type,
             "layout_field_map": layout_field_map,
             "layout_confidence": layout_confidence,
+            # Vision routing info (Step 22c)
+            "vision_routing": (doc.metadata_json or {}).get("vision_routing"),
+            "vision_field_map": (doc.metadata_json or {}).get("vision_field_map"),
             # LLM extraction preview (Step 19b)
             "extraction_preview": preview,
         })

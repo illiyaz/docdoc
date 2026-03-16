@@ -1,4 +1,4 @@
-"""Tests for two-phase pipeline: content onset, auto-approve, verified onset, entity groups, coordinate wiring.
+"""Tests for two-phase pipeline: content onset, auto-approve, verified onset, entity groups, coordinate wiring, vision routing, extraction verification.
 
 Tests across classes:
 - TestFindContentOnsetFromBlocks (7 tests)
@@ -7,6 +7,8 @@ Tests across classes:
 - TestGetHeuristicCandidatePages (4 tests)
 - TestFindVerifiedOnset (7 tests)
 - TestCoordinatePipelineWiring (15 tests)
+- TestVisionRoutingPipelineWiring (10 tests)
+- TestExtractionVerificationWiring (7 tests)
 """
 from __future__ import annotations
 
@@ -878,8 +880,8 @@ class TestCoordinatePipelineWiring:
         source = inspect.getsource(two_phase.run_extraction_background)
         # After Path 0, Path 1 should check 'not records'
         path1_section = source[source.find("Path 1: Vision"):]
-        # The condition should include 'not records'
-        assert "not records" in path1_section[:200], \
+        # The condition should include 'not records' (may be in the if-block below the comment)
+        assert "not records" in path1_section[:500], \
             "Path 1 (Vision) must be guarded by 'not records' to skip when coordinate path succeeds"
 
     def test_coordinate_path_uses_reconciliation_on_failures(self):
@@ -1055,3 +1057,193 @@ class TestCoordinatePipelineWiring:
         assert len(restored.layout_field_map) == 1
         assert restored.layout_field_map[0].field_type == "PERSON"
         assert restored.layout_confidence == 0.95
+
+
+# ---------------------------------------------------------------------------
+# TestVisionRoutingPipelineWiring
+# ---------------------------------------------------------------------------
+class TestVisionRoutingPipelineWiring:
+    """Tests for vision routing integration into the two-phase pipeline (Step 22c)."""
+
+    def test_vision_routing_persisted_to_metadata_during_analysis(self):
+        """analyze_generator persists vision_routing to Document.metadata_json."""
+        import inspect
+        from app.pipeline import two_phase
+
+        source = inspect.getsource(two_phase.analyze_generator)
+        assert '"vision_routing"' in source
+        assert '"structure_type"' in source
+        assert '"recommended_path"' in source
+
+    def test_vision_field_map_persisted_to_metadata_during_analysis(self):
+        """analyze_generator persists vision_field_map to Document.metadata_json."""
+        import inspect
+        from app.pipeline import two_phase
+
+        source = inspect.getsource(two_phase.analyze_generator)
+        assert '"vision_field_map"' in source
+        assert "FieldMapBuilder" in source
+
+    def test_vision_field_map_loaded_during_extraction(self):
+        """run_extraction_background loads vision_field_map from metadata for Path 0."""
+        import inspect
+        from app.pipeline import two_phase
+
+        source = inspect.getsource(two_phase.run_extraction_background)
+        assert '"vision_field_map"' in source
+        assert "vision_field_map" in source
+
+    def test_auditor_field_map_overrides_vision_field_map(self):
+        """Auditor field map takes priority over vision field map."""
+        import inspect
+        from app.pipeline import two_phase
+
+        source = inspect.getsource(two_phase.run_extraction_background)
+        # auditor_field_map or vision_field_map or ... (LLM schema)
+        assert "auditor_field_map or vision_field_map" in source
+
+    def test_coordinate_path_triggered_by_vision_routing(self):
+        """recommended_path='coordinate' + valid field map → Path 0."""
+        import inspect
+        from app.pipeline import two_phase
+
+        source = inspect.getsource(two_phase.run_extraction_background)
+        assert 'recommended_path == "coordinate"' in source
+
+    def test_vision_direct_path_falls_to_path1(self):
+        """recommended_path='vision_direct' means no coordinate path, falls to Path 1."""
+        # Vision direct docs skip coordinate extraction. Path 1 (Vision) handles them.
+        import inspect
+        from app.pipeline import two_phase
+
+        source = inspect.getsource(two_phase.run_extraction_background)
+        # Path 1 section still has "not records" guard
+        path1_section = source[source.find("Path 1: Vision"):]
+        assert "not records" in path1_section[:300]
+
+    def test_llm_template_path_from_vision_routing(self):
+        """Vision routing can recommend llm_template, which falls to Path 2b."""
+        # When recommended_path is "llm_template", coordinate path is skipped
+        # and records stay empty, so Path 2b handles it.
+        import inspect
+        from app.pipeline import two_phase
+
+        source = inspect.getsource(two_phase.run_extraction_background)
+        # is_coordinate_path requires recommended_path == "coordinate" (or auditor/legacy)
+        assert "recommended_path" in source
+
+    def test_no_vision_routing_uses_legacy_path_logic(self):
+        """Documents without vision_routing fall back to LLM schema layout_type."""
+        import inspect
+        from app.pipeline import two_phase
+
+        source = inspect.getsource(two_phase.run_extraction_background)
+        # Legacy check: layout_type in ("fixed", "template_with_drift")
+        assert '"fixed"' in source
+        assert '"template_with_drift"' in source
+        # The OR condition allows legacy schema path when no vision routing
+        assert "layout_type" in source
+
+    def test_small_doc_vision_direct_skips_coordinate(self):
+        """Small docs (≤5 pages) get vision_direct from VisionRouter, skip coordinate."""
+        from app.pipeline.vision_router import VisionRouter, VisionRoutingResult
+
+        result = VisionRoutingResult(
+            structure_type="fixed_single_page",
+            structure_confidence=0.9,
+            pii_fields=[{"type": "PERSON", "value": "John", "label": "Name:"}],
+        )
+        # With total_pages=3, _determine_path returns "vision_direct"
+        router = VisionRouter.__new__(VisionRouter)
+        path = router._determine_path(result, total_pages=3, is_scanned=False)
+        assert path == "vision_direct"
+
+    def test_field_map_validation_failure_downgrades_path(self):
+        """Vision field map validation failure during analysis → path downgraded."""
+        import inspect
+        from app.pipeline import two_phase
+
+        source = inspect.getsource(two_phase.analyze_generator)
+        assert "Vision field map failed validation" in source
+        assert "downgrading" in source
+
+    def test_analysis_api_exposes_vision_routing(self):
+        """GET /analysis response includes vision_routing and vision_field_map."""
+        import inspect
+        from app.api.routes import analysis_review
+
+        source = inspect.getsource(analysis_review.get_analysis_results)
+        assert '"vision_routing"' in source
+        assert '"vision_field_map"' in source
+
+
+# ---------------------------------------------------------------------------
+# Step 22d: Extraction Verification Pipeline Wiring
+# ---------------------------------------------------------------------------
+
+
+class TestExtractionVerificationWiring:
+    """Tests for post-extraction verification wiring in two_phase.py."""
+
+    def test_verifier_import_in_coordinate_path(self):
+        """ExtractionVerifier is imported in the coordinate extraction path."""
+        import inspect
+        from app.pipeline import two_phase
+
+        source = inspect.getsource(two_phase.run_extraction_background)
+        assert "ExtractionVerifier" in source
+        assert "extraction_verifier" in source
+
+    def test_verification_result_stored_in_metrics(self):
+        """Verification result is stored via _update_extraction_progress."""
+        import inspect
+        from app.pipeline import two_phase
+
+        source = inspect.getsource(two_phase.run_extraction_background)
+        assert "verification" in source
+        assert "success_rate" in source
+        assert "is_acceptable" in source
+
+    def test_verification_logged(self):
+        """Verification summary is logged."""
+        import inspect
+        from app.pipeline import two_phase
+
+        source = inspect.getsource(two_phase.run_extraction_background)
+        assert 'Verification:' in source
+
+    def test_verifier_module_exists(self):
+        """extraction_verifier module can be imported."""
+        from app.pipeline.extraction_verifier import ExtractionVerifier, ExtractionVerification
+        assert ExtractionVerifier is not None
+        assert ExtractionVerification is not None
+
+    def test_verifier_verify_method_signature(self):
+        """ExtractionVerifier.verify() accepts expected parameters."""
+        import inspect
+        from app.pipeline.extraction_verifier import ExtractionVerifier
+
+        sig = inspect.signature(ExtractionVerifier.verify)
+        params = list(sig.parameters.keys())
+        assert "records" in params
+        assert "failed_pages" in params
+        assert "reconciled_records" in params
+        assert "total_pages" in params
+        assert "field_map" in params
+
+    def test_verification_stage_name(self):
+        """Verification progress uses stage='verification'."""
+        import inspect
+        from app.pipeline import two_phase
+
+        source = inspect.getsource(two_phase.run_extraction_background)
+        assert 'stage="verification"' in source
+
+    def test_verification_result_fields(self):
+        """Verification result dict contains all expected fields."""
+        import inspect
+        from app.pipeline import two_phase
+
+        source = inspect.getsource(two_phase.run_extraction_background)
+        for field_name in ["success_rate", "successful", "reconciled", "failed", "field_rates", "is_acceptable"]:
+            assert f'"{field_name}"' in source

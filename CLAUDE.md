@@ -341,7 +341,8 @@ These are detailed in [docs/SCHEMA.md](docs/SCHEMA.md). Summary:
 | 18. Auditor-Ready CSV Export with Lineage | COMPLETE | Schema-driven CSV (auditor/minimal/full), +5 lineage columns on NotificationSubject (migration 0010), gov ID masking, preview endpoint. |
 | 19. Schema-Driven LLM Extraction for Templates | COMPLETE | LLMTemplateExtractor, ENTITY_EXTRACTION_GUIDE (17 types), ALWAYS_EXTRACT_IF_PRESENT, 3-path extraction (exclusive), cross-batch dedup, marker-based instance boundaries, 24 tests. |
 | 20. Vision-First Extraction Architecture | COMPLETE | Vision-language model as primary extractor. VisionDocumentExtractor, PDF page renderer, instance boundary detector, OllamaClient.generate_with_images. 4 extraction strategies: template, table, vision page, Presidio fallback. Pattern validation. Per-protocol model config. Table extraction. Background extraction (SSE decoupling). Configurable dedup anchors. Batch reliability with retry/backoff. 79 new tests. |
-| 21. Coordinate-Based Extraction for Structured Documents | IN PROGRESS | For fixed-layout documents (accounting statements, payslips), LLM analyzes layout once → builds field map (anchor text + spatial relationships + coordinates) → Python extracts ALL pages using coordinate-based text extraction in seconds. Auditor reviews/edits field map before extraction. Reconciliation: failed pages sent to LLM fallback. ADDITIVE — existing LLM template/table/page paths unchanged. |
+| 21. Coordinate-Based Extraction for Structured Documents | COMPLETE | For fixed-layout documents (accounting statements, payslips), LLM analyzes layout once → builds field map (anchor text + spatial relationships + coordinates) → Python extracts ALL pages using coordinate-based text extraction in seconds. Auditor reviews/edits field map before extraction. Reconciliation: failed pages sent to LLM fallback. ADDITIVE — existing LLM template/table/page paths unchanged. |
+| 22. Vision-Based Document Routing | COMPLETE | VisionRouter reads ONE page with vision model → determines structure type, PII fields, extraction path. FieldMapBuilder bridges vision PII to PyMuPDF coordinates. ExtractionVerifier validates post-extraction completeness. Frontend auditor panel shows vision routing results with field map editor. |
 
 **Bugfix: Extraction preview multi-page read** — Preview now reads ALL pages of instance 0 (not just identity page). `build_preview_extraction_prompt()` asks LLM for per-field page numbers (`{value, page}` format). `_parse_preview_response()` parses LLM output with canonical field mapping. Instance count uses `find_instance_boundaries()` when marker set. 11 net new tests.
 
@@ -497,6 +498,54 @@ These are detailed in [docs/SCHEMA.md](docs/SCHEMA.md). Summary:
   - `tests/test_coordinate_extraction.py`: 8 new tests (good field map passes, header text rejected, empty/no-PERSON/nonexistent rejected, single-word rejected, bad names set completeness)
 
 **2424 tests passing. (1 pre-existing failure in test_template_detection unrelated.)**
+
+**Step 22a (Run 1): VisionRouter — Vision-Based Document Routing** ✅
+  - `app/pipeline/vision_router.py` NEW: `VisionRouter` class + `VisionRoutingResult` dataclass
+    - `analyze_document(doc_path, onset_page, total_pages, is_scanned)` → `VisionRoutingResult`
+    - Renders onset page at 200 DPI via `render_page_to_image()`, sends to vision model
+    - `_build_routing_prompt()` asks vision model for: pii_fields, structure_type, records_per_page, cross_page_data, pages_per_instance
+    - `_parse_routing_response()` defensive JSON parsing (code fences, leading text, malformed → safe defaults)
+    - `_determine_path()` routing rules: ≤5 pages → vision_direct, scanned → vision_direct, fixed_single_page+PII → coordinate, multi_page_template → llm_template, table → llm_table, variable → presidio
+    - Graceful fallback on render/model failure → variable/presidio
+  - `tests/test_vision_router.py`: 44 tests (dataclass, _determine_path 9 scenarios, prompt content 5, response parsing 10, mock integration 6, helpers 8)
+
+**Step 22b (Run 2): FieldMapBuilder — Vision-to-Coordinate Field Map** ✅
+  - `app/pipeline/field_map_builder.py` NEW: `FieldMapBuilder` class
+    - `build_field_map(vision_result, doc_path, page_num)` → `list[FieldMapping]`
+    - Bridges VisionRoutingResult.pii_fields → FieldMapping list for CoordinateExtractor
+    - `_find_text_in_words()` — fuzzy word matching (single/multi-word, case-insensitive, compound words, partial match)
+    - `_compute_spatial_relationship()` — deterministic from actual coordinates (same_line_right, line_below, lines_below_N)
+    - `_infer_skip_pattern()` — detects noise between label and value (client codes, colons)
+    - `_infer_value_pattern()` — regex patterns for SSN, phone, email, DOB, NI_NUMBER, GOVERNMENT_ID
+    - No label = no field map entry (coordinate extraction needs anchors)
+  - `tests/test_field_map_builder.py`: 40 tests (word search 10, spatial 4, skip pattern 3, value pattern 5, line count 3, bbox merge 2, build_one_field 10, integration 3)
+
+**Step 22c (Run 3): Pipeline Wiring — Vision Routing Integration** ✅
+  - `app/pipeline/two_phase.py`: Vision routing wired into both `analyze_generator()` and `run_extraction_background()`
+    - `analyze_generator()`: New "vision_routing" stage before coordinate preview. VisionRouter analyzes each doc, FieldMapBuilder builds field map for coordinate-recommended docs, validates with sample extraction, persists `vision_routing` + `vision_field_map` to `Document.metadata_json`
+    - `run_extraction_background()`: Path 0 now loads vision routing from metadata. Priority: auditor override > vision field map > LLM schema field map. `recommended_path == "coordinate"` triggers coordinate extraction. Legacy LLM layout_type check preserved as fallback.
+    - Existing coordinate preview preserved for non-vision-routed docs (legacy path)
+  - `app/api/routes/analysis_review.py`: GET `/jobs/{id}/analysis` response extended with `vision_routing` and `vision_field_map` per document
+  - Routing priority: auditor override → vision field map → LLM schema → vision recommended_path → existing path logic
+  - `tests/test_two_phase.py`: 11 new tests (TestVisionRoutingPipelineWiring: metadata persistence, field map loading, auditor override, coordinate/vision_direct/llm_template routing, legacy fallback, small doc handling, validation downgrade, API exposure)
+
+**Step 22d (Run 4): ExtractionVerifier + Frontend Auditor Vision Panel** ✅
+  - `app/pipeline/extraction_verifier.py` NEW: `ExtractionVerifier` class + `ExtractionVerification` dataclass
+    - `verify(records, failed_pages, reconciled_records, total_pages, field_map)` → `ExtractionVerification`
+    - Per-field success rates (PERSON, US_SSN, LOCATION, etc. mapped to PIIRecord attributes)
+    - Quality assessment: `ACCEPTABLE_RATE = 0.90`, `is_acceptable` flag
+    - `_build_summary()` — human-readable summary for auditor (page counts, field rates, quality)
+  - `app/pipeline/two_phase.py`: Post-extraction verification wired into coordinate Path 0
+    - After coordinate extraction + reconciliation, `ExtractionVerifier.verify()` runs
+    - Verification summary logged, result stored in `run.metrics` via `_update_extraction_progress(stage="verification")`
+    - Result includes: success_rate, successful, reconciled, failed, field_rates, is_acceptable
+  - `frontend/src/api/client.ts`: `VisionRoutingInfo` interface, `AnalysisReviewDetail` extended with `vision_routing` + `vision_field_map`
+  - `frontend/src/pages/ProjectDetail.tsx`: Vision routing panel in AnalysisReviewPanel
+    - Structure type badge, recommended path with color coding, PII field count, cross-page indicator
+    - Estimated extraction time display per path
+    - Vision field map → reuses existing `FieldMapEditor` component (no duplication with legacy LLM field map)
+  - `tests/test_extraction_verifier.py`: 13 tests (all pass, empty, below threshold, reconciliation, per-field rates, summary, edge cases)
+  - `tests/test_two_phase.py`: 7 new tests (TestExtractionVerificationWiring: import, metrics storage, logging, module exists, method signature, stage name, result fields)
 
 See [docs/PLAN.md](docs/PLAN.md) for active steps and [docs/PLAN_COMPLETED.md](docs/PLAN_COMPLETED.md) for completed reference.
 

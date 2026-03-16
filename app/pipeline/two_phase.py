@@ -613,13 +613,171 @@ def analyze_generator(
             },
         })
 
-        # --- Stage 4b-0: Extraction Preview (coordinate / fixed-layout docs) ---
+        # --- Stage 4b-0: Vision-based routing for extraction path ---
+        # Uses vision model to classify document structure and identify PII
+        # fields. Replaces LLM layout_type classification as primary routing.
+
         doc_previews: dict[UUID, dict] = {}
         preview_count = 0
+        vision_routed_docs: set[UUID] = set()
 
+        if settings.llm_assist_enabled and settings.use_vision_extraction:
+            try:
+                from app.llm.client import OllamaClient
+                from app.pipeline.vision_router import VisionRouter
+                from app.pipeline.field_map_builder import FieldMapBuilder
+
+                vision_client = OllamaClient(db_session=db)
+                vision_model_override = None
+
+                # Check per-protocol vision model override
+                if protocol_config and isinstance(protocol_config, dict):
+                    vision_model_override = protocol_config.get("vision_model")
+                if not vision_model_override:
+                    base_key = body.protocol_id.lower().replace("-", "_").replace(" ", "_")
+                    if base_key in PROTOCOL_LLM_CONFIG:
+                        vision_model_override = PROTOCOL_LLM_CONFIG[base_key].get("vision_model")
+
+                if vision_client.is_vision_available(model_override=vision_model_override):
+                    router = VisionRouter(vision_client, vision_model=vision_model_override)
+
+                    yield _sse({
+                        "stage": "vision_routing", "status": "running",
+                        "message": "Analyzing document structure with vision model...",
+                        "detail": {"total": len(doc_records), "current": 0},
+                    })
+
+                    for doc in doc_records:
+                        if not doc.source_path:
+                            continue
+
+                        # Determine if scanned
+                        blocks = doc_blocks_cache.get(doc.id, [])
+                        is_scanned = (
+                            len(blocks) == 0
+                            and (doc.file_type or "").lower() in ("pdf", ".pdf", "application/pdf")
+                        )
+
+                        # Get onset page and total pages
+                        onset = doc.sample_onset_page or 0
+                        total_pages = len(set(b.page_or_sheet for b in blocks)) if blocks else 0
+
+                        # For scanned docs, get page count from PyMuPDF
+                        if is_scanned and doc.source_path:
+                            try:
+                                import fitz
+                                pdf_doc = fitz.open(doc.source_path)
+                                total_pages = pdf_doc.page_count
+                                pdf_doc.close()
+                            except Exception:
+                                pass
+
+                        try:
+                            routing = router.analyze_document(
+                                doc.source_path, onset_page=onset,
+                                total_pages=total_pages, is_scanned=is_scanned,
+                            )
+
+                            # Build field map if coordinate path recommended
+                            field_map = None
+                            if routing.recommended_path == "coordinate":
+                                builder = FieldMapBuilder()
+                                field_map = builder.build_field_map(
+                                    routing, doc.source_path, page_num=onset,
+                                )
+
+                                # Validate field map with sample extraction
+                                if field_map:
+                                    try:
+                                        from app.pipeline.coordinate_extractor import CoordinateExtractor
+                                        test_ext = CoordinateExtractor(field_map, doc.source_path, "validation")
+                                        test_records, test_failed = test_ext.extract_all_pages(page_range=[onset])
+
+                                        if not test_records or not test_records[0].raw_name:
+                                            logger.warning(
+                                                "Vision field map failed validation for %s, downgrading to %s",
+                                                doc.file_name,
+                                                "vision_direct" if total_pages <= 5 else "presidio",
+                                            )
+                                            field_map = None
+                                            routing.recommended_path = "vision_direct" if total_pages <= 5 else "presidio"
+                                        else:
+                                            logger.info(
+                                                "Vision field map validated: %s → '%s' on page %d",
+                                                doc.file_name, test_records[0].raw_name, onset,
+                                            )
+                                    except Exception:
+                                        logger.warning(
+                                            "Vision field map validation failed for %s",
+                                            doc.file_name, exc_info=True,
+                                        )
+                                        field_map = None
+                                        routing.recommended_path = "vision_direct" if total_pages <= 5 else "presidio"
+
+                            # Persist routing result and field map to document metadata
+                            doc_meta = doc.metadata_json or {}
+                            doc_meta["vision_routing"] = {
+                                "structure_type": routing.structure_type,
+                                "recommended_path": routing.recommended_path,
+                                "pii_field_count": len(routing.pii_fields),
+                                "records_per_page": routing.records_per_page,
+                                "cross_page_data": routing.cross_page_data,
+                            }
+                            if field_map:
+                                doc_meta["vision_field_map"] = [
+                                    {
+                                        "field_type": fm.field_type,
+                                        "anchor_text": fm.anchor_text,
+                                        "spatial_relationship": fm.spatial_relationship,
+                                        "value_pattern": fm.value_pattern,
+                                        "sample_bbox": fm.sample_bbox,
+                                        "line_count": fm.line_count,
+                                        "skip_pattern": fm.skip_pattern,
+                                    }
+                                    for fm in field_map
+                                ]
+                            doc.metadata_json = doc_meta
+                            flag_modified(doc, "metadata_json")
+
+                            # Build preview for the analysis review panel
+                            preview = {
+                                "extraction_method": routing.recommended_path,
+                                "structure_type": routing.structure_type,
+                                "pii_fields": [f.get("type", "") for f in routing.pii_fields],
+                                "field_map_count": len(field_map) if field_map else 0,
+                                "total_instances_estimate": (
+                                    total_pages if routing.records_per_page == 1
+                                    else total_pages * routing.records_per_page
+                                ),
+                                "sample_values": {
+                                    f.get("type", ""): f.get("value", "")[:50]
+                                    for f in routing.pii_fields[:5]
+                                },
+                            }
+                            doc_previews[doc.id] = preview
+                            vision_routed_docs.add(doc.id)
+
+                        except Exception:
+                            logger.warning("Vision routing failed for %s", doc.file_name, exc_info=True)
+
+                    db.commit()
+
+                    yield _sse({
+                        "stage": "vision_routing", "status": "complete",
+                        "message": f"Vision-routed {len(vision_routed_docs)} document(s)",
+                        "detail": {"routed": len(vision_routed_docs)},
+                    })
+            except ImportError:
+                logger.info("Vision routing not available (missing dependencies)")
+            except Exception:
+                logger.warning("Vision routing stage failed", exc_info=True)
+
+        # --- Stage 4b-0-legacy: Extraction Preview (coordinate / fixed-layout docs) ---
+        # For docs NOT already routed by vision, fall back to LLM schema field map.
         fixed_layout_docs = [
             doc for doc in doc_records
-            if doc.id in doc_schemas
+            if doc.id not in vision_routed_docs
+            and doc.id in doc_schemas
             and doc_schemas[doc.id] is not None
             and getattr(doc_schemas[doc.id], "layout_type", "variable") in ("fixed", "template_with_drift")
             and getattr(doc_schemas[doc.id], "layout_field_map", None)
@@ -1531,11 +1689,15 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                                 "batch": batch_idx, "total_batches": total_batches},
                     )
 
-                # --- Path 0: Coordinate extraction (fixed-layout docs) ---
-                # Check for auditor-edited field map first (from PUT /field-map)
+                # --- Path 0: Coordinate extraction (vision-routed) ---
+                # Load vision routing from analysis phase
+                doc_meta = doc.metadata_json or {}
+                vision_routing = doc_meta.get("vision_routing", {})
+                recommended_path = vision_routing.get("recommended_path", "")
+
+                # Load field map: auditor override > vision field map > LLM field map
                 auditor_field_map = None
                 auditor_method = None
-                doc_meta = doc.metadata_json or {}
                 if doc_meta.get("auditor_layout_field_map"):
                     from app.structure.document_schema import FieldMapping as _FM
                     auditor_field_map = [
@@ -1543,28 +1705,47 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                     ]
                     auditor_method = doc_meta.get("auditor_extraction_method", "coordinate")
 
-                # Use auditor field map if available, otherwise fall back to schema
-                effective_field_map = auditor_field_map or (
+                vision_field_map = None
+                if doc_meta.get("vision_field_map"):
+                    from app.structure.document_schema import FieldMapping as _FM
+                    vision_field_map = [
+                        _FM(**fm_dict) for fm_dict in doc_meta["vision_field_map"]
+                    ]
+
+                # Priority: auditor > vision > LLM schema
+                effective_field_map = auditor_field_map or vision_field_map or (
                     getattr(schema, "layout_field_map", None) if schema else None
                 )
                 use_coordinate = auditor_method != "ai" if auditor_method else True
 
-                is_fixed_layout = (
-                    schema is not None
-                    and getattr(schema, "layout_type", "variable") in ("fixed", "template_with_drift")
-                    and effective_field_map is not None
+                # Coordinate path eligibility:
+                # - Must have a field map and not be overridden to AI
+                # - Either vision recommended "coordinate", OR auditor explicitly set field map,
+                #   OR legacy LLM schema says "fixed"/"template_with_drift"
+                is_coordinate_path = (
+                    effective_field_map is not None
                     and use_coordinate
+                    and doc.source_path
+                    and (
+                        recommended_path == "coordinate"
+                        or auditor_field_map is not None
+                        or (
+                            schema is not None
+                            and getattr(schema, "layout_type", "variable") in ("fixed", "template_with_drift")
+                        )
+                    )
                 )
-                if is_fixed_layout and doc.source_path:
+
+                if is_coordinate_path:
                     # Validate field map quality before full extraction
                     if not _validate_field_map(effective_field_map, doc.source_path):
                         logger.warning(
                             "Field map validation failed for %s, skipping coordinate path",
                             doc.file_name,
                         )
-                        is_fixed_layout = False
+                        is_coordinate_path = False
 
-                if is_fixed_layout and doc.source_path:
+                if is_coordinate_path:
                     try:
                         from app.pipeline.coordinate_extractor import CoordinateExtractor
                         from app.pipeline.reconciliation import ExtractionReconciler
@@ -1588,16 +1769,51 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                             records = coord_records
                             extraction_path = "0-coord"
                             logger.info(
-                                "Path 0 (Coordinate) for %s: %d records (%d failed pages)",
+                                "Path 0 (Coordinate/Vision) for %s: %d records (%d failed pages)",
                                 doc.file_name, len(records), len(failed_pages),
                             )
+
+                            # Post-extraction verification (Step 22d)
+                            try:
+                                from app.pipeline.extraction_verifier import ExtractionVerifier
+                                verifier = ExtractionVerifier()
+                                recovered_list = recovered if 'recovered' in dir() else []
+                                coord_only = [r for r in records if r not in recovered_list] if recovered_list else records
+                                verification = verifier.verify(
+                                    records=coord_only,
+                                    failed_pages=failed_pages,
+                                    reconciled_records=recovered_list,
+                                    total_pages=total_pg,
+                                    field_map=effective_field_map,
+                                )
+                                logger.info("Verification: %s", verification.summary)
+                                _update_extraction_progress(
+                                    db, run,
+                                    stage="verification",
+                                    message=verification.summary,
+                                    completed_doc_ids=completed_doc_ids,
+                                    total_docs=len(approved_docs), current_doc=i,
+                                    records_found=len(all_records) + len(records),
+                                    result={
+                                        "success_rate": verification.success_rate,
+                                        "successful": verification.successful_pages,
+                                        "reconciled": verification.reconciled_pages,
+                                        "failed": verification.failed_pages,
+                                        "field_rates": verification.field_rates,
+                                        "is_acceptable": verification.is_acceptable,
+                                    },
+                                )
+                            except Exception:
+                                logger.warning("Post-extraction verification failed", exc_info=True)
                     except Exception:
                         logger.warning(
                             "Path 0 (Coordinate) failed for %s, trying other paths",
                             doc.file_name, exc_info=True,
                         )
 
-                # --- Path 1: Vision ---
+                # --- Path 1: Vision direct (small docs or scanned) ---
+                # Respects vision routing: if recommended_path is "vision_direct",
+                # or if no records yet and vision is available.
                 if (
                     not records
                     and settings.use_vision_extraction

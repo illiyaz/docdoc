@@ -1847,6 +1847,73 @@ function AnalysisReviewPanel({ jobId, onExtractionComplete }: { jobId: string; o
             </div>
           )}
 
+          {/* Vision Routing Info (Step 22d) */}
+          {doc.vision_routing && (
+            <div className="bg-cyan-50 border border-cyan-200 rounded p-2 space-y-1.5">
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-medium text-cyan-800">
+                  Vision Analysis
+                </p>
+                <span className={`text-[10px] px-1.5 py-0.5 rounded ${
+                  doc.vision_routing.recommended_path === "coordinate"
+                    ? "bg-green-100 text-green-800"
+                    : doc.vision_routing.recommended_path === "vision_direct"
+                    ? "bg-blue-100 text-blue-800"
+                    : "bg-gray-100 text-gray-700"
+                }`}>
+                  {doc.vision_routing.recommended_path.replace(/_/g, " ")}
+                </span>
+              </div>
+              <div className="flex flex-wrap gap-2 text-xs">
+                <span className="bg-white border border-cyan-100 rounded px-1.5 py-0.5">
+                  Structure: <span className="font-medium">{doc.vision_routing.structure_type.replace(/_/g, " ")}</span>
+                </span>
+                <span className="bg-white border border-cyan-100 rounded px-1.5 py-0.5">
+                  PII fields: <span className="font-medium">{doc.vision_routing.pii_field_count}</span>
+                </span>
+                {doc.vision_routing.records_per_page > 1 && (
+                  <span className="bg-white border border-cyan-100 rounded px-1.5 py-0.5">
+                    Records/page: <span className="font-medium">{doc.vision_routing.records_per_page}</span>
+                  </span>
+                )}
+                {doc.vision_routing.cross_page_data && (
+                  <span className="bg-amber-100 border border-amber-200 rounded px-1.5 py-0.5 text-amber-800">
+                    Cross-page data
+                  </span>
+                )}
+              </div>
+              {doc.extraction_preview?.total_instances_estimate && (
+                <p className="text-[10px] text-cyan-600">
+                  Est. time: {
+                    doc.vision_routing.recommended_path === "coordinate"
+                      ? `~${Math.max(1, Math.ceil((doc.extraction_preview.total_instances_estimate) / 100))}s`
+                      : doc.vision_routing.recommended_path === "vision_direct"
+                      ? `~${Math.max(1, Math.ceil((doc.extraction_preview.total_instances_estimate) * 2 / 60))} min`
+                      : doc.vision_routing.recommended_path === "llm_template"
+                      ? `~${Math.max(1, Math.ceil((doc.extraction_preview.total_instances_estimate) * 0.5 / 60))} min`
+                      : doc.vision_routing.recommended_path === "presidio"
+                      ? `~${Math.max(1, Math.ceil((doc.extraction_preview.total_instances_estimate) / 50))}s`
+                      : "unknown"
+                  } for {doc.extraction_preview.total_instances_estimate} pages
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* Vision Field Map → FieldMapEditor (Step 22d) */}
+          {doc.vision_routing?.recommended_path === "coordinate" &&
+            doc.vision_field_map && doc.vision_field_map.length > 0 &&
+            doc.review_status === "pending_review" && (
+            <FieldMapEditor
+              jobId={jobId}
+              docId={doc.document_id}
+              initialMappings={doc.vision_field_map}
+              layoutConfidence={null}
+              totalPages={doc.extraction_preview?.total_instances_estimate ?? null}
+              onSaved={() => queryClient.invalidateQueries({ queryKey: ["analysis-reviews", jobId] })}
+            />
+          )}
+
           {/* LLM Extraction Preview (Step 19b) */}
           {doc.extraction_preview && (
             <div className="bg-indigo-50 border border-indigo-200 rounded p-2 space-y-1.5">
@@ -1939,8 +2006,9 @@ function AnalysisReviewPanel({ jobId, onExtractionComplete }: { jobId: string; o
             </div>
           )}
 
-          {/* Field Map Editor (Step 21d) — for fixed-layout coordinate extraction */}
-          {(doc.layout_type === "fixed" || doc.layout_type === "template_with_drift") &&
+          {/* Field Map Editor (Step 21d) — for fixed-layout coordinate extraction (legacy LLM path) */}
+          {!doc.vision_field_map &&
+            (doc.layout_type === "fixed" || doc.layout_type === "template_with_drift") &&
             doc.layout_field_map && doc.layout_field_map.length > 0 &&
             doc.review_status === "pending_review" && (
             <FieldMapEditor

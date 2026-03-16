@@ -803,6 +803,14 @@ export interface EntityRelationship {
   confidence: number
 }
 
+export interface VisionRoutingInfo {
+  structure_type: string  // "fixed_single_page" | "multi_page_template" | "table" | "variable"
+  recommended_path: string  // "coordinate" | "vision_direct" | "llm_template" | "llm_table" | "presidio"
+  pii_field_count: number
+  records_per_page: number
+  cross_page_data: boolean
+}
+
 export interface AnalysisReviewDetail {
   document_id: string
   file_name: string
@@ -832,6 +840,9 @@ export interface AnalysisReviewDetail {
   layout_confidence: number | null
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   document_schema: Record<string, any> | null
+  // Vision routing info (Step 22d)
+  vision_routing?: VisionRoutingInfo
+  vision_field_map?: LayoutFieldMapping[]
 }
 
 export interface ExtractionPreview {
