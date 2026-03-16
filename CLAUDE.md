@@ -466,6 +466,22 @@ These are detailed in [docs/SCHEMA.md](docs/SCHEMA.md). Summary:
 
 **2293 tests passing after Step 21e (Run 5). (1 pre-existing failure in test_template_detection unrelated.)**
 
+**Bugfix: Scanned/image-only PDF support (0 extraction rows)** ✅
+  - **Bug A fix**: `run_extraction_background()` + `analyze_generator()` in `app/pipeline/two_phase.py` — when `reader.read()` returns empty blocks for a PDF, detect scanned PDF via `fitz.open()` page count. Populate `doc_pages` from PDF page count so Vision path (Path 1) gets actual page numbers to process.
+  - **Bug B fix**: `ocr_pdf_to_blocks()` added to `app/readers/ocr.py` — opens PDF with PyMuPDF, renders each page to image at 200 DPI, runs PaddleOCR, returns `list[ExtractedBlock]` compatible with all pipeline paths. Memory-safe (page streaming + `_forget_page()`).
+  - **Pipeline integration**: Both `analyze_generator()` (structure analysis + onset stages) and `run_extraction_background()` call OCR fallback when blocks are empty for PDF files. Falls back gracefully to Vision-only path if PaddleOCR unavailable.
+  - `tests/test_scanned_pdf.py`: 18 tests (doc_pages fallback, OCR block generation, page number correctness, pipeline integration, block compatibility)
+
+**Bugfix: Extraction validation — DOB context, email URLs, entity_types_found** ✅
+  - **Issue 1 fix**: `validate_dob()` in `app/pii/pattern_validator.py` — rejects transaction/service/statement dates misclassified as DOB. Checks context keywords ("Fee Slip Dated", "Statement Date", "Service Date", etc.), DOB labels ("Date of Birth", "DOB", "Born"), and date recency (within last 5 years = not a DOB).
+  - **Issue 4 fix**: `validate_email()` in `app/pii/pattern_validator.py` — rejects URLs (www.*, http://, https://) and strings without @ misclassified as email addresses.
+  - **Issue 5 fix**: `_build_entity_types_found()` in `app/pii/pattern_validator.py` — rebuilds entity_types_found from actually-populated PIIRecord fields only. Prevents phantom types (NI_NUMBER, EMAIL_ADDRESS, PHONE_NUMBER) appearing when those fields are null.
+  - **Wired into all extraction paths**: `VisionDocumentExtractor._data_to_record()` and `LLMTemplateExtractor._data_to_record()` both validate DOB/email at record construction time and build entity_types_found from populated fields only.
+  - `validate_extracted_records()` enhanced: strips invalid DOB and email during post-validation, rebuilds entity_types_found.
+  - `tests/test_extraction_validation.py`: 40 new tests (DOB context validation: fee slip/statement/service/invoice/due dates rejected, real DOB labels accepted, recency check, DOB label override; email validation: URLs rejected, valid emails pass; entity_types_found accuracy: only populated fields; integration: vision + LLM template extractors)
+
+**2373 tests passing. (1 pre-existing failure in test_template_detection unrelated.)**
+
 See [docs/PLAN.md](docs/PLAN.md) for active steps and [docs/PLAN_COMPLETED.md](docs/PLAN_COMPLETED.md) for completed reference.
 
 ---

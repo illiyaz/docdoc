@@ -350,6 +350,22 @@ def analyze_generator(
             try:
                 reader = get_reader(doc.source_path)
                 blocks = reader.read()
+
+                # Scanned PDF fallback: run OCR when no text blocks found
+                if not blocks and (doc.file_type or "").lower() in ("pdf", ".pdf", "application/pdf") and doc.source_path:
+                    try:
+                        from app.readers.ocr import ocr_pdf_to_blocks
+                        blocks = ocr_pdf_to_blocks(doc.source_path)
+                        if blocks:
+                            logger.info(
+                                "OCR produced %d blocks for scanned PDF %s (analyze phase)",
+                                len(blocks), doc.file_name,
+                            )
+                    except ImportError:
+                        logger.warning("PaddleOCR not available for %s", doc.file_name)
+                    except Exception:
+                        logger.warning("OCR failed for %s in analyze phase", doc.file_name, exc_info=True)
+
                 doc_blocks_cache[doc.id] = blocks
 
                 result = structure_task.run(blocks, str(doc.id), db_session=db)
@@ -398,6 +414,13 @@ def analyze_generator(
                 if blocks is None:
                     reader = get_reader(doc.source_path)
                     blocks = reader.read()
+                    # Scanned PDF fallback (same as structure_analysis stage)
+                    if not blocks and (doc.file_type or "").lower() in ("pdf", ".pdf", "application/pdf") and doc.source_path:
+                        try:
+                            from app.readers.ocr import ocr_pdf_to_blocks
+                            blocks = ocr_pdf_to_blocks(doc.source_path)
+                        except Exception:
+                            pass
                     doc_blocks_cache[doc.id] = blocks
 
                 # PII-verified onset detection
@@ -1267,6 +1290,39 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                 reader = get_reader(doc.source_path)
                 blocks = reader.read()
 
+                # --- Scanned PDF fallback ---
+                # If no text blocks but file is a PDF, get page count from
+                # PyMuPDF and run OCR to produce text blocks for all paths.
+                is_pdf = (doc.file_type or "").lower() in ("pdf", ".pdf", "application/pdf")
+                scanned_page_count = 0
+                if not blocks and is_pdf and doc.source_path:
+                    try:
+                        import fitz
+                        pdf_doc = fitz.open(doc.source_path)
+                        scanned_page_count = pdf_doc.page_count
+                        pdf_doc.close()
+                        logger.info(
+                            "Scanned PDF detected: %s (%d pages, 0 text blocks)",
+                            doc.file_name, scanned_page_count,
+                        )
+                    except Exception:
+                        pass
+
+                    # Run OCR to produce text blocks for all extraction paths
+                    if scanned_page_count > 0:
+                        try:
+                            from app.readers.ocr import ocr_pdf_to_blocks
+                            blocks = ocr_pdf_to_blocks(doc.source_path)
+                            if blocks:
+                                logger.info(
+                                    "OCR produced %d text blocks for scanned PDF %s",
+                                    len(blocks), doc.file_name,
+                                )
+                        except ImportError:
+                            logger.warning("PaddleOCR not available for %s, falling back to Vision path", doc.file_name)
+                        except Exception:
+                            logger.warning("OCR failed for %s, falling back to Vision path", doc.file_name, exc_info=True)
+
                 schema = None
                 # Try loading schema persisted during analysis phase
                 doc_meta = doc.metadata_json or {}
@@ -1286,6 +1342,8 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                         if doc.structure_analysis and isinstance(doc.structure_analysis, dict):
                             heuristic_doc_type = doc.structure_analysis.get("document_type", "unknown")
                         doc_pages = set(b.page_or_sheet for b in blocks)
+                        if not doc_pages and scanned_page_count > 0:
+                            doc_pages = set(range(scanned_page_count))
                         total_pages = len(doc_pages)
                         du = doc_understanding_cls(db_session=db)
                         schema = du.understand(
@@ -1314,6 +1372,11 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                     and schema.records_per_page_estimate > 1
                 )
                 doc_pages = set(b.page_or_sheet for b in blocks)
+                # For scanned PDFs with no text blocks (OCR may also have
+                # failed or not been available), populate from PDF page count
+                # so Vision path has page numbers to process.
+                if not doc_pages and scanned_page_count > 0:
+                    doc_pages = set(range(scanned_page_count))
                 total_pg = len(doc_pages)
 
                 records: list[PIIRecord] = []

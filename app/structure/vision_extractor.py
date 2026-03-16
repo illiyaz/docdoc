@@ -23,6 +23,7 @@ from app.llm.extraction_prompts import (
     ENTITY_EXTRACTION_GUIDE,
 )
 from app.pdf.renderer import render_page_to_image
+from app.pii.pattern_validator import validate_dob, validate_email
 from app.rra.entity_resolver import PIIRecord
 from app.structure.document_schema import DocumentSchema
 from app.structure.llm_template_extractor import (
@@ -428,6 +429,9 @@ class VisionDocumentExtractor:
         """Convert a parsed JSON dict to a PIIRecord.
 
         Reuses the field mapping from LLMTemplateExtractor.
+        Validates DOB (rejects transaction dates) and email (rejects URLs).
+        Only includes entity types in entity_types_found for fields that
+        are actually populated.
         """
         raw_name: str | None = None
         raw_email: str | None = None
@@ -436,7 +440,6 @@ class VisionDocumentExtractor:
         raw_address: dict | None = None
         raw_government_id: str | None = None
         government_id_type: str | None = None
-        entity_types_found: list[str] = []
 
         for entity_type, value in data.items():
             if value is None or value == "" or value == "null":
@@ -449,16 +452,16 @@ class VisionDocumentExtractor:
             if raw_field is None:
                 continue
 
-            entity_types_found.append(entity_type)
-
             if raw_field == "raw_name":
                 raw_name = value_str
             elif raw_field == "raw_email":
-                raw_email = value_str
+                if validate_email(value_str):
+                    raw_email = value_str
             elif raw_field == "raw_phone":
                 raw_phone = value_str
             elif raw_field == "raw_dob":
-                raw_dob = value_str
+                if validate_dob(value_str):
+                    raw_dob = value_str
             elif raw_field == "raw_address":
                 raw_address = {"raw": value_str}
             elif raw_field == "raw_government_id":
@@ -468,6 +471,19 @@ class VisionDocumentExtractor:
 
         if not raw_name:
             return None
+
+        # Build entity_types_found from actually-populated fields only
+        entity_types_found: list[str] = ["PERSON"]
+        if raw_address:
+            entity_types_found.append("LOCATION")
+        if raw_dob:
+            entity_types_found.append("DATE_OF_BIRTH")
+        if raw_government_id:
+            entity_types_found.append(government_id_type or "GOVERNMENT_ID")
+        if raw_email:
+            entity_types_found.append("EMAIL_ADDRESS")
+        if raw_phone:
+            entity_types_found.append("PHONE_NUMBER")
 
         # Build page range (1-indexed for humans)
         pages_1 = sorted(int(p) + 1 for p in instance_pages)

@@ -19,10 +19,14 @@ no outbound network call is ever made at runtime.
 """
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 from paddleocr import PaddleOCR
 
 from app.readers.base import ExtractedBlock
+
+logger = logging.getLogger(__name__)
 
 
 class OCREngine:
@@ -125,3 +129,59 @@ class OCREngine:
             ))
 
         return blocks
+
+
+def ocr_pdf_to_blocks(
+    pdf_path: str,
+    dpi: int = 200,
+    lang: str = "en",
+) -> list[ExtractedBlock]:
+    """Run PaddleOCR on every page of a scanned PDF.
+
+    Opens the PDF with PyMuPDF, renders each page to a raster image,
+    runs PaddleOCR, and returns ``ExtractedBlock`` objects compatible
+    with the rest of the pipeline.
+
+    Pages are streamed one at a time and released after OCR to keep
+    memory usage bounded.
+
+    Parameters
+    ----------
+    pdf_path:
+        Absolute path to the PDF file.
+    dpi:
+        Render resolution.  200 DPI balances OCR accuracy and speed.
+    lang:
+        PaddleOCR language code (default ``"en"``).
+
+    Returns
+    -------
+    list[ExtractedBlock]
+        Blocks from all pages, ordered by page number then reading order.
+    """
+    import fitz  # PyMuPDF — lazy import to avoid top-level dependency
+
+    engine = OCREngine(lang=lang)
+    all_blocks: list[ExtractedBlock] = []
+
+    doc = fitz.open(pdf_path)
+    try:
+        mat = fitz.Matrix(dpi / 72, dpi / 72)
+        for page_num in range(doc.page_count):
+            page = doc[page_num]
+            pix = page.get_pixmap(matrix=mat)
+            page_blocks = engine.ocr_page_image(pix, page_num, pdf_path)
+            all_blocks.extend(page_blocks)
+            doc._forget_page(page)  # release memory
+            logger.debug(
+                "OCR page %d/%d: %d blocks",
+                page_num + 1, doc.page_count, len(page_blocks),
+            )
+    finally:
+        doc.close()
+
+    logger.info(
+        "OCR complete for %s: %d blocks across %d pages",
+        pdf_path, len(all_blocks), doc.page_count,
+    )
+    return all_blocks
