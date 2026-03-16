@@ -564,6 +564,24 @@ def analyze_generator(
                         understanding_count += 1
                         # Persist schema to metadata_json for extraction phase
                         doc.metadata_json = doc.metadata_json or {}
+
+                        # Don't downgrade from "fixed" to "variable" — LLM non-determinism
+                        existing_schema_dict = doc.metadata_json.get("document_schema")
+                        if existing_schema_dict:
+                            existing_lt = existing_schema_dict.get("layout_type", "variable")
+                            new_lt = getattr(schema, "layout_type", "variable")
+                            if existing_lt in ("fixed", "template_with_drift") and new_lt == "variable":
+                                logger.warning(
+                                    "Keeping existing '%s' layout for %s (LLM said 'variable' this run)",
+                                    existing_lt, doc.file_name,
+                                )
+                                try:
+                                    from app.structure.document_schema import DocumentSchema as _DSKeep
+                                    schema = _DSKeep.from_dict(existing_schema_dict)
+                                    doc_schemas[doc.id] = schema
+                                except Exception:
+                                    pass  # fall through with new schema
+
                         doc.metadata_json["document_schema"] = schema.to_dict()
                         flag_modified(doc, "metadata_json")
                         # Apply SchemaFilter to this doc's detections
@@ -603,6 +621,7 @@ def analyze_generator(
             doc for doc in doc_records
             if doc.id in doc_schemas
             and doc_schemas[doc.id] is not None
+            and getattr(doc_schemas[doc.id], "layout_type", "variable") in ("fixed", "template_with_drift")
             and getattr(doc_schemas[doc.id], "layout_field_map", None)
         ]
 
@@ -629,9 +648,20 @@ def analyze_generator(
                     except Exception:
                         logger.warning("Coordinate preview failed for %s", doc.file_name, exc_info=True)
 
+                # Validate preview quality — reject garbage extractions
+                preview_valid = True
+                if sample_records and sample_records[0].raw_name:
+                    pv_name = sample_records[0].raw_name.lower().strip()
+                    if pv_name in _FIELD_MAP_BAD_NAMES or len(pv_name.split()) < 2:
+                        logger.warning(
+                            "Coordinate preview for %s extracted bad name '%s', field map may be wrong",
+                            doc.file_name, sample_records[0].raw_name,
+                        )
+                        preview_valid = False
+
                 # Build preview dict
                 fields_found: dict[str, dict] = {}
-                if sample_records:
+                if sample_records and preview_valid:
                     rec = sample_records[0]
                     onset_pg = (doc.sample_onset_page or 0) + 1
                     if rec.raw_name:
@@ -1135,6 +1165,74 @@ def _update_extraction_progress(
     db.commit()
 
 
+# Known-bad names that indicate field map is extracting from headers/boilerplate
+_FIELD_MAP_BAD_NAMES = frozenset({
+    "summary", "statement", "page", "report", "document",
+    "invoice", "receipt", "form", "bill", "notice",
+    "certificate", "record", "schedule", "exhibit",
+    "total", "balance", "account", "date", "description",
+})
+
+
+def _validate_field_map(field_map: list, doc_path: str) -> bool:
+    """Validate field map quality before coordinate extraction.
+
+    Quick check: extract from page 0.  If the PERSON field produces a
+    known-bad value (header text, boilerplate) or is empty, reject the
+    field map so extraction falls through to Vision / LLM paths.
+    """
+    if not field_map:
+        return False
+
+    # Must have at least a PERSON-mapped field
+    try:
+        from app.pipeline.coordinate_extractor import _normalize_field_type
+    except ImportError:
+        return False
+
+    has_person = any(
+        _normalize_field_type(fm.field_type) == "PERSON"
+        for fm in field_map
+    )
+    if not has_person:
+        return False
+
+    # Quick test: extract from page 0
+    try:
+        from app.pipeline.coordinate_extractor import CoordinateExtractor
+
+        extractor = CoordinateExtractor(field_map, doc_path, "validation")
+        records, _failed = extractor.extract_all_pages(page_range=[0])
+
+        if not records:
+            return False
+
+        name = records[0].raw_name
+        if not name:
+            return False
+
+        # Reject known-bad names (page headers, document titles)
+        if name.lower().strip() in _FIELD_MAP_BAD_NAMES:
+            logger.warning(
+                "Field map validation failed: PERSON extracted '%s' (likely header text)",
+                name,
+            )
+            return False
+
+        # Reject single-word names (likely boilerplate)
+        if len(name.strip().split()) < 2:
+            logger.warning(
+                "Field map validation failed: PERSON '%s' is single word",
+                name,
+            )
+            return False
+
+        return True
+    except Exception:
+        logger.debug("Field map validation error", exc_info=True)
+        return False
+
+
 def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
     """Run extraction in a background thread with its own DB session.
 
@@ -1451,15 +1549,21 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                 )
                 use_coordinate = auditor_method != "ai" if auditor_method else True
 
-                # Try coordinate extraction if a field map exists — regardless
-                # of layout_type.  The LLM sometimes returns "variable" even
-                # for fixed-layout docs; having a field_map is the stronger
-                # signal that coordinate extraction should be attempted.
                 is_fixed_layout = (
-                    effective_field_map is not None
+                    schema is not None
+                    and getattr(schema, "layout_type", "variable") in ("fixed", "template_with_drift")
+                    and effective_field_map is not None
                     and use_coordinate
-                    and doc.source_path
                 )
+                if is_fixed_layout and doc.source_path:
+                    # Validate field map quality before full extraction
+                    if not _validate_field_map(effective_field_map, doc.source_path):
+                        logger.warning(
+                            "Field map validation failed for %s, skipping coordinate path",
+                            doc.file_name,
+                        )
+                        is_fixed_layout = False
+
                 if is_fixed_layout and doc.source_path:
                     try:
                         from app.pipeline.coordinate_extractor import CoordinateExtractor

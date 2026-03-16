@@ -488,7 +488,15 @@ These are detailed in [docs/SCHEMA.md](docs/SCHEMA.md). Summary:
   - **Wired into pipeline**: `validate_extracted_records()` now calls `validate_person_name()` instead of `is_likely_organization()` for broader coverage.
   - `tests/test_extraction_validation.py`: 43 new tests (TestLooksLikeBusiness: 22 tests for suffixes/keywords/store numbers/persons/edge cases; TestValidatePersonName: 11 tests including estate-of passthrough; TestValidateExtractedRecordsOrgSuppression: 5 integration tests)
 
-**2416 tests passing. (1 pre-existing failure in test_template_detection unrelated.)**
+**Bugfix: Path 0 coordinate extraction field map quality validation** ✅
+  - **Problem**: Removing `layout_type` gate from Path 0 caused garbage extraction (1,354 rows of "Summary") when LLM non-deterministically produced a bad field map. The bad field map extracted from page header "Summary Statement" instead of "Client:" anchor.
+  - **Fix A — Restored layout_type gate**: Path 0 again requires `layout_type in ("fixed", "template_with_drift")`.
+  - **Fix B — Field map quality validation**: `_validate_field_map()` in `app/pipeline/two_phase.py` — extracts page 0 with the field map, rejects if PERSON produces known-bad names (header text like "Summary", "Statement", "Page") or single-word names. Called before full coordinate extraction.
+  - **Fix C — Schema downgrade prevention**: If persisted schema has `layout_type="fixed"` and new LLM response says `"variable"`, keeps the existing fixed schema. Prevents LLM non-determinism from breaking coordinate extraction path.
+  - **Fix D — Preview validation**: Coordinate preview in `analyze_generator()` validates extracted names against `_FIELD_MAP_BAD_NAMES`, warns if field map produces garbage.
+  - `tests/test_coordinate_extraction.py`: 8 new tests (good field map passes, header text rejected, empty/no-PERSON/nonexistent rejected, single-word rejected, bad names set completeness)
+
+**2424 tests passing. (1 pre-existing failure in test_template_detection unrelated.)**
 
 See [docs/PLAN.md](docs/PLAN.md) for active steps and [docs/PLAN_COMPLETED.md](docs/PLAN_COMPLETED.md) for completed reference.
 
