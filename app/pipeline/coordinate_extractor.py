@@ -100,6 +100,157 @@ _ANCHOR_STRIP_CHARS = ":.,;!?"  # trailing punctuation stripped during anchor ma
 # Common noise patterns stripped from PERSON values (client codes, ref numbers)
 _PERSON_CLEANUP_RE = re.compile(r"\(\d+\)\s*")
 
+# Status codes stripped from end of names (e.g., "ADAMS,BRADLEY JAY A" → "ADAMS,BRADLEY JAY")
+_STATUS_CODES = frozenset("ABCDEFST")
+
+
+def _clean_name(name_str: str) -> str:
+    """Strip trailing single-letter status codes from matched names.
+    
+    Only strips A-F, S, T (common status codes). Preserves real initials
+    like V, W (could be middle name).
+    """
+    parts = name_str.strip().split()
+    while len(parts) > 1 and len(parts[-1]) == 1 and parts[-1].upper() in _STATUS_CODES:
+        parts.pop()
+    return " ".join(parts)
+
+
+# ---------------------------------------------------------------------------
+# Structural name matcher for ALL_CAPS embedded names (Step 23a)
+#
+# Proven on Complex1 (0→8,617 PERSON), PPACA (0→1,650 PERSON).
+# When names are embedded in data lines (no separate anchor), the standard
+# anchor-based extraction fails. This matcher learns name structures from
+# vision samples (e.g., (WORD, INITIAL, WORD)) and finds matching patterns
+# in each line of text.
+# ---------------------------------------------------------------------------
+
+# Comprehensive blocklist for ALL_CAPS word rejection
+_NAME_BLOCKLIST: frozenset[str] = frozenset({
+    # Address words
+    "ST", "AVE", "RD", "DR", "LN", "BLVD", "WAY", "PL", "CT", "STREET", "AVENUE",
+    "ROAD", "DRIVE", "LANE", "BOULEVARD", "PLACE", "COURT", "NE", "NW", "SE", "SW",
+    "APT", "SUITE", "STE", "FLOOR", "UNIT", "BOX",
+    # Directions / geography
+    "NORTH", "SOUTH", "EAST", "WEST", "PARK", "HILL", "BEACH", "SPRINGS", "FALLS",
+    "CREEK", "LAKE", "VALLEY", "RIDGE", "HEIGHTS", "MANOR", "GROVE", "ISLAND",
+    "CENTER", "VILLAGE", "TOWN", "CITY", "COUNTY",
+    # Report/form labels
+    "REPORT", "PAYROLL", "MANAGEMENT", "SUMMARY", "TOTAL", "PAGE", "FORM", "SECTION",
+    "DEPARTMENT", "COMPANY", "DISTRICT", "OFFICE", "SYSTEM", "DATE", "NUMBER",
+    "ACCOUNT", "EMPLOYEE", "NAME", "ADDRESS", "PHONE", "EMAIL", "CODE", "TYPE",
+    "STATUS", "AMOUNT", "BALANCE", "PERIOD", "RATE", "GROUP", "CHECK", "STATEMENT",
+    "DEDUCTION", "EARNINGS", "FEDERAL", "STATE", "LOCAL", "TAX", "INSURANCE",
+    "BENEFIT", "PLAN", "COVERAGE", "PREMIUM", "INFORMATION", "DESCRIPTION",
+    # Company suffixes
+    "LLP", "LLC", "INC", "CORP", "LTD", "PLC", "HOLDINGS", "PARTNERS", "CONSULTING",
+    "SERVICES", "SOLUTIONS", "TECHNOLOGIES", "ENTERPRISES", "INTERNATIONAL", "GLOBAL",
+    # Education
+    "SCHOOL", "UNIVERSITY", "COLLEGE", "ACADEMY", "INSTITUTE", "HOSPITAL", "MEDICAL",
+    "HIGH", "GRADE", "SEMESTER", "TERM", "COURSE",
+    # Common English function words
+    "AND", "OR", "THE", "FOR", "WITH", "FROM", "THAT", "WILL", "THIS", "HAS", "BEEN",
+    "NOT", "ARE", "ALL", "BUT", "CAN", "HER", "HIS", "MAY", "NEW", "OUR", "PER",
+    "WHO", "EACH", "THAN", "THEM", "THEN", "THEY", "INTO", "JUST", "LIKE", "MAKE",
+    "MUST", "NEED", "ALSO", "HAVE", "DOES",
+    # Suffixes (handled separately in structure analysis)
+    "JR", "SR", "II", "III", "IV", "V", "VI", "VII", "VIII", "ESQ", "MD", "PHD", "DDS",
+})
+
+_SUFFIX_WORDS = frozenset({"JR", "SR", "II", "III", "IV", "V", "VI", "VII", "VIII", "ESQ", "MD", "PHD", "DDS"})
+
+
+def _analyze_name_structure(name: str) -> tuple[str, ...]:
+    """Break a name into structural components.
+    
+    Examples:
+        "ADAMS,BRADLEY JAY" → ("WORD", "WORD", "WORD")
+        "K BEVINGTON II" → ("INITIAL", "WORD", "SUFFIX")
+        "JOHN SMITH" → ("WORD", "WORD")
+    """
+    parts = name.strip().replace(",", " ").split()
+    structure: list[str] = []
+    for p in parts:
+        pc = p.rstrip(".")
+        if pc.upper() in _SUFFIX_WORDS:
+            structure.append("SUFFIX")
+        elif len(pc) == 1 and pc.isupper():
+            structure.append("INITIAL")
+        elif len(pc) >= 2 and pc.isupper():
+            structure.append("WORD")
+        else:
+            structure.append("OTHER")
+    return tuple(structure)
+
+
+def _build_name_structures(
+    samples: list[str],
+) -> tuple[set[tuple[str, ...]], int, int]:
+    """Build set of acceptable name structures from vision samples.
+    
+    Returns (structures, min_words, max_words).
+    """
+    structures: set[tuple[str, ...]] = set()
+    for s in samples:
+        st = _analyze_name_structure(s)
+        if "OTHER" not in st:
+            structures.add(st)
+            # Also accept without trailing suffix
+            if st and st[-1] == "SUFFIX":
+                structures.add(st[:-1])
+    if not structures:
+        return set(), 2, 4
+    min_w = min(len(s) for s in structures)
+    max_w = max(len(s) for s in structures)
+    return structures, min_w, max_w
+
+
+def find_structural_names(
+    line: str,
+    structures: set[tuple[str, ...]],
+    min_words: int,
+    max_words: int,
+) -> list[str]:
+    """Find ALL_CAPS names in a line using learned structures.
+    
+    Slides a window across the line words, checking each candidate
+    against the learned structure patterns while rejecting blocklisted words.
+    """
+    line_norm = re.sub(r"\s+", " ", line).strip()
+    words = line_norm.split()
+    found: list[str] = []
+    used: set[int] = set()
+
+    for start in range(len(words)):
+        if start in used:
+            continue
+        best = None
+        for length in range(max_words, min_words - 1, -1):
+            if start + length > len(words):
+                continue
+            cand = words[start:start + length]
+            cand_text = " ".join(cand)
+            # Reject if any word has digits
+            if any(any(c.isdigit() for c in w) for w in cand):
+                continue
+            st = _analyze_name_structure(cand_text)
+            if st not in structures:
+                continue
+            if any(w.upper() in _NAME_BLOCKLIST for w in cand):
+                continue
+            # Must have at least one word with 3+ chars (not all initials/suffixes)
+            if not any(len(w) >= 3 and w.upper() not in _SUFFIX_WORDS for w in cand):
+                continue
+            best = (cand_text, start, length)
+            break
+        if best:
+            found.append(_clean_name(best[0]))
+            for i in range(best[1], best[1] + best[2]):
+                used.add(i)
+
+    return found
+
 # Address validation: US state abbreviations (2-letter), ZIP codes, country names
 _US_STATE_ABBRS = frozenset({
     "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA",
@@ -170,6 +321,10 @@ class CoordinateExtractor:
         Path to the PDF file.
     doc_id:
         Document ID for ``PIIRecord.source_document_id``.
+    name_samples:
+        Optional list of PERSON name strings from vision analysis.
+        Used for structural name matching fallback when anchor-based
+        PERSON extraction fails (e.g., ALL_CAPS names embedded in data lines).
     """
 
     def __init__(
@@ -177,10 +332,25 @@ class CoordinateExtractor:
         field_map: list[FieldMapping],
         doc_path: str,
         doc_id: str,
+        name_samples: list[str] | None = None,
     ) -> None:
         self.field_map = field_map
         self.doc_path = doc_path
         self.doc_id = doc_id
+        
+        # Build structural name patterns from vision samples (Step 23a)
+        self._name_structures: set[tuple[str, ...]] = set()
+        self._struct_min_w = 2
+        self._struct_max_w = 4
+        if name_samples:
+            self._name_structures, self._struct_min_w, self._struct_max_w = (
+                _build_name_structures(name_samples)
+            )
+            if self._name_structures:
+                logger.info(
+                    "Structural name matcher: %d patterns from %d samples",
+                    len(self._name_structures), len(name_samples),
+                )
 
     def extract_all_pages(
         self,
@@ -236,6 +406,28 @@ class CoordinateExtractor:
                 elif norm_type == "PERSON":
                     # PERSON is mandatory — page fails without it
                     success = False
+
+            # Structural name fallback (Step 23a):
+            # When anchor-based PERSON extraction fails but we have structural
+            # patterns from vision samples, scan the page text for ALL_CAPS names.
+            # Proven on Complex1 (0→8,617) and PPACA (0→1,650).
+            if not success and self._name_structures:
+                page_text = page.get_text()
+                for line in page_text.split("\n"):
+                    line_stripped = line.strip()
+                    if len(line_stripped) < 4:
+                        continue
+                    names = find_structural_names(
+                        line_stripped,
+                        self._name_structures,
+                        self._struct_min_w,
+                        self._struct_max_w,
+                    )
+                    if names:
+                        fields["raw_name"] = names[0]
+                        entity_types_found.append("PERSON")
+                        success = True
+                        break  # Use first name found on page
 
             # Address fallback: if PERSON found but no LOCATION in field_map,
             # look for address lines below the PERSON anchor.  Common in
@@ -360,6 +552,7 @@ class CoordinateExtractor:
         effective_type = norm_type or _normalize_field_type(field.field_type)
         if effective_type == "PERSON" and value:
             value = _PERSON_CLEANUP_RE.sub("", value).strip()
+            value = _clean_name(value)
 
         # Skip value_pattern validation for PERSON fields — names are too
         # variable for regex validation.

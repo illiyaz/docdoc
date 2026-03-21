@@ -629,17 +629,25 @@ def analyze_generator(
 
                 vision_client = OllamaClient(db_session=db)
                 vision_model_override = None
+                vision_fallback_model = None
 
                 # Check per-protocol vision model override
                 if protocol_config and isinstance(protocol_config, dict):
                     vision_model_override = protocol_config.get("vision_model")
+                    vision_fallback_model = protocol_config.get("vision_fallback_model")
                 if not vision_model_override:
                     base_key = body.protocol_id.lower().replace("-", "_").replace(" ", "_")
                     if base_key in PROTOCOL_LLM_CONFIG:
                         vision_model_override = PROTOCOL_LLM_CONFIG[base_key].get("vision_model")
+                        if not vision_fallback_model:
+                            vision_fallback_model = PROTOCOL_LLM_CONFIG[base_key].get("vision_fallback_model")
 
                 if vision_client.is_vision_available(model_override=vision_model_override):
-                    router = VisionRouter(vision_client, vision_model=vision_model_override)
+                    router = VisionRouter(
+                        vision_client,
+                        vision_model=vision_model_override,
+                        fallback_model=vision_fallback_model,
+                    )
 
                     yield _sse({
                         "stage": "vision_routing", "status": "running",
@@ -722,8 +730,6 @@ def analyze_generator(
                                 "pii_field_count": len(routing.pii_fields),
                                 "records_per_page": routing.records_per_page,
                                 "cross_page_data": routing.cross_page_data,
-                                "pii_fields": routing.pii_fields[:5],  # store first 5 for debugging
-                                "raw_response": routing.raw_response[:1000] if routing.raw_response else "",
                             }
                             if field_map:
                                 doc_meta["vision_field_map"] = [
@@ -1776,6 +1782,7 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                             )
 
                             # Post-extraction verification (Step 22d)
+                            # Uses both count-based AND coordinate-based text audit
                             try:
                                 from app.pipeline.extraction_verifier import ExtractionVerifier
                                 verifier = ExtractionVerifier()
@@ -1788,6 +1795,39 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                                     total_pages=total_pg,
                                     field_map=effective_field_map,
                                 )
+                                
+                                # Coordinate-based text audit: verify values exist in source
+                                # Builds page_records dict from PIIRecords for the verifier
+                                if doc.source_path and records:
+                                    page_recs_for_audit: dict[int, list[dict]] = {}
+                                    for rec in records:
+                                        pg = int(rec.page_range) - 1 if rec.page_range and rec.page_range.isdigit() else -1
+                                        if pg < 0:
+                                            continue
+                                        rec_dict: dict[str, str] = {}
+                                        if rec.raw_name: rec_dict["PERSON"] = rec.raw_name
+                                        if rec.raw_government_id: rec_dict["US_SSN"] = rec.raw_government_id
+                                        if rec.raw_dob: rec_dict["DATE_OF_BIRTH"] = rec.raw_dob
+                                        if rec.raw_email: rec_dict["EMAIL_ADDRESS"] = rec.raw_email
+                                        if rec.raw_phone: rec_dict["PHONE_NUMBER"] = rec.raw_phone
+                                        if rec_dict:
+                                            page_recs_for_audit.setdefault(pg, []).append(rec_dict)
+                                    
+                                    if page_recs_for_audit:
+                                        coord_audit = verifier.verify_by_coordinates(
+                                            doc.source_path, page_recs_for_audit, sample_size=10,
+                                        )
+                                        verification.audit_status = coord_audit.audit_status
+                                        verification.audit_confidence = coord_audit.audit_confidence
+                                        verification.audit_consistency = coord_audit.audit_consistency
+                                        verification.pages_audited = coord_audit.pages_audited
+                                        # Update summary with audit results
+                                        verification.summary += f"\n{coord_audit.summary}"
+                                        logger.info(
+                                            "Coordinate audit for %s: %s (%d%% confidence)",
+                                            doc.file_name, coord_audit.audit_status, coord_audit.audit_confidence,
+                                        )
+                                
                                 logger.info("Verification: %s", verification.summary)
                                 _update_extraction_progress(
                                     db, run,
@@ -1814,15 +1854,14 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                         )
 
                 # --- Path 1: Vision direct (small docs or scanned) ---
-                # Only use vision when routing recommends it, or when no routing exists.
-                # Skip if routing explicitly recommends "presidio" (too many pages for vision).
+                # Respects vision routing: if recommended_path is "vision_direct",
+                # or if no records yet and vision is available.
                 if (
                     not records
                     and settings.use_vision_extraction
                     and settings.llm_assist_enabled
                     and doc.source_path
                     and (doc.file_type or "").lower() in ("pdf", ".pdf", "application/pdf")
-                    and recommended_path != "presidio"
                 ):
                     try:
                         from app.llm.client import OllamaClient

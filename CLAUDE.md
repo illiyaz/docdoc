@@ -63,9 +63,28 @@ LLM-backed reasoning only in Phase 4+, gated behind `llm_assist_enabled: false`.
 |---|---|---|
 | Workflow orchestration | **Prefect (self-hosted)** | LangGraph, CrewAI, AutoGen, Airflow |
 | PDF engine | **PyMuPDF (fitz)** | pdfplumber, PyPDF2 |
-| OCR | **PaddleOCR** | Tesseract |
-| Multi-format parsing | **Apache Tika (self-hosted)** | Cloud-based parsers |
+| OCR | **Tesseract** (proven) + **PaddleOCR** (original) | Cloud OCR |
+| Multi-format parsing | **Native readers** (proven) + **Apache Tika (self-hosted)** | Cloud-based parsers |
 | Word documents | **python-docx** | — |
+| Vision models | **Ollama** (qwen2.5vl:32b primary, llama3.2-vision fallback) | Cloud vision APIs |
+
+### Multi-format dependencies (proven in Step 23)
+
+| Format | Library |
+|---|---|
+| XLSX/XLSM | openpyxl |
+| XLS (legacy) | xlrd |
+| XLSB (binary) | pyxlsb |
+| DOCX | python-docx |
+| DOC (legacy) | antiword / libreoffice |
+| MSG | extract-msg |
+| HEIC/HEIF | pillow-heif + Pillow |
+| Images (OCR) | pytesseract + Pillow |
+| DBF | dbfread |
+| MDB/ACCDB | mdb-tools (system) |
+| SQLite | stdlib sqlite3 |
+| PST | readpst (system) |
+| 7z | py7zr |
 
 ### PII detection & NLP
 
@@ -343,6 +362,29 @@ These are detailed in [docs/SCHEMA.md](docs/SCHEMA.md). Summary:
 | 20. Vision-First Extraction Architecture | COMPLETE | Vision-language model as primary extractor. VisionDocumentExtractor, PDF page renderer, instance boundary detector, OllamaClient.generate_with_images. 4 extraction strategies: template, table, vision page, Presidio fallback. Pattern validation. Per-protocol model config. Table extraction. Background extraction (SSE decoupling). Configurable dedup anchors. Batch reliability with retry/backoff. 79 new tests. |
 | 21. Coordinate-Based Extraction for Structured Documents | COMPLETE | For fixed-layout documents (accounting statements, payslips), LLM analyzes layout once → builds field map (anchor text + spatial relationships + coordinates) → Python extracts ALL pages using coordinate-based text extraction in seconds. Auditor reviews/edits field map before extraction. Reconciliation: failed pages sent to LLM fallback. ADDITIVE — existing LLM template/table/page paths unchanged. |
 | 22. Vision-Based Document Routing | COMPLETE | VisionRouter reads ONE page with vision model → determines structure type, PII fields, extraction path. FieldMapBuilder bridges vision PII to PyMuPDF coordinates. ExtractionVerifier validates post-extraction completeness. Frontend auditor panel shows vision routing results with field map editor. |
+| 23. Hybrid Pipeline & Multi-Format Orchestration | **PROVEN** | Standalone testing on 34 real documents: 78,471 records, 33/34 working. PDF hybrid (vision+template+coord), scanned PDF OCR, 47 file formats, coordinate-based audit. See PLAN.md Step 23 for integration plan. |
+
+**Step 23 — Standalone Scripts (proven, awaiting integration):**
+
+| Script | Purpose | Formats |
+|---|---|---|
+| `scripts/test_hybrid_pipeline.py` | PDF-specific hybrid extraction engine | Text + scanned PDFs |
+| `scripts/forentis_extract.py` | Unified orchestrator for all formats | 47 file extensions |
+
+**Key proven metrics (March 2026, 34 real breach documents):**
+- 78,471 PII records extracted across PDF, XLSX, XLS, MSG, HEIC, JPG
+- 33/34 files successful (1 genuinely empty)
+- Coordinate-based audit: 17/17 PASS on text PDFs
+- Speed: 30-45ms per page (vs 5+ seconds/page for LLM-per-page)
+- Dual-model fallback: qwen2.5vl primary → llama3.2-vision catches 500 errors
+- Scanned PDFs: vision OCR reads ID cards, receipts, dental statements
+- MSG emails: body text PII extraction (not just attachments)
+- HEIC photos: 2x upscale OCR for phone camera images
+
+**End-to-end workflow (see PLAN.md Step 23c):**
+```
+Folder → Discover → Route → Extract → Audit → Normalize → Dedup → Sample → Review → Notify
+```
 
 **Bugfix: Extraction preview multi-page read** — Preview now reads ALL pages of instance 0 (not just identity page). `build_preview_extraction_prompt()` asks LLM for per-field page numbers (`{value, page}` format). `_parse_preview_response()` parses LLM output with canonical field mapping. Instance count uses `find_instance_boundaries()` when marker set. 11 net new tests.
 
@@ -519,15 +561,6 @@ These are detailed in [docs/SCHEMA.md](docs/SCHEMA.md). Summary:
     - `_infer_value_pattern()` — regex patterns for SSN, phone, email, DOB, NI_NUMBER, GOVERNMENT_ID
     - No label = no field map entry (coordinate extraction needs anchors)
   - `tests/test_field_map_builder.py`: 40 tests (word search 10, spatial 4, skip pattern 3, value pattern 5, line count 3, bbox merge 2, build_one_field 10, integration 3)
-
-**Bugfix: FieldMapBuilder spatial relationship + duplicate field maps** ✅
-  - **Problem**: `_compute_spatial_relationship()` returned "lines_below_2" for same-line fields (e.g., "Client:" → "ADELINE CHANDLER"). Multi-line values pulled merged bbox center-y down. Duplicate values on page matched wrong instance.
-  - **Fix A — First-word y**: `_compute_spatial_relationship()` now uses the topmost value word's center-y (not merged bbox center) for y-comparison. Multi-line values no longer skew spatial detection.
-  - **Fix B — Near-label proximity**: `_find_text_in_words()` accepts `near_label` bbox parameter. When multiple matches exist (e.g., name appears twice on page), picks the match closest to the label. `_build_one_field()` passes label bbox to value search.
-  - **Fix C — LINE_TOLERANCE increased**: 5→8 points for robust same-line detection with slight y variations.
-  - **Fix D — Field map deduplication**: `build_field_map()` deduplicates by field_type (keeps first), drops entries with empty anchors.
-  - **Fix E — Tiny label fallback**: Labels with height <5pt use fallback line_height=15 instead of producing huge line counts.
-  - `tests/test_field_map_builder.py`: 52 tests (+12: spatial fix 8, near-label proximity 1, dedup 2, pick_nearest 1)
 
 **Step 22c (Run 3): Pipeline Wiring — Vision Routing Integration** ✅
   - `app/pipeline/two_phase.py`: Vision routing wired into both `analyze_generator()` and `run_extraction_background()`

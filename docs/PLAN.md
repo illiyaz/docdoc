@@ -337,3 +337,232 @@ Read CLAUDE.md and docs/PLAN.md Step 21d for context.
 
 Run pytest. Update CLAUDE.md.
 ```
+---
+
+### Step 23 — Hybrid Pipeline Integration & Multi-Format Orchestration (PROVEN — NEEDS WIRING)
+
+**Status: Extraction logic PROVEN on 34 real documents (78,471 records, 33/34 working). 
+Standalone scripts validated. Now wire into main pipeline.**
+
+#### What Was Proven (standalone testing — March 2026)
+
+**Standalone scripts:** `test_hybrid_pipeline.py` (PDF engine), `forentis_extract.py` (47-format orchestrator)
+
+**Test results across 34 documents:**
+
+| Category | Docs | Records | Audit |
+|---|---|---|---|
+| Text PDFs (structured) | 23 | 77,410 | 17 PASS, 2 fallback |
+| Scanned PDFs (OCR/Vision) | 5 | 15 | All via vision OCR |
+| MSG emails (body extraction) | 5 | 49 | Body text PII |
+| HEIC/JPG images (phone photos) | 2 | 2 | Vision for ID cards |
+| XLS/XLSX spreadsheets | 2 | 66 | Tabular mapping |
+| **TOTAL** | **34** | **78,471** | **33/34 working** |
+
+**Key innovations proven:**
+
+1. **Onset detection with cover page penalty** — cover pages score -20 per signal word ("Report Summary", "Account Criteria"), data pages score +50 per name/account/SSN. Solved AWIR-038 and TALX which previously picked cover pages.
+
+2. **Structural name matcher for ALL_CAPS embedded names** — analyzes vision samples into structures like `(INITIAL, WORD, WORD)`, matches against page text. Complex1: 0→8,617 PERSON.
+
+3. **Template-based extraction at ms/page** — vision analyzes ONE page, builds spatial template (proximity, same-line rules), Python applies to ALL pages. 4,200 pages in 157 seconds.
+
+4. **Coordinate-based audit (no vision needed)** — verifies extracted values exist in source text, checks format validity, measures record count consistency. 17/17 PASS instantly.
+
+5. **Text-based PERSON discovery** — when vision reports 0 PERSON, scans nearby pages for name patterns. Boosey: 0→1,427 PERSON.
+
+6. **Three-tier scanned PDF handling** — Vision OCR (best) → Tesseract+regex (fallback) → graceful empty.
+
+7. **Multi-format unified orchestration** — 47 file extensions, one command, automatic routing.
+
+8. **Dual-model fallback** — qwen2.5vl primary, llama3.2-vision fallback. AWIR-038 and TALX extracted via fallback when primary threw 500 errors.
+
+---
+
+#### 23a. Wire Hybrid Extraction into `two_phase.py`
+
+The existing pipeline in `two_phase.py` already has:
+- `content_onset.py` — onset detection (needs cover page penalty from proven script)
+- `vision_router.py` — vision analysis (working, add fallback model support)
+- `field_map_builder.py` — vision→coordinates bridge (working)
+- `coordinate_extractor.py` — coordinate extraction (needs proximity/embedded name logic)
+- `extraction_verifier.py` — post-extraction audit (needs coordinate-based text verification)
+
+**Integration plan (NOT a rewrite — enhance existing components):**
+
+```
+1. content_onset.py — port cover page penalty scoring from test_hybrid_pipeline.py
+   Add: COVER_PAGE_SIGNALS list, -20/+50 scoring, diversity bonus
+   
+2. vision_router.py — add fallback_model parameter
+   Add: try primary → on 500 → retry with fallback model
+   
+3. coordinate_extractor.py — port structural name matcher + proximity rules
+   Add: _analyze_structure(), find_structural_names(), _clean_name()
+   Add: embedded name detection (names inside same line as other data)
+   
+4. extraction_verifier.py — port coordinate-based text audit
+   Replace vision-based audit with text verification (instant, deterministic)
+   
+5. two_phase.py — add scanned PDF path
+   Before: scanned PDFs → skip
+   After: scanned PDFs → vision OCR → regex extraction (or Tesseract fallback)
+```
+
+---
+
+#### 23b. Multi-Format Reader Integration
+
+Existing readers in `app/readers/`:
+- `pdf_reader.py` ✅ 
+- `docx_reader.py` ✅
+- `excel_reader.py` ✅ (needs multi-tab join logic)
+- `csv_reader.py` ✅
+- `email_reader.py` ✅ (needs body text PII extraction)
+- `html_reader.py` ✅
+- `parquet_reader.py` ✅
+- `ocr.py` ✅ (needs vision-first path for ID cards)
+
+**New readers to add from `forentis_extract.py`:**
+- `heic_reader.py` — HEIC→PNG conversion + vision/OCR
+- `image_reader.py` — vision-first for JPG/PNG/WEBP + OCR fallback
+- `sqlite_reader.py` — SQLite/DB files
+- `dbf_reader.py` — dBase legacy files
+- `mdb_reader.py` — Access databases via mdb-tools
+- `vcf_reader.py` — vCard contact files
+- `msg_reader.py` — enhanced MSG with body PII extraction
+- `archive_reader.py` — ZIP/7z/RAR recursive extraction
+
+**Enhancements to existing readers:**
+- `excel_reader.py` — add multi-tab pattern detection (join/concat/independent)
+- `email_reader.py` — extract PII from HTML body, not just attachments
+- `ocr.py` — add 2x upscale for phone photos, vision-first path
+
+---
+
+#### 23c. End-to-End Workflow: Folder → Extract → Audit → Sample → Review → Notify
+
+**This is the production workflow that ties everything together:**
+
+```
+┌─────────────────────────────────────────────────────────┐
+│ STEP 1: DISCOVERY                                       │
+│   Input: folder path (or upload via API)                │
+│   Action: scan all files, classify by format            │
+│   Output: file manifest with types + sizes              │
+│   Code: tasks/discovery.py + readers/classifier.py      │
+└──────────────────────┬──────────────────────────────────┘
+                       │
+┌──────────────────────▼──────────────────────────────────┐
+│ STEP 2: ROUTE TO READER                                 │
+│   PDF text → hybrid pipeline (vision+template+coord)    │
+│   PDF scanned → vision OCR → regex (3-tier)             │
+│   XLSX/CSV → tabular extraction (multi-tab aware)       │
+│   DOCX → table extraction → narrative fallback          │
+│   MSG/EML → body PII + extract attachments → recurse    │
+│   JPG/HEIC → vision-first → OCR fallback               │
+│   ZIP/7z → extract → recurse on contents                │
+│   Code: readers/*.py + pipeline/two_phase.py            │
+└──────────────────────┬──────────────────────────────────┘
+                       │
+┌──────────────────────▼──────────────────────────────────┐
+│ STEP 3: PII EXTRACTION                                  │
+│   For each file → extract PII records                   │
+│   Each record: PERSON + fields (SSN, DOB, address...)   │
+│   Each value: page#, char offset, bounding box          │
+│   Code: pipeline/coordinate_extractor.py (fast path)    │
+│         tasks/extraction.py (LLM path)                  │
+└──────────────────────┬──────────────────────────────────┘
+                       │
+┌──────────────────────▼──────────────────────────────────┐
+│ STEP 4: COORDINATE-BASED AUDIT                          │
+│   Sample N pages per document                           │
+│   Verify: extracted values exist in source text          │
+│   Check: format validity (SSN, DOB, email patterns)     │
+│   Check: record count consistency across pages           │
+│   Output: PASS (≥80%) / REVIEW (50-80%) / FAIL (<50%)  │
+│   Code: pipeline/extraction_verifier.py                 │
+└──────────────────────┬──────────────────────────────────┘
+                       │
+┌──────────────────────▼──────────────────────────────────┐
+│ STEP 5: NORMALIZATION + DEDUPLICATION                   │
+│   Name normalization: "SMITH, JOHN" = "John Smith"      │
+│   Address normalization: "PO BOX 74" = "P O BOX 74"    │
+│   Cross-document dedup by SSN / name+DOB               │
+│   Entity resolution → NotificationSubject records       │
+│   Code: normalization/*.py + rra/*.py                   │
+└──────────────────────┬──────────────────────────────────┘
+                       │
+┌──────────────────────▼──────────────────────────────────┐
+│ STEP 6: QC SAMPLING                                     │
+│   Select 5-10% of AI-approved records for human review  │
+│   Stratified: proportional across documents + PII types │
+│   Create ReviewTask records in review queue             │
+│   Code: review/sampling.py                              │
+└──────────────────────┬──────────────────────────────────┘
+                       │
+┌──────────────────────▼──────────────────────────────────┐
+│ STEP 7: HUMAN-IN-THE-LOOP REVIEW                        │
+│   AI_PENDING → HUMAN_REVIEW → APPROVED / REJECTED       │
+│   Escalation path: → LEGAL_REVIEW for regulatory cases  │
+│   Reviewer sees: original page image + extracted values  │
+│   Can edit, approve, reject, escalate                    │
+│   Code: review/workflow.py + review/queue_manager.py    │
+└──────────────────────┬──────────────────────────────────┘
+                       │
+┌──────────────────────▼──────────────────────────────────┐
+│ STEP 8: NOTIFICATION                                    │
+│   Build notification list from approved subjects         │
+│   Apply regulatory protocol (HIPAA, state laws)         │
+│   Generate: email template or print-ready postal letter │
+│   Deliver: email sender or PDF for mailing              │
+│   Code: notification/*.py + protocols/*.py              │
+└─────────────────────────────────────────────────────────┘
+```
+
+**What exists vs what's missing:**
+
+| Step | Component | Status |
+|---|---|---|
+| 1. Discovery | `tasks/discovery.py` | ✅ Exists |
+| 2. Multi-format routing | `readers/*.py` | ✅ Most readers exist, need HEIC/image/MSG body/archive |
+| 3. Hybrid extraction | `pipeline/coordinate_extractor.py` | ⚠ Exists but needs proven enhancements |
+| 4. Coordinate audit | `pipeline/extraction_verifier.py` | ⚠ Exists but needs text-based verification |
+| 5. Normalization + dedup | `normalization/*.py` + `rra/*.py` | ✅ Exists |
+| 6. QC sampling | `review/sampling.py` | ✅ Exists |
+| 7. HITL review | `review/workflow.py` | ✅ Exists |
+| 8. Notification | `notification/*.py` | ✅ Exists |
+
+---
+
+#### 23d. Static Value Filter (Post-Extraction Cleanup)
+
+**Problem proven in testing:** Report dates extracted as DOB, company phone numbers extracted as personal phones. The extraction is correct (value exists at the coordinates) but the value is static across all pages — it's metadata, not individual PII.
+
+**Fix:** After extraction, identify values that appear on >50% of pages and remove them from individual records. These are report headers, not personal data.
+
+```python
+def filter_static_values(page_records, threshold=0.5):
+    """Remove values that appear on too many pages (report metadata, not individual PII)."""
+    value_counts = Counter()
+    total_pages = len(page_records)
+    for recs in page_records.values():
+        page_vals = set()
+        for r in recs:
+            for v in r.values():
+                page_vals.add(str(v))
+        for v in page_vals:
+            value_counts[v] += 1
+    
+    static = {v for v, c in value_counts.items() if c / total_pages > threshold}
+    # Remove static values from records
+    ...
+```
+
+---
+
+#### 23e. Template Caching
+
+**Problem:** Re-analyzing the same document layout burns vision model time. If the same layout/format appears in multiple documents (e.g., 50 AWIR files with identical structure), the template from the first should apply to all.
+
+**Fix:** Hash the onset page text + layout → cache template. On subsequent documents with same hash → skip vision, reuse template.

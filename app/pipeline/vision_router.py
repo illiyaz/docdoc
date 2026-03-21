@@ -53,6 +53,9 @@ class VisionRoutingResult:
     # Raw vision model response (for debugging)
     raw_response: str = ""
 
+    # Which model actually produced the response (primary or fallback)
+    model_used: str = ""
+
 
 # ------------------------------------------------------------------
 # Routing prompt
@@ -94,9 +97,11 @@ class VisionRouter:
         self,
         ollama_client: OllamaClient,
         vision_model: str | None = None,
+        fallback_model: str | None = None,
     ) -> None:
         self.client = ollama_client
         self.vision_model = vision_model
+        self.fallback_model = fallback_model
 
     def analyze_document(
         self,
@@ -109,6 +114,9 @@ class VisionRouter:
 
         Renders the onset page as an image, sends to the vision model,
         and parses the response to determine the best extraction path.
+        
+        If the primary model fails (500 error, timeout), automatically
+        retries with the fallback model before giving up.
         """
         # Render the onset page
         try:
@@ -126,21 +134,35 @@ class VisionRouter:
                 recommended_path="presidio",
             )
 
-        # Send to vision model
         prompt = self._build_routing_prompt(total_pages)
-        try:
-            response = self.client.generate_with_images(
-                prompt=prompt,
-                images=[image],
-                use_case="vision_routing",
-                model_override=self.vision_model,
-            )
-        except Exception:
-            logger.warning(
-                "Vision routing failed for %s",
-                doc_path,
-                exc_info=True,
-            )
+        
+        # Try primary model, then fallback on failure
+        response = None
+        model_used = self.vision_model
+        
+        for attempt_model in [self.vision_model, self.fallback_model]:
+            if attempt_model is None:
+                continue
+            try:
+                response = self.client.generate_with_images(
+                    prompt=prompt,
+                    images=[image],
+                    use_case="vision_routing",
+                    model_override=attempt_model,
+                )
+                model_used = attempt_model
+                break  # Success
+            except Exception:
+                logger.warning(
+                    "Vision routing failed with model %s for %s%s",
+                    attempt_model,
+                    doc_path,
+                    " — trying fallback" if attempt_model == self.vision_model and self.fallback_model else "",
+                    exc_info=True,
+                )
+                continue
+        
+        if response is None:
             return VisionRoutingResult(
                 structure_type="variable",
                 structure_confidence=0.0,
@@ -148,22 +170,11 @@ class VisionRouter:
             )
 
         # Parse the response and determine routing
-        logger.info(
-            "Vision routing raw response for %s (page %d): %.500s",
-            doc_path.rsplit("/", 1)[-1] if "/" in doc_path else doc_path,
-            onset_page,
-            response,
-        )
         result = self._parse_routing_response(response, total_pages)
         result.recommended_path = self._determine_path(
             result, total_pages, is_scanned,
         )
-        logger.info(
-            "Vision routing result: structure=%s, pii_fields=%d, recommended=%s",
-            result.structure_type,
-            len(result.pii_fields),
-            result.recommended_path,
-        )
+        result.model_used = model_used  # type: ignore[attr-defined]
         return result
 
     def _build_routing_prompt(self, total_pages: int) -> str:
@@ -312,54 +323,6 @@ def _parse_json(text: str) -> dict | None:
                 return data
         except json.JSONDecodeError:
             pass
-
-    # Fallback: vision models sometimes return bare "key": value pairs
-    # without outer braces (e.g., prose then "pii_fields": [...] then
-    # "structure_type": "fixed_single_page" etc.).  Wrap them in {}.
-    import re
-    bare_keys = re.findall(
-        r'"(pii_fields|structure_type|records_per_page|cross_page_data|pages_per_instance)"\s*:',
-        text,
-    )
-    if bare_keys:
-        # Extract each "key": value fragment and reassemble
-        parts: list[str] = []
-        for key in ("pii_fields", "structure_type", "records_per_page",
-                     "cross_page_data", "pages_per_instance"):
-            pattern = rf'"{key}"\s*:\s*'
-            match = re.search(pattern, text)
-            if not match:
-                continue
-            val_start = match.end()
-            # Determine value extent
-            if text[val_start:val_start + 1] == "[":
-                # Array — find matching ]
-                depth, i = 1, val_start + 1
-                while i < len(text) and depth > 0:
-                    if text[i] == "[":
-                        depth += 1
-                    elif text[i] == "]":
-                        depth -= 1
-                    i += 1
-                parts.append(f'"{key}": {text[val_start:i]}')
-            elif text[val_start:val_start + 1] == '"':
-                # String — find closing quote
-                end_q = text.index('"', val_start + 1)
-                parts.append(f'"{key}": {text[val_start:end_q + 1]}')
-            else:
-                # Number/bool — take until whitespace/comma/newline
-                m2 = re.match(r'(\S+)', text[val_start:])
-                if m2:
-                    parts.append(f'"{key}": {m2.group(1).rstrip(",")}')
-        if parts:
-            wrapped = "{" + ", ".join(parts) + "}"
-            try:
-                data = json.loads(wrapped)
-                if isinstance(data, dict):
-                    logger.info("Parsed vision response from bare key-value pairs")
-                    return data
-            except json.JSONDecodeError:
-                pass
 
     return None
 

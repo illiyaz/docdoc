@@ -87,8 +87,10 @@ def _register_defaults() -> None:
     _LAZY_REGISTRY["pdf"] = ("app.readers.pdf_reader", "PDFReader")
     _LAZY_REGISTRY["xlsx"] = ("app.readers.excel_reader", "ExcelReader")
     _LAZY_REGISTRY["xls"] = ("app.readers.excel_reader", "ExcelReader")
+    _LAZY_REGISTRY["xlsm"] = ("app.readers.excel_reader", "ExcelReader")
     _LAZY_REGISTRY["docx"] = ("app.readers.docx_reader", "DOCXReader")
     _LAZY_REGISTRY["csv"] = ("app.readers.csv_reader", "CSVReader")
+    _LAZY_REGISTRY["tsv"] = ("app.readers.csv_reader", "CSVReader")
     _LAZY_REGISTRY["html"] = ("app.readers.html_reader", "HTMLReader")
     _LAZY_REGISTRY["htm"] = ("app.readers.html_reader", "HTMLReader")
     _LAZY_REGISTRY["xml"] = ("app.readers.html_reader", "HTMLReader")
@@ -96,6 +98,10 @@ def _register_defaults() -> None:
     _LAZY_REGISTRY["msg"] = ("app.readers.email_reader", "EmailReader")
     _LAZY_REGISTRY["parquet"] = ("app.readers.parquet_reader", "ParquetReader")
     _LAZY_REGISTRY["avro"] = ("app.readers.parquet_reader", "ParquetReader")
+
+    # Image formats (Step 23b — vision-first extraction)
+    for img_ext in ("jpg", "jpeg", "png", "bmp", "webp", "gif", "heic", "heif", "tif", "tiff"):
+        _LAZY_REGISTRY[img_ext] = ("app.readers.image_reader", "ImageReader")
 
 
 _register_defaults()
