@@ -312,7 +312,7 @@ class TestAnalyzeDocument:
             "pages_per_instance": 1,
         })
 
-        router = VisionRouter(client)
+        router = VisionRouter(client, vision_model="llama3.2-vision:latest")
         with patch("app.pipeline.vision_router.render_page_to_image", return_value="base64img"):
             result = router.analyze_document(
                 doc_path="/tmp/test.pdf",
@@ -336,7 +336,7 @@ class TestAnalyzeDocument:
             "pages_per_instance": 3,
         })
 
-        router = VisionRouter(client)
+        router = VisionRouter(client, vision_model="llama3.2-vision:latest")
         with patch("app.pipeline.vision_router.render_page_to_image", return_value="base64img"):
             result = router.analyze_document(
                 doc_path="/tmp/test.pdf",

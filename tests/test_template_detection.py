@@ -299,7 +299,11 @@ class TestSchemaTemplateRoundTrip:
 
 class TestProtocolLLMConfig:
     def test_all_protocols_present(self):
-        expected = {"hipaa", "gdpr", "ccpa", "hitech", "ferpa", "state_breach_generic", "bipa", "dpdpa"}
+        expected = {
+            "hipaa", "gdpr", "gdpr_article_33", "ccpa", "hitech", "ferpa",
+            "state_breach", "state_breach_generic", "bipa", "pci_dss",
+            "glba", "dpdpa", "custom",
+        }
         assert set(PROTOCOL_LLM_CONFIG.keys()) == expected
 
     def test_each_protocol_has_required_keys(self):

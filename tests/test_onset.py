@@ -4,9 +4,11 @@ All tests use MagicMock document objects — no real PDF files required.
 MagicMock is used instead of Mock so that len() and attribute access work
 without extra configuration.
 
-Onset rule (CLAUDE.md § 2):
-  onset_page = max(0, first_signal_page - 1)
-  onset_page = 0 if no signals found
+Scoring-based onset detection:
+  Primary: score every page (cover penalties + data signals + diversity + volume).
+           Return the page with the highest score if score >= 20.
+  Fallback: legacy signal matching returns max(0, first_signal_page - 1).
+  Default: 0 if nothing found.
 """
 from __future__ import annotations
 
@@ -53,32 +55,33 @@ def test_no_signals_many_pages_returns_0():
 
 
 # ---------------------------------------------------------------------------
-# Signal position → onset = max(0, match_page - 1)
+# Signal position → scoring returns the highest-scoring page directly
 # ---------------------------------------------------------------------------
 
 def test_signal_on_page_0_returns_0():
-    # max(0, 0 - 1) = max(0, -1) = 0
+    # Page 0 scores highest (NAME_LABEL + volume) → returns 0
     assert find_data_onset(_doc(["Name: John Doe"])) == 0
 
 
-def test_signal_on_page_1_returns_0():
-    # max(0, 1 - 1) = max(0, 0) = 0
-    assert find_data_onset(_doc(["Cover", "Name: John Doe"])) == 0
+def test_signal_on_page_1_returns_1():
+    # Page 1 scores highest (NAME_LABEL) → returns 1 directly
+    assert find_data_onset(_doc(["Cover", "Name: John Doe"])) == 1
 
 
-def test_signal_on_page_2_returns_1():
-    # max(0, 2 - 1) = 1
-    assert find_data_onset(_doc(["Cover", "TOC", "Name: John Doe"])) == 1
+def test_signal_on_page_2_returns_2():
+    # Page 2 scores highest → returns 2 directly
+    assert find_data_onset(_doc(["Cover", "TOC", "Name: John Doe"])) == 2
 
 
-def test_signal_on_page_3_returns_2():
-    # max(0, 3 - 1) = 2
-    assert find_data_onset(_doc(["Cover", "TOC", "Legal", "Name: John Doe"])) == 2
+def test_signal_on_page_3_returns_3():
+    # Page 3 scores highest → returns 3 directly
+    assert find_data_onset(_doc(["Cover", "TOC", "Legal", "Name: John Doe"])) == 3
 
 
 def test_signal_on_last_page_of_five():
+    # Page 4 has SSN + SSN_LABEL → highest score → returns 4
     pages = ["p0", "p1", "p2", "p3", "SSN: 123-45-6789"]
-    assert find_data_onset(_doc(pages)) == 3
+    assert find_data_onset(_doc(pages)) == 4
 
 
 def test_onset_never_negative():
@@ -92,19 +95,23 @@ def test_onset_never_negative():
 # ---------------------------------------------------------------------------
 
 def test_keyword_name_triggers():
-    assert find_data_onset(_doc(["Cover", "TOC", "name: Alice Smith"])) == 1
+    # Scoring: NAME_LABEL on page 2 scores highest → returns 2
+    assert find_data_onset(_doc(["Cover", "TOC", "name: Alice Smith"])) == 2
 
 
 def test_keyword_ssn_word_triggers():
-    assert find_data_onset(_doc(["Cover", "ssn required"])) == 0
+    # Scoring: SSN_LABEL on page 1 scores highest → returns 1
+    assert find_data_onset(_doc(["Cover", "ssn required"])) == 1
 
 
 def test_keyword_dob_triggers():
-    assert find_data_onset(_doc(["Cover", "TOC", "dob: 1980-01-15"])) == 1
+    # Scoring: DOB_LABEL on page 2 scores highest → returns 2
+    assert find_data_onset(_doc(["Cover", "TOC", "dob: 1980-01-15"])) == 2
 
 
 def test_keyword_date_of_birth_triggers():
-    assert find_data_onset(_doc(["Cover", "date of birth: unknown"])) == 0
+    # Scoring: DOB_LABEL on page 1 scores highest → returns 1
+    assert find_data_onset(_doc(["Cover", "date of birth: unknown"])) == 1
 
 
 def test_keyword_address_triggers():
@@ -120,8 +127,8 @@ def test_keyword_policy_triggers():
 
 
 def test_ssn_numeric_pattern_triggers():
-    # \d{3}-\d{2}-\d{4}
-    assert find_data_onset(_doc(["Cover", "TOC", "ID: 123-45-6789"])) == 1
+    # SSN pattern on page 2 scores 30+2=32 → returns 2 directly
+    assert find_data_onset(_doc(["Cover", "TOC", "ID: 123-45-6789"])) == 2
 
 
 def test_id_number_pattern_triggers():
@@ -138,34 +145,38 @@ def test_id_number_long_digits_triggers():
 # ---------------------------------------------------------------------------
 
 def test_keyword_uppercase_triggers():
-    assert find_data_onset(_doc(["Cover", "TOC", "NAME: JOHN DOE"])) == 1
+    # NAME_LABEL on page 2 scores highest → returns 2
+    assert find_data_onset(_doc(["Cover", "TOC", "NAME: JOHN DOE"])) == 2
 
 
 def test_keyword_mixed_case_triggers():
-    assert find_data_onset(_doc(["Cover", "Date Of Birth: unknown"])) == 0
+    # DOB_LABEL on page 1 scores highest → returns 1
+    assert find_data_onset(_doc(["Cover", "Date Of Birth: unknown"])) == 1
 
 
 def test_keyword_all_caps_ssn_triggers():
-    assert find_data_onset(_doc(["Cover", "TOC", "SSN: provided above"])) == 1
+    # SSN_LABEL on page 2 scores highest → returns 2
+    assert find_data_onset(_doc(["Cover", "TOC", "SSN: provided above"])) == 2
 
 
 # ---------------------------------------------------------------------------
-# First match wins — subsequent pages are not scanned
+# Highest score wins — scoring scans all pages to find the best
 # ---------------------------------------------------------------------------
 
-def test_first_match_wins_returns_earliest():
-    # Signal on page 2 and page 4; should return based on page 2
+def test_highest_score_wins():
+    # Page 4 has SSN + SSN_LABEL (highest score) → returns page 4
     pages = ["p0", "p1", "Name: Alice", "p3", "SSN: 123-45-6789"]
-    assert find_data_onset(_doc(pages)) == 1
+    assert find_data_onset(_doc(pages)) == 4
 
 
-def test_only_pages_up_to_first_match_are_loaded():
-    """load_page must not be called for pages after the first match."""
+def test_all_pages_scanned_for_scoring():
+    """Scoring phase loads all pages (up to max_scan) to find the best."""
     pages = ["Cover", "TOC", "Name: Bob", "p3", "p4"]
     doc = _doc(pages)
     find_data_onset(doc)
     loaded = [c.args[0] for c in doc.load_page.call_args_list]
-    assert 3 not in loaded and 4 not in loaded
+    # All 5 pages loaded in the scoring loop
+    assert 0 in loaded and 1 in loaded and 2 in loaded and 3 in loaded and 4 in loaded
 
 
 # ---------------------------------------------------------------------------
