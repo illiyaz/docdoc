@@ -624,7 +624,7 @@ def analyze_generator(
         if settings.llm_assist_enabled and settings.use_vision_extraction:
             try:
                 from app.llm.client import OllamaClient
-                from app.pipeline.vision_router import VisionRouter
+                from app.pipeline.vision_router import VisionRouter, VisionRoutingResult
                 from app.pipeline.field_map_builder import FieldMapBuilder
 
                 vision_client = OllamaClient(db_session=db)
@@ -648,6 +648,9 @@ def analyze_generator(
                         vision_model=vision_model_override,
                         fallback_model=vision_fallback_model,
                     )
+
+                    from app.pipeline.template_cache import TemplateCache
+                    template_cache = TemplateCache()
 
                     yield _sse({
                         "stage": "vision_routing", "status": "running",
@@ -681,14 +684,52 @@ def analyze_generator(
                                 pass
 
                         try:
-                            routing = router.analyze_document(
-                                doc.source_path, onset_page=onset,
-                                total_pages=total_pages, is_scanned=is_scanned,
-                            )
+                            # --- Template cache (Step 23e): skip vision on repeat layouts ---
+                            cached_entry = template_cache.get(doc.source_path, onset)
+                            cache_hit = False
 
-                            # Build field map if coordinate path recommended
-                            field_map = None
-                            if routing.recommended_path == "coordinate":
+                            if cached_entry:
+                                # Reconstruct routing + field_map from cache
+                                rd = cached_entry.routing_dict
+                                routing = VisionRoutingResult(
+                                    structure_type=rd.get("structure_type", "variable"),
+                                    structure_confidence=rd.get("structure_confidence", 0.8),
+                                    pii_fields=rd.get("pii_fields", []),
+                                    records_per_page=rd.get("records_per_page", 1),
+                                    cross_page_data=rd.get("cross_page_data", False),
+                                    pages_per_instance=rd.get("pages_per_instance", 1),
+                                    recommended_path=rd.get("recommended_path", "presidio"),
+                                )
+                                field_map = None
+                                if cached_entry.field_map_dicts:
+                                    from app.structure.document_schema import FieldMapping
+                                    field_map = [
+                                        FieldMapping(
+                                            field_type=fm["field_type"],
+                                            anchor_text=fm["anchor_text"],
+                                            spatial_relationship=fm["spatial_relationship"],
+                                            value_pattern=fm.get("value_pattern"),
+                                            sample_bbox=fm.get("sample_bbox", []),
+                                            line_count=fm.get("line_count", 1),
+                                            skip_pattern=fm.get("skip_pattern"),
+                                        )
+                                        for fm in cached_entry.field_map_dicts
+                                    ]
+                                cache_hit = True
+                                logger.info(
+                                    "Template cache hit for %s — skipping vision call",
+                                    doc.file_name,
+                                )
+                            else:
+                                routing = router.analyze_document(
+                                    doc.source_path, onset_page=onset,
+                                    total_pages=total_pages, is_scanned=is_scanned,
+                                )
+
+                            # Build field map if coordinate path recommended (skip on cache hit)
+                            if not cache_hit:
+                                field_map = None
+                            if not cache_hit and routing.recommended_path == "coordinate":
                                 builder = FieldMapBuilder()
                                 field_map = builder.build_field_map(
                                     routing, doc.source_path, page_num=onset,
@@ -722,6 +763,42 @@ def analyze_generator(
                                         field_map = None
                                         routing.recommended_path = "vision_direct" if total_pages <= 5 else "presidio"
 
+                                # Store in template cache on successful vision routing
+                                try:
+                                    routing_dict = {
+                                        "structure_type": routing.structure_type,
+                                        "structure_confidence": routing.structure_confidence,
+                                        "pii_fields": routing.pii_fields,
+                                        "records_per_page": routing.records_per_page,
+                                        "cross_page_data": routing.cross_page_data,
+                                        "pages_per_instance": routing.pages_per_instance,
+                                        "recommended_path": routing.recommended_path,
+                                    }
+                                    fm_dicts = None
+                                    if field_map:
+                                        fm_dicts = [
+                                            {
+                                                "field_type": fm.field_type,
+                                                "anchor_text": fm.anchor_text,
+                                                "spatial_relationship": fm.spatial_relationship,
+                                                "value_pattern": fm.value_pattern,
+                                                "sample_bbox": fm.sample_bbox,
+                                                "line_count": fm.line_count,
+                                                "skip_pattern": fm.skip_pattern,
+                                            }
+                                            for fm in field_map
+                                        ]
+                                    name_samples = [
+                                        f.get("value", "")
+                                        for f in routing.pii_fields
+                                        if f.get("type") == "PERSON"
+                                    ]
+                                    template_cache.put(
+                                        doc.source_path, onset, routing_dict, fm_dicts, name_samples,
+                                    )
+                                except Exception:
+                                    logger.debug("Template cache store failed", exc_info=True)
+
                             # Persist routing result and field map to document metadata
                             doc_meta = doc.metadata_json or {}
                             doc_meta["vision_routing"] = {
@@ -730,6 +807,7 @@ def analyze_generator(
                                 "pii_field_count": len(routing.pii_fields),
                                 "records_per_page": routing.records_per_page,
                                 "cross_page_data": routing.cross_page_data,
+                                "template_cache_hit": cache_hit,
                             }
                             if field_map:
                                 doc_meta["vision_field_map"] = [
@@ -1772,6 +1850,38 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                                 effective_field_map, client,
                             )
                             coord_records.extend(recovered)
+
+                        # --- Static filter (Step 23d): remove report-wide values ---
+                        if coord_records and len(coord_records) >= 5:
+                            try:
+                                from app.pipeline.static_filter import filter_static_values
+
+                                page_recs_sf: dict[int, list[dict]] = {}
+                                for _idx, rec in enumerate(coord_records):
+                                    pg = int(rec.page_range) - 1 if rec.page_range and rec.page_range.isdigit() else 0
+                                    rec_dict: dict[str, str] = {}
+                                    if rec.raw_name: rec_dict["PERSON"] = rec.raw_name
+                                    if rec.raw_government_id: rec_dict["US_SSN"] = rec.raw_government_id
+                                    if rec.raw_dob: rec_dict["DATE_OF_BIRTH"] = rec.raw_dob
+                                    if rec.raw_email: rec_dict["EMAIL_ADDRESS"] = rec.raw_email
+                                    if rec.raw_phone: rec_dict["PHONE_NUMBER"] = rec.raw_phone
+                                    if rec_dict:
+                                        page_recs_sf.setdefault(pg, []).append(rec_dict)
+
+                                cleaned_sf, removed_static = filter_static_values(page_recs_sf)
+                                if removed_static:
+                                    logger.info("Static filter removed: %s", removed_static)
+                                    # Null out static values on the actual PIIRecord objects
+                                    _static_set = {(ft, v) for ft, vals in removed_static.items() for v in vals}
+                                    for rec in coord_records:
+                                        if rec.raw_dob and ("DATE_OF_BIRTH", rec.raw_dob) in _static_set:
+                                            rec.raw_dob = None
+                                        if rec.raw_phone and ("PHONE_NUMBER", rec.raw_phone) in _static_set:
+                                            rec.raw_phone = None
+                                        if rec.raw_email and ("EMAIL_ADDRESS", rec.raw_email) in _static_set:
+                                            rec.raw_email = None
+                            except Exception:
+                                logger.warning("Static filter failed", exc_info=True)
 
                         if coord_records:
                             records = coord_records
