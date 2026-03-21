@@ -22,7 +22,7 @@ from app.structure.document_schema import FieldMapping
 logger = logging.getLogger(__name__)
 
 # Vertical tolerance in points for same-line detection
-_LINE_TOLERANCE = 5
+_LINE_TOLERANCE = 8
 
 
 class FieldMapBuilder:
@@ -63,7 +63,21 @@ class FieldMapBuilder:
             if fm is not None:
                 field_maps.append(fm)
 
-        return field_maps
+        # Deduplicate: keep first entry per field type, drop empty anchors
+        seen_types: set[str] = set()
+        deduped: list[FieldMapping] = []
+        for fm in field_maps:
+            norm_type = fm.field_type.upper()
+            if not fm.anchor_text or not fm.anchor_text.strip():
+                logger.debug("Dropping field with empty anchor: %s", fm.field_type)
+                continue
+            if norm_type in seen_types:
+                logger.debug("Dropping duplicate field type: %s", fm.field_type)
+                continue
+            seen_types.add(norm_type)
+            deduped.append(fm)
+
+        return deduped
 
     # ------------------------------------------------------------------
     # Per-field builder
@@ -93,14 +107,15 @@ class FieldMapBuilder:
         if not label_words:
             return None
 
-        # Step 2: find the value in PyMuPDF words
-        value_words = self._find_text_in_words(words, value_text)
+        # Step 2: find the value NEAR the label (prefer closest match)
+        label_bbox = _merge_bboxes(label_words)
+        value_words = self._find_text_in_words(words, value_text, near_label=label_bbox)
 
         if not value_words:
             # Fuzzy fallback: search for first word of value
             first_word = value_text.split()[0] if value_text.strip() else ""
             if first_word and len(first_word) >= 3:
-                value_words = self._find_text_in_words(words, first_word)
+                value_words = self._find_text_in_words(words, first_word, near_label=label_bbox)
 
         if not value_words:
             logger.warning("Could not find '%s' in PyMuPDF words", value_text[:30])
@@ -141,6 +156,7 @@ class FieldMapBuilder:
     def _find_text_in_words(
         words: list[tuple],
         text: str,
+        near_label: tuple[float, float, float, float] | None = None,
     ) -> list[tuple] | None:
         """Find *text* in PyMuPDF word list.
 
@@ -150,6 +166,9 @@ class FieldMapBuilder:
         - Case-insensitive matching
         - Partial matching (first N words of a long value)
         - Compound PyMuPDF words (e.g. ``"STREET,11TH"`` matching ``"STREET"``)
+
+        If *near_label* is provided (label bbox), prefer the match closest
+        to the label when multiple matches exist.
         """
         if not text or not words:
             return None
@@ -158,17 +177,20 @@ class FieldMapBuilder:
         if not text_parts:
             return None
 
+        all_matches: list[list[tuple]] = []
+
         # --- single-word ---
         if len(text_parts) == 1:
             target = text_parts[0].lower().rstrip(":.,;")
             for w in words:
                 word_text = w[4].lower().rstrip(":.,;")
                 if word_text == target:
-                    return [w]
-                # Substring match for compound words (e.g. "STREET,11TH")
-                if target in word_text and len(target) >= 3:
-                    return [w]
-            return None
+                    all_matches.append([w])
+                elif target in word_text and len(target) >= 3:
+                    all_matches.append([w])
+            if not all_matches:
+                return None
+            return _pick_nearest(all_matches, near_label)
 
         # --- multi-word: find consecutive words on the same line ---
         target_parts = [p.lower().rstrip(":.,;") for p in text_parts]
@@ -197,7 +219,10 @@ class FieldMapBuilder:
                             result.append(words[j])
                         else:
                             break
-                    return result
+                    all_matches.append(result)
+            # If we found matches at this match_len, pick the best and stop
+            if all_matches:
+                return _pick_nearest(all_matches, near_label)
 
         return None
 
@@ -212,31 +237,48 @@ class FieldMapBuilder:
     ) -> tuple[str, int]:
         """Compute spatial relationship between label and value.
 
+        Uses the FIRST (topmost) value word for y-comparison so that
+        multi-line values don't skew the spatial relationship.
+
         Returns ``(relationship_string, line_count)``.
         """
         label_bbox = _merge_bboxes(label_words)
         value_bbox = _merge_bboxes(value_words)
 
         label_cy = (label_bbox[1] + label_bbox[3]) / 2
-        value_cy = (value_bbox[1] + value_bbox[3]) / 2
+
+        # Use the topmost value word for y-comparison (not merged bbox center).
+        # This prevents multi-line values from being classified as "lines_below"
+        # when the first line is actually on the same line as the label.
+        first_value_word = min(value_words, key=lambda w: w[1])
+        value_first_cy = (first_value_word[1] + first_value_word[3]) / 2
 
         line_height = (label_bbox[3] - label_bbox[1]) or 15
+        if line_height < 5:
+            line_height = 15  # fallback for tiny labels
 
-        y_diff = value_cy - label_cy
+        y_diff = value_first_cy - label_cy
+
+        logger.debug(
+            "Spatial: label bbox=%s (cy=%.1f), first value word='%s' at y=(%.1f,%.1f) cy=%.1f, y_diff=%.1f",
+            label_bbox, label_cy,
+            first_value_word[4], first_value_word[1], first_value_word[3],
+            value_first_cy, y_diff,
+        )
 
         # Same line
-        if abs(y_diff) < _LINE_TOLERANCE:
-            if value_bbox[0] > label_bbox[2]:
+        if abs(y_diff) <= _LINE_TOLERANCE:
+            if value_bbox[0] >= label_bbox[0]:
                 return ("same_line_right", 1)
             return ("same_line_right", 1)  # fallback for overlapping
 
         # Below
-        lines_below = round(y_diff / line_height)
-        if lines_below == 1:
-            return ("line_below", 1)
-        if lines_below > 1:
+        if y_diff > 0:
+            lines_below = max(1, round(y_diff / line_height))
+            if lines_below == 1:
+                return ("line_below", 1)
             value_line_count = _count_value_lines(value_words)
-            return (f"lines_below_{lines_below}", max(value_line_count, lines_below))
+            return (f"lines_below_{lines_below}", max(value_line_count, 1))
 
         # Above (unusual) — fallback
         return ("same_line_right", 1)
@@ -305,6 +347,26 @@ class FieldMapBuilder:
 # ------------------------------------------------------------------
 # Helpers
 # ------------------------------------------------------------------
+
+
+def _pick_nearest(
+    matches: list[list[tuple]],
+    near_label: tuple[float, float, float, float] | None,
+) -> list[tuple]:
+    """Pick the match closest to *near_label*, or the first match if no label."""
+    if len(matches) == 1 or near_label is None:
+        return matches[0]
+
+    label_cx = (near_label[0] + near_label[2]) / 2
+    label_cy = (near_label[1] + near_label[3]) / 2
+
+    def _distance(match: list[tuple]) -> float:
+        bbox = _merge_bboxes(match)
+        mx = (bbox[0] + bbox[2]) / 2
+        my = (bbox[1] + bbox[3]) / 2
+        return ((mx - label_cx) ** 2 + (my - label_cy) ** 2) ** 0.5
+
+    return min(matches, key=_distance)
 
 
 def _merge_bboxes(word_tuples: list[tuple]) -> tuple[float, float, float, float]:

@@ -1932,10 +1932,15 @@ function AnalysisReviewPanel({ jobId, onExtractionComplete }: { jobId: string; o
                   Tabular document. ~{doc.extraction_preview.records_per_page_estimate ?? "?"} individuals/page,
                   {" "}~{doc.extraction_preview.total_instances_estimate} total
                 </p>
-              ) : (
+              ) : doc.extraction_preview.pages ? (
                 <p className="text-[10px] text-indigo-600">
                   Instance 1 of ~{doc.extraction_preview.total_instances_estimate}
-                  {" "}(pages {doc.extraction_preview.pages}, {doc.extraction_preview.pages_per_instance} pages each)
+                  {" "}(pages {doc.extraction_preview.pages}, {doc.extraction_preview.pages_per_instance ?? 1} pages each)
+                </p>
+              ) : (
+                <p className="text-[10px] text-indigo-600">
+                  ~{doc.extraction_preview.total_instances_estimate ?? "?"} instances estimated
+                  {doc.extraction_preview.structure_type && ` (${doc.extraction_preview.structure_type})`}
                 </p>
               )}
 
@@ -1965,7 +1970,7 @@ function AnalysisReviewPanel({ jobId, onExtractionComplete }: { jobId: string; o
               )}
 
               {/* Fields found (non-tabular or tabular first row) */}
-              {!doc.extraction_preview.is_tabular && Object.keys(doc.extraction_preview.fields_found).length > 0 && (
+              {!doc.extraction_preview.is_tabular && doc.extraction_preview.fields_found && Object.keys(doc.extraction_preview.fields_found).length > 0 && (
                 <div className="space-y-0.5">
                   <p className="text-[10px] font-medium text-indigo-700 uppercase tracking-wide">Fields Found:</p>
                   <div className="flex flex-wrap gap-1">
@@ -1985,7 +1990,7 @@ function AnalysisReviewPanel({ jobId, onExtractionComplete }: { jobId: string; o
               )}
 
               {/* Fields missing */}
-              {!doc.extraction_preview.is_tabular && doc.extraction_preview.fields_missing.length > 0 && (
+              {!doc.extraction_preview.is_tabular && doc.extraction_preview.fields_missing && doc.extraction_preview.fields_missing.length > 0 && (
                 <div className="space-y-0.5">
                   <p className="text-[10px] font-medium text-indigo-700 uppercase tracking-wide">Not Found:</p>
                   <div className="flex flex-wrap gap-1">
@@ -1998,7 +2003,36 @@ function AnalysisReviewPanel({ jobId, onExtractionComplete }: { jobId: string; o
                 </div>
               )}
 
-              {Object.keys(doc.extraction_preview.fields_found).length === 0 && !doc.extraction_preview.sample_rows?.length && (
+              {/* Step 22 sample_values format */}
+              {doc.extraction_preview.sample_values && Object.keys(doc.extraction_preview.sample_values).length > 0 && (
+                <div className="space-y-0.5">
+                  <p className="text-[10px] font-medium text-indigo-700 uppercase tracking-wide">Sample Values:</p>
+                  <div className="flex flex-wrap gap-1">
+                    {Object.entries(doc.extraction_preview.sample_values).map(([field, value]) => (
+                      <span key={field} className="inline-flex items-center gap-1 text-xs bg-green-50 border border-green-200 rounded px-1.5 py-0.5">
+                        <span className="font-medium text-green-800">{field}</span>
+                        <span className="text-green-600 max-w-[120px] truncate" title={String(value)}>{String(value)}</span>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* PII fields list (Step 22 format) */}
+              {doc.extraction_preview.pii_fields && doc.extraction_preview.pii_fields.length > 0 && !doc.extraction_preview.fields_found && (
+                <div className="space-y-0.5">
+                  <p className="text-[10px] font-medium text-indigo-700 uppercase tracking-wide">PII Fields:</p>
+                  <div className="flex flex-wrap gap-1">
+                    {doc.extraction_preview.pii_fields.map((field: string) => (
+                      <span key={field} className="text-xs bg-blue-50 border border-blue-200 text-blue-700 rounded px-1.5 py-0.5">
+                        {field}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {(!doc.extraction_preview.fields_found || Object.keys(doc.extraction_preview.fields_found).length === 0) && !doc.extraction_preview.sample_rows?.length && !doc.extraction_preview.sample_values && !doc.extraction_preview.pii_fields?.length && (
                 <p className="text-xs text-red-600 font-medium">
                   No fields extracted — LLM extraction may not work for this document
                 </p>

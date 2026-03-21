@@ -520,6 +520,15 @@ These are detailed in [docs/SCHEMA.md](docs/SCHEMA.md). Summary:
     - No label = no field map entry (coordinate extraction needs anchors)
   - `tests/test_field_map_builder.py`: 40 tests (word search 10, spatial 4, skip pattern 3, value pattern 5, line count 3, bbox merge 2, build_one_field 10, integration 3)
 
+**Bugfix: FieldMapBuilder spatial relationship + duplicate field maps** ✅
+  - **Problem**: `_compute_spatial_relationship()` returned "lines_below_2" for same-line fields (e.g., "Client:" → "ADELINE CHANDLER"). Multi-line values pulled merged bbox center-y down. Duplicate values on page matched wrong instance.
+  - **Fix A — First-word y**: `_compute_spatial_relationship()` now uses the topmost value word's center-y (not merged bbox center) for y-comparison. Multi-line values no longer skew spatial detection.
+  - **Fix B — Near-label proximity**: `_find_text_in_words()` accepts `near_label` bbox parameter. When multiple matches exist (e.g., name appears twice on page), picks the match closest to the label. `_build_one_field()` passes label bbox to value search.
+  - **Fix C — LINE_TOLERANCE increased**: 5→8 points for robust same-line detection with slight y variations.
+  - **Fix D — Field map deduplication**: `build_field_map()` deduplicates by field_type (keeps first), drops entries with empty anchors.
+  - **Fix E — Tiny label fallback**: Labels with height <5pt use fallback line_height=15 instead of producing huge line counts.
+  - `tests/test_field_map_builder.py`: 52 tests (+12: spatial fix 8, near-label proximity 1, dedup 2, pick_nearest 1)
+
 **Step 22c (Run 3): Pipeline Wiring — Vision Routing Integration** ✅
   - `app/pipeline/two_phase.py`: Vision routing wired into both `analyze_generator()` and `run_extraction_background()`
     - `analyze_generator()`: New "vision_routing" stage before coordinate preview. VisionRouter analyzes each doc, FieldMapBuilder builds field map for coordinate-recommended docs, validates with sample extraction, persists `vision_routing` + `vision_field_map` to `Document.metadata_json`

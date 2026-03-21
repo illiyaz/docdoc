@@ -722,6 +722,8 @@ def analyze_generator(
                                 "pii_field_count": len(routing.pii_fields),
                                 "records_per_page": routing.records_per_page,
                                 "cross_page_data": routing.cross_page_data,
+                                "pii_fields": routing.pii_fields[:5],  # store first 5 for debugging
+                                "raw_response": routing.raw_response[:1000] if routing.raw_response else "",
                             }
                             if field_map:
                                 doc_meta["vision_field_map"] = [
@@ -1812,14 +1814,15 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                         )
 
                 # --- Path 1: Vision direct (small docs or scanned) ---
-                # Respects vision routing: if recommended_path is "vision_direct",
-                # or if no records yet and vision is available.
+                # Only use vision when routing recommends it, or when no routing exists.
+                # Skip if routing explicitly recommends "presidio" (too many pages for vision).
                 if (
                     not records
                     and settings.use_vision_extraction
                     and settings.llm_assist_enabled
                     and doc.source_path
                     and (doc.file_type or "").lower() in ("pdf", ".pdf", "application/pdf")
+                    and recommended_path != "presidio"
                 ):
                     try:
                         from app.llm.client import OllamaClient

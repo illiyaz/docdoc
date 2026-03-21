@@ -846,17 +846,22 @@ export interface AnalysisReviewDetail {
 }
 
 export interface ExtractionPreview {
-  preview_instance: number
-  pages: string
-  fields_found: Record<string, { value: string; page: number }>
-  fields_missing: string[]
-  pages_read: number[]
-  total_instances_estimate: number
-  extraction_method: string
-  pages_per_instance: number
+  preview_instance?: number
+  pages?: string
+  fields_found?: Record<string, { value: string; page: number }>
+  fields_missing?: string[]
+  pages_read?: number[]
+  total_instances_estimate?: number
+  extraction_method?: string
+  pages_per_instance?: number
   is_tabular?: boolean
   records_per_page_estimate?: number
   sample_rows?: Record<string, string>[]
+  // Step 22 vision routing preview format
+  structure_type?: string
+  pii_fields?: string[]
+  field_map_count?: number
+  sample_values?: Record<string, string>
 }
 
 export interface LayoutFieldMapping {

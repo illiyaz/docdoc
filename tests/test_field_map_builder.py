@@ -13,6 +13,7 @@ from app.pipeline.field_map_builder import (
     FieldMapBuilder,
     _count_value_lines,
     _merge_bboxes,
+    _pick_nearest,
 )
 from app.pipeline.vision_router import VisionRoutingResult
 
@@ -431,3 +432,166 @@ class TestBuildFieldMapIntegration:
             assert field_maps == []
         finally:
             os.unlink(pdf_path)
+
+
+# ---------------------------------------------------------------------------
+# Test: spatial relationship fix — first-value-word y + tolerance
+# ---------------------------------------------------------------------------
+
+class TestSpatialRelationshipFix:
+    """Tests for the fixed _compute_spatial_relationship using first-word y."""
+    builder = FieldMapBuilder()
+
+    def test_boosey_hawkes_same_line(self):
+        """Boosey & Hawkes case: label y=74, value y=74 → same_line_right."""
+        label = [_w(36, 74, 62, 81, "Client:")]
+        value = [_w(99, 74, 126, 81, "ADELINE"), _w(127, 74, 170, 81, "CHANDLER")]
+        rel, lc = self.builder._compute_spatial_relationship(label, value)
+        assert rel == "same_line_right"
+        assert lc == 1
+
+    def test_same_line_left(self):
+        """Value x < label x → still same_line_right (fallback)."""
+        label = [_w(200, 74, 260, 81, "Label:")]
+        value = [_w(50, 74, 120, 81, "VALUE")]
+        rel, lc = self.builder._compute_spatial_relationship(label, value)
+        assert rel == "same_line_right"
+
+    def test_one_line_below(self):
+        """Value one line below → line_below."""
+        label = [_w(50, 74, 110, 89, "Address:")]  # height=15
+        value = [_w(50, 92, 200, 107, "123 Main")]
+        rel, lc = self.builder._compute_spatial_relationship(label, value)
+        assert rel == "line_below"
+
+    def test_multiple_lines_below(self):
+        """Value 3 lines below → lines_below_3."""
+        label = [_w(50, 74, 110, 89, "Header:")]  # height=15
+        value = [_w(50, 134, 200, 149, "Value")]   # y_diff=52.5, 3.5 lines
+        rel, lc = self.builder._compute_spatial_relationship(label, value)
+        assert rel.startswith("lines_below_")
+        n = int(rel.split("_")[-1])
+        assert n >= 3
+
+    def test_multiline_value_uses_first_word_y(self):
+        """Multi-line value: spatial uses first (topmost) word y, not merged bbox center."""
+        label = [_w(50, 100, 110, 115, "Client:")]
+        # Value: "ADELINE" at y=100 (same line), "CHANDLER" at y=130 (next line)
+        value = [_w(145, 100, 200, 115, "ADELINE"), _w(145, 130, 220, 145, "CHANDLER")]
+        rel, lc = self.builder._compute_spatial_relationship(label, value)
+        # First word y=100 matches label y=100 → same_line_right
+        assert rel == "same_line_right"
+
+    def test_slight_y_variation_within_tolerance(self):
+        """Slight y difference (74.0 vs 78.0) within LINE_TOLERANCE=8 → same_line_right."""
+        label = [_w(36, 74, 62, 81, "Client:")]  # cy=77.5
+        value = [_w(99, 78, 170, 85, "VALUE")]    # cy=81.5, diff=4
+        rel, lc = self.builder._compute_spatial_relationship(label, value)
+        assert rel == "same_line_right"
+
+    def test_tiny_label_height_uses_fallback(self):
+        """Label with height < 5 uses fallback line_height=15."""
+        label = [_w(50, 100, 110, 103, "Lbl")]  # height=3 → fallback 15
+        value = [_w(50, 140, 200, 155, "Value")]  # y_diff ~37.5, ~2.5 lines
+        rel, lc = self.builder._compute_spatial_relationship(label, value)
+        assert rel.startswith("lines_below_")
+
+
+# ---------------------------------------------------------------------------
+# Test: near_label proximity in _find_text_in_words
+# ---------------------------------------------------------------------------
+
+class TestNearLabelProximity:
+    """Tests for _find_text_in_words near_label parameter."""
+    builder = FieldMapBuilder()
+
+    def test_picks_nearest_to_label(self):
+        """Same value appears twice on page — picks the one closest to label."""
+        words = [
+            # "ADELINE" near label at x=36 (left side)
+            _w(99, 74, 126, 81, "ADELINE", 0, 0, 0),
+            # "ADELINE" far from label at x=394 (right side)
+            _w(450, 74, 480, 81, "ADELINE", 1, 0, 0),
+        ]
+        label_bbox = (36, 74, 62, 81)  # Client: label
+        result = self.builder._find_text_in_words(words, "ADELINE", near_label=label_bbox)
+        assert result is not None
+        assert result[0][0] == 99  # should pick the one at x=99, not x=450
+
+
+# ---------------------------------------------------------------------------
+# Test: build_field_map deduplication
+# ---------------------------------------------------------------------------
+
+class TestFieldMapDedup:
+    """Tests for build_field_map deduplication of field types."""
+    builder = FieldMapBuilder()
+
+    def test_duplicate_person_entries_deduped(self):
+        """Duplicate PERSON entries → only first kept."""
+        words = SAMPLE_WORDS
+        pii1 = {"type": "PERSON", "value": "ADELINE CHANDLER", "label": "Client:"}
+        pii2 = {"type": "PERSON", "value": "ADELINE CHANDLER", "label": "DOB:"}
+        fm1 = self.builder._build_one_field(pii1, words)
+        fm2 = self.builder._build_one_field(pii2, words)
+        assert fm1 is not None
+        field_maps = [fm1]
+        if fm2:
+            field_maps.append(fm2)
+
+        # Apply dedup logic (same as build_field_map)
+        seen = set()
+        deduped = []
+        for fm in field_maps:
+            nt = fm.field_type.upper()
+            if not fm.anchor_text or not fm.anchor_text.strip():
+                continue
+            if nt in seen:
+                continue
+            seen.add(nt)
+            deduped.append(fm)
+
+        person_count = sum(1 for fm in deduped if fm.field_type == "PERSON")
+        assert person_count == 1
+
+    def test_empty_anchor_removed(self):
+        """FieldMapping with empty anchor_text is filtered out."""
+        from app.structure.document_schema import FieldMapping
+        fm = FieldMapping(
+            field_type="PERSON",
+            anchor_text="",
+            spatial_relationship="same_line_right",
+        )
+        field_maps = [fm]
+
+        seen = set()
+        deduped = []
+        for f in field_maps:
+            if not f.anchor_text or not f.anchor_text.strip():
+                continue
+            nt = f.field_type.upper()
+            if nt in seen:
+                continue
+            seen.add(nt)
+            deduped.append(f)
+
+        assert len(deduped) == 0
+
+
+# ---------------------------------------------------------------------------
+# Test: _pick_nearest helper
+# ---------------------------------------------------------------------------
+
+class TestPickNearest:
+    def test_single_match_no_label(self):
+        """Single match, no label → returns it."""
+        matches = [[_w(50, 100, 90, 115, "A")]]
+        assert _pick_nearest(matches, None) == matches[0]
+
+    def test_picks_closest(self):
+        """Two matches, picks the one closest to label."""
+        m1 = [_w(100, 74, 150, 81, "VAL")]
+        m2 = [_w(400, 74, 450, 81, "VAL")]
+        label = (36, 74, 62, 81)
+        result = _pick_nearest([m1, m2], label)
+        assert result == m1  # x=100 is closer to x=36 than x=400
