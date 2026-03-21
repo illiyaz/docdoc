@@ -1,0 +1,873 @@
+{
+  "results": [
+    {
+      "total_pages": 511,
+      "extraction_mode": "full_pipeline",
+      "total_records": 511,
+      "fields": {
+        "PERSON": 511,
+        "LOCATION": 484,
+        "CITY_STATE_ZIP": 425
+      },
+      "onset_page": 3,
+      "template_name_fmt": "all_caps",
+      "template_located": 1,
+      "audit_status": "PASS",
+      "audit_confidence": 100,
+      "vision_model": "llama3.2-vision:latest",
+      "filename": "AWIR-DOC.00000001.00000038.00000806.pdf",
+      "extension": ".pdf",
+      "size_bytes": 294406,
+      "time_seconds": 101.61
+    },
+    {
+      "total_pages": 1037,
+      "extraction_mode": "full_pipeline",
+      "total_records": 1037,
+      "fields": {
+        "PERSON": 1036,
+        "DATE_OF_BIRTH": 1037,
+        "US_SSN": 1036
+      },
+      "onset_page": 18,
+      "template_name_fmt": "last_first",
+      "template_located": 18,
+      "audit_status": "PASS",
+      "audit_confidence": 99,
+      "vision_model": "llama3.2-vision:latest",
+      "filename": "TPHS2_656_0000070715.pdf",
+      "extension": ".pdf",
+      "size_bytes": 326223,
+      "time_seconds": 291.2
+    },
+    {
+      "total_records": 6,
+      "fields": {
+        "PERSON": 5,
+        "PHONE_NUMBER": 2,
+        "EMAIL_ADDRESS": 2,
+        "LOCATION": 1
+      },
+      "extraction_mode": "email_body",
+      "metadata": {
+        "subject": "Fw: Drug-screen registration Ronald A. Bailey\u0000",
+        "sender": "Ann Maynard <amaynard@jswallacegroup.com>",
+        "date": "2022-11-08 00:46:07+05:30"
+      },
+      "body_chars": 3116,
+      "filename": "Vamp0000066511.msg",
+      "extension": ".msg",
+      "size_bytes": 114688,
+      "time_seconds": 0.01
+    },
+    {
+      "total_records": 21,
+      "fields": {
+        "PERSON": 21,
+        "PHONE_NUMBER": 2,
+        "EMAIL_ADDRESS": 5
+      },
+      "extraction_mode": "email_body",
+      "metadata": {
+        "subject": "Re: Alexandrea Malley - 02960-001016000\t60940144\tJOHNSTONE SUPPLY\u0000",
+        "sender": "Ann Maynard <amaynard@jswallacegroup.com>",
+        "date": "2022-11-08 01:46:41+05:30"
+      },
+      "body_chars": 2069,
+      "filename": "Vamp0000066652.msg",
+      "extension": ".msg",
+      "size_bytes": 109568,
+      "time_seconds": 0.0
+    },
+    {
+      "total_pages": 4,
+      "extraction_mode": "vision_ocr",
+      "total_records": 6,
+      "fields": {
+        "PERSON": 6,
+        "CITY_STATE_ZIP": 5,
+        "PHONE_NUMBER": 1,
+        "DATE_OF_BIRTH": 2,
+        "INTERVIEWED_BY": 1,
+        "ROLE": 1
+      },
+      "filename": "Vamp0000068240.pdf",
+      "extension": ".pdf",
+      "size_bytes": 5716383,
+      "time_seconds": 180.36
+    },
+    {
+      "total_pages": 5,
+      "extraction_mode": "full_pipeline",
+      "total_records": 5,
+      "fields": {
+        "PERSON": 5,
+        "PHONE_NUMBER": 1,
+        "EMAIL_ADDRESS": 2
+      },
+      "onset_page": 0,
+      "template_name_fmt": "first_last",
+      "template_located": 10,
+      "audit_status": "PASS",
+      "audit_confidence": 100,
+      "vision_model": "qwen2.5vl:32b",
+      "filename": "Vamp0000068247.pdf",
+      "extension": ".pdf",
+      "size_bytes": 64240,
+      "time_seconds": 85.82
+    },
+    {
+      "total_records": 1,
+      "fields": {
+        "US_SSN": 1
+      },
+      "ocr_chars": 396,
+      "method": "heic\u21922x_png\u2192tesseract",
+      "filename": "Vamp0000068253.heic",
+      "extension": ".heic",
+      "size_bytes": 1479450,
+      "time_seconds": 7.83
+    },
+    {
+      "total_records": 0,
+      "fields": {},
+      "ocr_chars": 219,
+      "method": "tesseract_ocr",
+      "filename": "Vamp0000068254.jpg",
+      "extension": ".jpg",
+      "size_bytes": 288063,
+      "time_seconds": 0.34
+    },
+    {
+      "total_records": 10,
+      "fields": {
+        "PERSON": 9,
+        "PHONE_NUMBER": 2,
+        "EMAIL_ADDRESS": 3,
+        "LOCATION": 1
+      },
+      "extraction_mode": "email_body",
+      "metadata": {
+        "subject": "Re: [EXTERNAL] Re: New Tax ID, Setup Information for BRI\u0000",
+        "sender": "Ann Maynard <amaynard@jswallacegroup.com>",
+        "date": "2022-09-20 03:34:11+05:30"
+      },
+      "body_chars": 7474,
+      "filename": "Vamp0000068289.msg",
+      "extension": ".msg",
+      "size_bytes": 171520,
+      "time_seconds": 0.01
+    },
+    {
+      "total_records": 6,
+      "fields": {
+        "PERSON": 5,
+        "PHONE_NUMBER": 2,
+        "EMAIL_ADDRESS": 2,
+        "LOCATION": 1
+      },
+      "extraction_mode": "email_body",
+      "metadata": {
+        "subject": "FW: Drug-screen registration Elanie Rodriguez\u0000",
+        "sender": "Ann Maynard <amaynard@jswallacegroup.com>",
+        "date": "2022-09-20 20:09:37+05:30"
+      },
+      "body_chars": 3475,
+      "filename": "Vamp0000068368.msg",
+      "extension": ".msg",
+      "size_bytes": 155648,
+      "time_seconds": 0.0
+    },
+    {
+      "total_records": 6,
+      "fields": {
+        "PERSON": 5,
+        "PHONE_NUMBER": 2,
+        "EMAIL_ADDRESS": 2
+      },
+      "extraction_mode": "email_body",
+      "metadata": {
+        "subject": "FW: Drug-screen registration Marcelo Figueroa\u0000",
+        "sender": "Ann Maynard <amaynard@jswallacegroup.com>",
+        "date": "2022-09-20 20:12:00+05:30"
+      },
+      "body_chars": 3030,
+      "filename": "Vamp0000068375.msg",
+      "extension": ".msg",
+      "size_bytes": 122368,
+      "time_seconds": 0.0
+    },
+    {
+      "total_records": 4,
+      "fields": {
+        "ACCOUNT_NUMBER": 4
+      },
+      "filename": "Vamp0000068722.xls",
+      "extension": ".xls",
+      "size_bytes": 207872,
+      "time_seconds": 0.01
+    },
+    {
+      "total_records": 62,
+      "fields": {
+        "PERSON": 62,
+        "EMAIL_ADDRESS": 3
+      },
+      "sheets": [
+        {
+          "sheet": "Sheet1",
+          "columns_mapped": {
+            "PERSON": "Employee Name:____________________",
+            "EMAIL_ADDRESS": "Personal Email:__________________________"
+          },
+          "fields": {
+            "PERSON": 62,
+            "EMAIL_ADDRESS": 3
+          },
+          "total_records": 62
+        }
+      ],
+      "filename": "Vamp0000069297.xlsx",
+      "extension": ".xlsx",
+      "size_bytes": 19411,
+      "time_seconds": 0.01
+    },
+    {
+      "total_pages": 1,
+      "extraction_mode": "vision_ocr",
+      "total_records": 2,
+      "fields": {
+        "PERSON": 2,
+        "LOCATION": 1,
+        "CITY_STATE_ZIP": 1,
+        "PHONE_NUMBER": 1,
+        "ACCOUNT_NUMBER": 1,
+        "GOVERNMENT_ID": 1,
+        "ROLE": 1
+      },
+      "filename": "Vamp0000071981.pdf",
+      "extension": ".pdf",
+      "size_bytes": 952952,
+      "time_seconds": 46.02
+    },
+    {
+      "total_pages": 1,
+      "extraction_mode": "vision_ocr",
+      "total_records": 2,
+      "fields": {
+        "PERSON": 2,
+        "LOCATION": 2,
+        "CITY_STATE_ZIP": 2,
+        "GOVERNMENT_ID": 2,
+        "ACCOUNT_NUMBER": 1
+      },
+      "filename": "Vamp0000071987.pdf",
+      "extension": ".pdf",
+      "size_bytes": 840817,
+      "time_seconds": 53.92
+    },
+    {
+      "total_pages": 17,
+      "extraction_mode": "quick_regex",
+      "total_records": 0,
+      "filename": "Vamp0000072380.pdf",
+      "extension": ".pdf",
+      "size_bytes": 83308,
+      "time_seconds": 39.79
+    },
+    {
+      "total_pages": 3,
+      "extraction_mode": "vision_ocr",
+      "total_records": 5,
+      "fields": {
+        "PERSON": 5,
+        "PHONE_NUMBER": 3,
+        "LOCATION": 3,
+        "CITY_STATE_ZIP": 3,
+        "DATE_OF_BIRTH": 1
+      },
+      "filename": "Vamp0000074646.pdf",
+      "extension": ".pdf",
+      "size_bytes": 833880,
+      "time_seconds": 129.55
+    }
+  ],
+  "total_records": 1684,
+  "records_sample": [
+    {
+      "PERSON": "MICHELLE S ABRAM",
+      "LOCATION": "16061 EAST HIGH ST",
+      "CITY_STATE_ZIP": "MIDDLEFIELD, OH 44062-1104",
+      "_source_page": 2
+    },
+    {
+      "PERSON": "DONNA R ADCOCK",
+      "_source_page": 2
+    },
+    {
+      "PERSON": "GLENN E AIDT",
+      "LOCATION": "5912 ROUNDSTONE PLACE",
+      "CITY_STATE_ZIP": "CHARDON, OH 44024-1300",
+      "_source_page": 2
+    },
+    {
+      "PERSON": "DOUGLAS J ALVORD",
+      "LOCATION": "1112 ELM",
+      "CITY_STATE_ZIP": "EAST CLARIDON, OH 44033-0074",
+      "_source_page": 2
+    },
+    {
+      "PERSON": "ROBERT A ALVORD",
+      "LOCATION": "8387 FAIRFAX DR",
+      "CITY_STATE_ZIP": "MENTOR, OH 44060-3837",
+      "_source_page": 2
+    },
+    {
+      "PERSON": "MICHELE AMATO",
+      "LOCATION": "1320 WADSWORTH RD",
+      "CITY_STATE_ZIP": "MEDINA, OH 44256-3254",
+      "_source_page": 2
+    },
+    {
+      "PERSON": "WILLIAM ANDERSON",
+      "LOCATION": "17685 OLD STATE RD",
+      "CITY_STATE_ZIP": "MARATHON, FL 33050-3185",
+      "_source_page": 2
+    },
+    {
+      "PERSON": "NICOLE ARGANTI",
+      "LOCATION": "PO BOX 1224",
+      "CITY_STATE_ZIP": "MIDDLEFIELD, OH 44062-1224",
+      "_source_page": 3
+    },
+    {
+      "PERSON": "GERALD R ARMSTRONG",
+      "_source_page": 3
+    },
+    {
+      "PERSON": "MELODY ASKEY",
+      "LOCATION": "P.O. BOX 295",
+      "CITY_STATE_ZIP": "MIDDLEFIELD, OH 44062-1224",
+      "_source_page": 3
+    },
+    {
+      "PERSON": "ALAN A ATWOOD",
+      "LOCATION": "8 LIGHTSTONE COURT",
+      "CITY_STATE_ZIP": "SAVANNAH   GA 31411-3075",
+      "_source_page": 3
+    },
+    {
+      "PERSON": "ALAN R ATWOOD",
+      "LOCATION": "8 LIGHTENSTONE CT",
+      "CITY_STATE_ZIP": "SAVANNAH GA 31411-3075",
+      "_source_page": 3
+    },
+    {
+      "PERSON": "FLORINDA R ATWOOD",
+      "LOCATION": "8 LIGHTENSTONE CT",
+      "CITY_STATE_ZIP": "CLEVELAND, OH 44101-4614",
+      "_source_page": 3
+    },
+    {
+      "PERSON": "MATTHEW C FREILING",
+      "LOCATION": "P O BOX 424",
+      "CITY_STATE_ZIP": "EAST CLARIDON, OH 44033-0424",
+      "_source_page": 3
+    },
+    {
+      "PERSON": "EARL HERR",
+      "_source_page": 3
+    },
+    {
+      "PERSON": "LORI ATWOOD",
+      "_source_page": 3
+    },
+    {
+      "PERSON": "DENNIS HERR",
+      "_source_page": 3
+    },
+    {
+      "PERSON": "KYLE T HERR",
+      "_source_page": 3
+    },
+    {
+      "PERSON": "RHNEE C KINCAID",
+      "LOCATION": "900 AQUA ISLE BLVD APT B39",
+      "CITY_STATE_ZIP": "LABELLE FL 33935",
+      "_source_page": 3
+    },
+    {
+      "PERSON": "CLIFFORD J BABCOCK",
+      "LOCATION": "11359 PEKIN RD",
+      "CITY_STATE_ZIP": "LABELLE FL 33935",
+      "_source_page": 3
+    },
+    {
+      "PERSON": "EDWARD BABCOCK",
+      "_source_page": 4
+    },
+    {
+      "PERSON": "CHRISTINA I BABCOCK",
+      "LOCATION": "11359 PEKIN RD",
+      "CITY_STATE_ZIP": "NEWBURY, OH 44065-9504",
+      "_source_page": 4
+    },
+    {
+      "PERSON": "EDWARD M BABCOCK",
+      "LOCATION": "11359 PEKIN RD",
+      "CITY_STATE_ZIP": "NEWBURY, OH 44065-9504",
+      "_source_page": 4
+    },
+    {
+      "PERSON": "JEREMY J BAILEY",
+      "LOCATION": "1830 RADIUS DR, APT 815",
+      "CITY_STATE_ZIP": "HOLLYWOOD, FL 33020-7714",
+      "_source_page": 4
+    },
+    {
+      "PERSON": "JAMES M BALL",
+      "LOCATION": "786 CRESTWAY DRIVE",
+      "CITY_STATE_ZIP": "COLUMBUS, OH 43235-3464",
+      "_source_page": 4
+    },
+    {
+      "PERSON": "DONNA BARNETT",
+      "LOCATION": "19065 NELSON LEDGE RD",
+      "_source_page": 4
+    },
+    {
+      "PERSON": "MARIA BASILE",
+      "LOCATION": "1796 LA ENTRADA DRIVE",
+      "CITY_STATE_ZIP": "NEWARK, OH 43058-3500",
+      "_source_page": 4
+    },
+    {
+      "PERSON": "DARLEEN K BEAVER",
+      "LOCATION": "12270 PRINCETON ST",
+      "CITY_STATE_ZIP": "NEWARK, OH 43058-3500",
+      "_source_page": 4
+    },
+    {
+      "PERSON": "DEBORAH BELL",
+      "LOCATION": "308 CRESTHAVEN DRVIE",
+      "CITY_STATE_ZIP": "NEWARK, OH 43058-3500",
+      "_source_page": 4
+    },
+    {
+      "PERSON": "JOANNA R BELL",
+      "LOCATION": "308 CRESTHAVEN DRIVE",
+      "CITY_STATE_ZIP": "GAFFNEY, SC 29341-1210",
+      "_source_page": 4
+    },
+    {
+      "PERSON": "JOEL R BELL",
+      "LOCATION": "308 CRESTHAVEN DRIVE",
+      "CITY_STATE_ZIP": "GAFFNEY, SC 29341-1210",
+      "_source_page": 4
+    },
+    {
+      "PERSON": "MATTHEW E BELLIN",
+      "LOCATION": "231 PAWNEE CT",
+      "CITY_STATE_ZIP": "GAFFNEY   SC 29341",
+      "_source_page": 4
+    },
+    {
+      "PERSON": "PHILIP J BIANCALANA",
+      "LOCATION": "2401 CREEKWOOD CT",
+      "CITY_STATE_ZIP": "GIRARD, OH 44420-3657",
+      "_source_page": 4
+    },
+    {
+      "PERSON": "ALLISON BLAIR",
+      "LOCATION": "5651 SW 57TH STREET",
+      "CITY_STATE_ZIP": "DAVIE, FL 33314-7420",
+      "_source_page": 5
+    },
+    {
+      "PERSON": "CHARLES J BLAIR SR",
+      "LOCATION": "13792 CARLTON ST",
+      "CITY_STATE_ZIP": "BURTON, OH 44021-9756",
+      "_source_page": 5
+    },
+    {
+      "PERSON": "FRANK E BLAIR",
+      "LOCATION": "17875 OWEN RD",
+      "CITY_STATE_ZIP": "MONTVILLE, OH 44064-8717",
+      "_source_page": 5
+    },
+    {
+      "PERSON": "EMILY E BLASKO",
+      "LOCATION": "4336 MALLARD AVE",
+      "CITY_STATE_ZIP": "STOW, OH 44224-2371",
+      "_source_page": 5
+    },
+    {
+      "PERSON": "KAREN BLUE",
+      "LOCATION": "15666 ELMWOOD ST",
+      "CITY_STATE_ZIP": "BURTON, OH 44021-9601",
+      "_source_page": 5
+    },
+    {
+      "PERSON": "CYNTHIA BOEHNLEIN",
+      "LOCATION": "P O BOX 3",
+      "CITY_STATE_ZIP": "MIDDLEFIELD, OH 44062-8203",
+      "_source_page": 5
+    },
+    {
+      "PERSON": "LORETTA BOERS",
+      "LOCATION": "731 LEHIGH AVENUE",
+      "CITY_STATE_ZIP": "STOW, OH 44224-2371",
+      "_source_page": 5
+    },
+    {
+      "PERSON": "EVELYN BOESON",
+      "LOCATION": "7507 GLENWOOD DR",
+      "CITY_STATE_ZIP": "CONNEAUT, OH 44030-3348",
+      "_source_page": 5
+    },
+    {
+      "PERSON": "CURT P BOGEN",
+      "LOCATION": "405 FAIRWAY DR NE",
+      "CITY_STATE_ZIP": "WARREN, OH 44483-5629",
+      "_source_page": 5
+    },
+    {
+      "PERSON": "PAMI B BOGEN",
+      "LOCATION": "405 FAIRWAY DR N E",
+      "CITY_STATE_ZIP": "WARREN, OH 44483-5629",
+      "_source_page": 5
+    },
+    {
+      "PERSON": "JANET BOLTON",
+      "LOCATION": "8925 N GIRDLE RD",
+      "CITY_STATE_ZIP": "MIDDLEFIELD, OH 44062-9574",
+      "_source_page": 5
+    },
+    {
+      "PERSON": "MARISA R BOLTON",
+      "LOCATION": "8925 NORTH GIRDLE RD",
+      "CITY_STATE_ZIP": "WARREN, OH 44483-5629",
+      "_source_page": 5
+    },
+    {
+      "PERSON": "MATTHEW C BOLTON",
+      "LOCATION": "8925 NORTH GIRDLE RD",
+      "CITY_STATE_ZIP": "MIDDLEFIELD, OH 44062-9574",
+      "_source_page": 5
+    },
+    {
+      "PERSON": "RANDY BOLTON",
+      "LOCATION": "8925 NORTH GIRDLE RD",
+      "CITY_STATE_ZIP": "MIDDLEFIELD, OH 44062-9574",
+      "_source_page": 5
+    },
+    {
+      "PERSON": "RICHARD BONNER",
+      "LOCATION": "PO BOX 1359",
+      "CITY_STATE_ZIP": "MIDDLEFIELD, OH 44062-1359",
+      "_source_page": 5
+    },
+    {
+      "PERSON": "RICHARD A BONNER",
+      "LOCATION": "PO BOX 1359",
+      "CITY_STATE_ZIP": "MIDDLEFIELD, OH 44062-1359",
+      "_source_page": 6
+    },
+    {
+      "PERSON": "BEATRICE BOSSOW",
+      "LOCATION": "7915 SR 305",
+      "CITY_STATE_ZIP": "GARRETTSVILLE, OH 44231-9698",
+      "_source_page": 6
+    },
+    {
+      "PERSON": "GARTH BOSSOW",
+      "LOCATION": "13609 WESTOVER DR",
+      "CITY_STATE_ZIP": "SARATOGA, CA 95070-5136",
+      "_source_page": 6
+    },
+    {
+      "PERSON": "GLENN BOSSOW",
+      "LOCATION": "27 VISTA MARIN",
+      "CITY_STATE_ZIP": "SAN RAFAEL CA 94903",
+      "_source_page": 6
+    },
+    {
+      "PERSON": "ROBERT BOSSOW",
+      "LOCATION": "8000 GOTHAM RD",
+      "_source_page": 6
+    },
+    {
+      "PERSON": "BRENDA L BOWDEN",
+      "LOCATION": "6455 ST RT 82",
+      "CITY_STATE_ZIP": "SARATOGA, CA 95070-5136",
+      "_source_page": 6
+    },
+    {
+      "PERSON": "KAREN D BRANHAM",
+      "LOCATION": "491 W LAKE ST",
+      "CITY_STATE_ZIP": "SAN RAFAEL CA 94903",
+      "_source_page": 6
+    },
+    {
+      "PERSON": "JEANNETTE BRILL",
+      "LOCATION": "16302 HUNTER PL",
+      "CITY_STATE_ZIP": "LEESBURG, VA 20176-7829",
+      "_source_page": 6
+    },
+    {
+      "PERSON": "BRIAN A BROCKWAY",
+      "LOCATION": "11993 CLARIDON TROY RD",
+      "CITY_STATE_ZIP": "RAVENNA, OH 44266-3648",
+      "_source_page": 6
+    },
+    {
+      "PERSON": "SARAH J BROOK",
+      "LOCATION": "346 E MAIN STREET",
+      "CITY_STATE_ZIP": "LABELLE, FL 33935-4304",
+      "_source_page": 6
+    },
+    {
+      "PERSON": "DENNIS J BROWN",
+      "LOCATION": "5619 DAYTON RD",
+      "CITY_STATE_ZIP": "LEESBURG, VA 20176-7829",
+      "_source_page": 6
+    },
+    {
+      "PERSON": "DOROTHY J BROWN",
+      "LOCATION": "5619 DAYTON ROAD",
+      "CITY_STATE_ZIP": "CHARDON, OH 44024-8441",
+      "_source_page": 6
+    },
+    {
+      "PERSON": "DOROTHY J BROWN",
+      "LOCATION": "206 WOODBRIDGE LANE",
+      "CITY_STATE_ZIP": "ORWELL, OH 44076-9431",
+      "_source_page": 6
+    },
+    {
+      "PERSON": "JAMES BROWN",
+      "LOCATION": "7499 STATE RTE 45",
+      "_source_page": 6
+    },
+    {
+      "PERSON": "JOHN A BYLER",
+      "LOCATION": "8642 GIRDLE RD",
+      "_source_page": 7
+    },
+    {
+      "PERSON": "THOMAS G CALDWELL",
+      "LOCATION": "2956 HUNTINGTON WAY",
+      "CITY_STATE_ZIP": "AURORA, OH 44202-8765",
+      "_source_page": 7
+    },
+    {
+      "PERSON": "ERICA CARR",
+      "_source_page": 7
+    },
+    {
+      "PERSON": "JEAN M CARTER",
+      "LOCATION": "11464 SOMERSET TR",
+      "CITY_STATE_ZIP": "AURORA, OH 44202-8765",
+      "_source_page": 7
+    },
+    {
+      "PERSON": "LINDA J CHANDLER",
+      "LOCATION": "P.O. BOX 506",
+      "CITY_STATE_ZIP": "LILBURN, GA 30047-7504",
+      "_source_page": 7
+    },
+    {
+      "PERSON": "DEBRA L CLARK",
+      "LOCATION": "560 HARTVILLE RD",
+      "CITY_STATE_ZIP": "ATWATER, OH 44201-9785",
+      "_source_page": 7
+    },
+    {
+      "PERSON": "DOUGLAS W CLARK",
+      "LOCATION": "15868 KENWOOD DR",
+      "CITY_STATE_ZIP": "MIDDLEFIELD, OH 44062-0194",
+      "_source_page": 7
+    },
+    {
+      "PERSON": "STEVEN CLARK",
+      "LOCATION": "10745 PEKIN RD",
+      "CITY_STATE_ZIP": "MIDDLEFIELD, OH 44062-0063",
+      "_source_page": 7
+    },
+    {
+      "PERSON": "STEVEN W CLARK",
+      "LOCATION": "10745 PEKIN RD",
+      "CITY_STATE_ZIP": "NEWBURY, OH 44065-9762",
+      "_source_page": 7
+    },
+    {
+      "PERSON": "SHARON L CLEMENTS",
+      "LOCATION": "3020 S DENMARK RD",
+      "CITY_STATE_ZIP": "MIDDLEFIELD, OH 44062-0194",
+      "_source_page": 7
+    },
+    {
+      "PERSON": "JUDITH COOK",
+      "LOCATION": "P O BOX 946",
+      "_source_page": 8
+    },
+    {
+      "PERSON": "LEWIS COOK",
+      "LOCATION": "4309 MILL POND CIRCLE",
+      "CITY_STATE_ZIP": "PERRY, OH 44081-9545",
+      "_source_page": 8
+    },
+    {
+      "PERSON": "LEWIS COOK",
+      "LOCATION": "4309 MILL POND CIRCLE",
+      "CITY_STATE_ZIP": "PERRY, OH 44081-9545",
+      "_source_page": 8
+    },
+    {
+      "PERSON": "DENISE M KATO",
+      "LOCATION": "4309 MILL POND CIRCLE",
+      "CITY_STATE_ZIP": "PERRY OH 44081",
+      "_source_page": 8
+    },
+    {
+      "PERSON": "BARBARA L SIMKOFF",
+      "LOCATION": "4309 MILL POND CIRCLE",
+      "CITY_STATE_ZIP": "PERRY OH 44081",
+      "_source_page": 8
+    },
+    {
+      "PERSON": "DAVID COOPER",
+      "LOCATION": "1034 EMERALD BAY RD #531",
+      "CITY_STATE_ZIP": "PERRY, OH 44081-9545",
+      "_source_page": 8
+    },
+    {
+      "PERSON": "MILTON L COOPER",
+      "LOCATION": "PO BOX 774603",
+      "CITY_STATE_ZIP": "PERRY OH 44081",
+      "_source_page": 8
+    },
+    {
+      "PERSON": "WHITNEY COREY",
+      "LOCATION": "15948 RAPIDS RD",
+      "CITY_STATE_ZIP": "BURTON, OH 44021-9781",
+      "_source_page": 8
+    },
+    {
+      "PERSON": "TIMOTHY F COURTAD",
+      "LOCATION": "503 FOX RUN TR",
+      "CITY_STATE_ZIP": "AURORA, OH 44202-9328",
+      "_source_page": 8
+    },
+    {
+      "PERSON": "JANET M COYNE",
+      "LOCATION": "11092 CARRIAGE HILL DRIVE",
+      "CITY_STATE_ZIP": "AURORA, OH 44202-9328",
+      "_source_page": 8
+    },
+    {
+      "PERSON": "RICHARD T COYNE",
+      "LOCATION": "11092 CARRIAGE HILL DRIVE",
+      "CITY_STATE_ZIP": "CHAGRIN FALLS, OH 44023-5521",
+      "_source_page": 9
+    },
+    {
+      "PERSON": "HERBERT E CRAIG III",
+      "_source_page": 9
+    },
+    {
+      "PERSON": "GRETCHEN S CRAM",
+      "LOCATION": "10767 LIBERTY ST",
+      "CITY_STATE_ZIP": "SCOTCH PLAINS, NJ 07076-2921",
+      "_source_page": 9
+    },
+    {
+      "PERSON": "CLAUDIA K CROOKSHANKS",
+      "LOCATION": "16525 ROCKCREEK RD",
+      "CITY_STATE_ZIP": "THOMPSON, OH 44086-8753",
+      "_source_page": 9
+    },
+    {
+      "PERSON": "BETH M CROUP",
+      "LOCATION": "13440 TAYLOR WELLS ROAD",
+      "CITY_STATE_ZIP": "MIDDLEFIELD, OH 44062-8290",
+      "_source_page": 9
+    },
+    {
+      "PERSON": "GAGE D CULLISON",
+      "LOCATION": "4738 ELM STREET",
+      "CITY_STATE_ZIP": "MEDINA, OH 44256-2048",
+      "_source_page": 9
+    },
+    {
+      "PERSON": "AMANDA CUMMINGS",
+      "LOCATION": "4763 DOTY EAST RD",
+      "CITY_STATE_ZIP": "SOUTHINGTON, OH 44470-9706",
+      "_source_page": 9
+    },
+    {
+      "PERSON": "LYNDSAY CUMMINS",
+      "LOCATION": "PO BOX 1162",
+      "CITY_STATE_ZIP": "MIDDLEFIELD, OH 44062-1162",
+      "_source_page": 9
+    },
+    {
+      "PERSON": "LYNETTE B DALLMAN",
+      "LOCATION": "2931 WOODS HOLLOW LANE",
+      "CITY_STATE_ZIP": "ALLENTOWN, PA 18103-9274",
+      "_source_page": 10
+    },
+    {
+      "PERSON": "ROBERT J DEIMLING",
+      "LOCATION": "6048 MAPLEWOOD RD",
+      "_source_page": 10
+    },
+    {
+      "PERSON": "ALBERTA DELIERE",
+      "LOCATION": "18333 CLARIDON TROY RD",
+      "CITY_STATE_ZIP": "HIRAM, OH 44234-9633",
+      "_source_page": 10
+    },
+    {
+      "PERSON": "KEVIN P DERRICK",
+      "LOCATION": "900 TOLLIS PKWY 503",
+      "_source_page": 10
+    },
+    {
+      "PERSON": "JANE A DEVOL",
+      "LOCATION": "4934 KINSMAN RD",
+      "CITY_STATE_ZIP": "HIRAM, OH 44234-9633",
+      "_source_page": 10
+    },
+    {
+      "PERSON": "AMANDA DIMEOLO",
+      "LOCATION": "7160 N KIPLING PL",
+      "CITY_STATE_ZIP": "PAINESVILLE, OH 44077-9545",
+      "_source_page": 10
+    },
+    {
+      "PERSON": "JAMIE H DLUGOZ",
+      "LOCATION": "92 DELLENBERGER AVENUE",
+      "CITY_STATE_ZIP": "MIDDLEFIELD, OH 44062-9512",
+      "_source_page": 10
+    },
+    {
+      "PERSON": "MARK J DOLEZAL",
+      "LOCATION": "PO BOX 794",
+      "CITY_STATE_ZIP": "BOARDMAN, OH 44512-5911",
+      "_source_page": 10
+    },
+    {
+      "PERSON": "PATRICIA S DOLEZAL",
+      "LOCATION": "2002 LIVING TRUST DTD 07 31 02",
+      "CITY_STATE_ZIP": "MIDDLEFIELD, OH 44062-0794",
+      "_source_page": 11
+    },
+    {
+      "PERSON": "WILLIAM L DOUGLASS",
+      "LOCATION": "286 BEELER DR",
+      "CITY_STATE_ZIP": "BEREA, OH 44017-1439",
+      "_source_page": 11
+    }
+  ]
+}

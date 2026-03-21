@@ -3,11 +3,11 @@ import { useQuery } from "@tanstack/react-query"
 import { useNavigate, Link } from "react-router-dom"
 import {
   Loader2, CheckCircle, Upload, FolderOpen, Server,
-  X, FileText, Circle, AlertCircle, FolderOpen as FolderIcon,
+  X, FileText, Circle, AlertCircle,
 } from "lucide-react"
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
 import { getProtocols, uploadFiles, submitJobStreaming, listProjects } from "@/api/client"
-import type { JobResult, UploadResult, PipelineProgress, ProjectSummary } from "@/api/client"
+import type { JobResult, UploadResult, PipelineProgress } from "@/api/client"
 import { JobIdSetterContext } from "@/App"
 
 const SUPPORTED_EXTENSIONS = new Set([

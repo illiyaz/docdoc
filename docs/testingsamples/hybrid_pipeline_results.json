@@ -1,0 +1,3701 @@
+{
+  "3046246": {
+    "filename": "3046246.pdf",
+    "total_pages": 158,
+    "pdf_type": "text",
+    "onset_page": 10,
+    "vision": {
+      "parsed": {
+        "pii_fields": [
+          {
+            "type": "PERSON",
+            "value": "Carrelas, Caleb",
+            "label": "Athlete Name",
+            "position": "top_left"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "05/06/2000",
+            "label": "Date of Birth",
+            "position": "top_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "Clark, Austin",
+            "label": "Athlete Name",
+            "position": "top_left"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "08/01/1999",
+            "label": "Date of Birth",
+            "position": "top_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "Cowdry, Joseph",
+            "label": "Athlete Name",
+            "position": "top_left"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "08/18/1993",
+            "label": "Date of Birth",
+            "position": "top_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "Greenwood, Steven",
+            "label": "Athlete Name",
+            "position": "top_left"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "06/03/1994",
+            "label": "Date of Birth",
+            "position": "top_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "Jilg, Victor",
+            "label": "Athlete Name",
+            "position": "top_left"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "09/10/1996",
+            "label": "Date of Birth",
+            "position": "top_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "Mansfield, Anique",
+            "label": "Athlete Name",
+            "position": "top_left"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "09/24/1994",
+            "label": "Date of Birth",
+            "position": "top_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "Minasse, Josiah",
+            "label": "Athlete Name",
+            "position": "top_left"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "04/05/2001",
+            "label": "Date of Birth",
+            "position": "top_left"
+          }
+        ],
+        "structure_type": "fixed_single_page",
+        "records_per_page": 7,
+        "cross_page_data": false,
+        "pages_per_instance": 1
+      },
+      "model_used": "qwen2.5vl:32b"
+    },
+    "template": {
+      "name_pattern": "[A-Z\u00c0-\u00d6\u00d8-\u00de][A-Z\u00c0-\u00d6\u00d8-\u00dea-z\u00e0-\u00f6\u00f8-\u00ff' -]{1,30},\\s*[A-Z\u00c0-\u00d6\u00d8-\u00de][A-Z\u00c0-\u00d6\u00d8-\u00dea-z\u00e0-\u00f6\u00f8-\u00ff .'-]+",
+      "name_fmt": "last_first",
+      "names_embedded": false,
+      "name_samples": [
+        "Carrelas, Caleb",
+        "Clark, Austin",
+        "Cowdry, Joseph",
+        "Greenwood, Steven",
+        "Jilg, Victor",
+        "Mansfield, Anique",
+        "Minasse, Josiah"
+      ],
+      "persons_found": 7,
+      "total_located": 14,
+      "rules": [
+        {
+          "type": "DATE_OF_BIRTH",
+          "fmt": "\\d{2}/\\d{2}/\\d{4}",
+          "prox": 800,
+          "same_line": false
+        }
+      ]
+    },
+    "extraction": {
+      "time_s": 1.22,
+      "ms_per_page": 7.7,
+      "content_pages": 158,
+      "pages_with_records": 158,
+      "total_records": 900,
+      "fields": {
+        "PERSON": 900,
+        "DATE_OF_BIRTH": 899
+      },
+      "static_filtered": 143
+    },
+    "audit": {
+      "status": "PASS",
+      "confidence": 100,
+      "avg_page_confidence": 100,
+      "consistency": 100,
+      "pages_audited": 5,
+      "per_page": [
+        {
+          "page": 1,
+          "confidence": 100,
+          "checks": 14,
+          "passed": 14,
+          "field_results": {
+            "PERSON": 7,
+            "DATE_OF_BIRTH": 7
+          },
+          "status": "PASS"
+        },
+        {
+          "page": 32,
+          "confidence": 100,
+          "checks": 12,
+          "passed": 12,
+          "field_results": {
+            "PERSON": 6,
+            "DATE_OF_BIRTH": 6
+          },
+          "status": "PASS"
+        },
+        {
+          "page": 63,
+          "confidence": 100,
+          "checks": 10,
+          "passed": 10,
+          "field_results": {
+            "PERSON": 5,
+            "DATE_OF_BIRTH": 5
+          },
+          "status": "PASS"
+        },
+        {
+          "page": 94,
+          "confidence": 100,
+          "checks": 12,
+          "passed": 12,
+          "field_results": {
+            "PERSON": 6,
+            "DATE_OF_BIRTH": 6
+          },
+          "status": "PASS"
+        },
+        {
+          "page": 125,
+          "confidence": 100,
+          "checks": 14,
+          "passed": 14,
+          "field_results": {
+            "PERSON": 7,
+            "DATE_OF_BIRTH": 7
+          },
+          "status": "PASS"
+        }
+      ]
+    }
+  },
+  "3666752": {
+    "filename": "3666752.pdf",
+    "total_pages": 595,
+    "pdf_type": "text",
+    "onset_page": 7,
+    "vision": {
+      "parsed": {
+        "pii_fields": [
+          {
+            "type": "PERSON",
+            "value": "ALEXANDER, JOSEPH",
+            "label": "Student Name",
+            "position": "top_left"
+          },
+          {
+            "type": "LOCATION",
+            "value": "6303 ST ALBION WAY APT L103 MOUNTLAKE TERRACE WA 98043",
+            "label": "Student Address",
+            "position": "top_left"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "01/21/1995",
+            "label": "Student Birth Date",
+            "position": "top_right"
+          },
+          {
+            "type": "PERSON",
+            "value": "ROBERT WEISS JOY WEISS",
+            "label": "First Family",
+            "position": "middle_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "ALEXANDER, RACHEL",
+            "label": "Student Name",
+            "position": "middle_left"
+          },
+          {
+            "type": "LOCATION",
+            "value": "943 ALDER ST EDMONDS WA 98020",
+            "label": "Student Address",
+            "position": "middle_left"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "05/24/1996",
+            "label": "Student Birth Date",
+            "position": "middle_right"
+          },
+          {
+            "type": "PERSON",
+            "value": "ROBYN ALEXANDER",
+            "label": "First Family",
+            "position": "middle_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "ALEXIOU, JAMES",
+            "label": "Student Name",
+            "position": "bottom_left"
+          },
+          {
+            "type": "LOCATION",
+            "value": "7916 196TH PL SW EDMONDS WA 98026",
+            "label": "Student Address",
+            "position": "bottom_left"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "02/24/1995",
+            "label": "Student Birth Date",
+            "position": "bottom_right"
+          },
+          {
+            "type": "PERSON",
+            "value": "THOMAS ALEXIOU",
+            "label": "First Family",
+            "position": "bottom_left"
+          }
+        ],
+        "structure_type": "fixed_single_page",
+        "records_per_page": 1,
+        "cross_page_data": false,
+        "pages_per_instance": 1
+      },
+      "model_used": "qwen2.5vl:32b"
+    },
+    "template": {
+      "name_pattern": "[A-Z\u00c0-\u00d6\u00d8-\u00de][A-Z\u00c0-\u00d6\u00d8-\u00dea-z\u00e0-\u00f6\u00f8-\u00ff' -]{1,30},\\s*[A-Z\u00c0-\u00d6\u00d8-\u00de][A-Z\u00c0-\u00d6\u00d8-\u00dea-z\u00e0-\u00f6\u00f8-\u00ff .'-]+",
+      "name_fmt": "last_first",
+      "names_embedded": false,
+      "name_samples": [
+        "ALEXANDER, JOSEPH",
+        "ROBERT WEISS JOY WEISS",
+        "ALEXANDER, RACHEL",
+        "ROBYN ALEXANDER",
+        "ALEXIOU, JAMES",
+        "THOMAS ALEXIOU"
+      ],
+      "persons_found": 5,
+      "total_located": 8,
+      "rules": [
+        {
+          "type": "DATE_OF_BIRTH",
+          "fmt": "\\d{2}/\\d{2}/\\d{4}",
+          "prox": 800,
+          "same_line": false
+        }
+      ]
+    },
+    "extraction": {
+      "time_s": 6.6,
+      "ms_per_page": 11.1,
+      "content_pages": 595,
+      "pages_with_records": 595,
+      "total_records": 1776,
+      "fields": {
+        "PERSON": 1776,
+        "DATE_OF_BIRTH": 1776,
+        "LOCATION": 300,
+        "CITY_STATE_ZIP": 300
+      }
+    },
+    "audit": {
+      "status": "PASS",
+      "confidence": 100,
+      "avg_page_confidence": 100,
+      "consistency": 100,
+      "pages_audited": 5,
+      "per_page": [
+        {
+          "page": 1,
+          "confidence": 100,
+          "checks": 6,
+          "passed": 6,
+          "field_results": {
+            "PERSON": 3,
+            "DATE_OF_BIRTH": 3
+          },
+          "status": "PASS"
+        },
+        {
+          "page": 120,
+          "confidence": 100,
+          "checks": 8,
+          "passed": 8,
+          "field_results": {
+            "PERSON": 3,
+            "DATE_OF_BIRTH": 3,
+            "LOCATION": 2
+          },
+          "status": "PASS"
+        },
+        {
+          "page": 239,
+          "confidence": 100,
+          "checks": 6,
+          "passed": 6,
+          "field_results": {
+            "PERSON": 3,
+            "DATE_OF_BIRTH": 3
+          },
+          "status": "PASS"
+        },
+        {
+          "page": 358,
+          "confidence": 100,
+          "checks": 7,
+          "passed": 7,
+          "field_results": {
+            "PERSON": 3,
+            "DATE_OF_BIRTH": 3,
+            "LOCATION": 1
+          },
+          "status": "PASS"
+        },
+        {
+          "page": 477,
+          "confidence": 100,
+          "checks": 6,
+          "passed": 6,
+          "field_results": {
+            "PERSON": 3,
+            "DATE_OF_BIRTH": 3
+          },
+          "status": "PASS"
+        }
+      ]
+    }
+  },
+  "3733050": {
+    "filename": "3733050.pdf",
+    "total_pages": 3063,
+    "pdf_type": "text",
+    "onset_page": 4,
+    "vision": {
+      "parsed": {
+        "pii_fields": [
+          {
+            "type": "PERSON",
+            "value": "Patrick M. Abrigo",
+            "label": "Student Name",
+            "position": "top_right"
+          },
+          {
+            "type": "PERSON",
+            "value": "Michael & Carolyn Abrigo",
+            "label": "Parent/Guardian Name",
+            "position": "top_left"
+          },
+          {
+            "type": "LOCATION",
+            "value": "6118 183RD PL SW, LYNNWOOD, WA 98037",
+            "label": "Parent/Guardian Address",
+            "position": "top_left"
+          },
+          {
+            "type": "LOCATION",
+            "value": "6002 168th St SW, Lynnwood, WA 98037",
+            "label": "School Address",
+            "position": "top_center"
+          },
+          {
+            "type": "PHONE_NUMBER",
+            "value": "425-431-6400",
+            "label": "School Phone Number",
+            "position": "top_center"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "2013",
+            "label": "Academic Year",
+            "position": "top_right"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "2012-13",
+            "label": "Semester",
+            "position": "top_right"
+          },
+          {
+            "type": "EMAIL_ADDRESS",
+            "value": "Skyward Family Access",
+            "label": "Online Access System",
+            "position": "middle_right"
+          }
+        ],
+        "structure_type": "fixed_single_page",
+        "records_per_page": 1,
+        "cross_page_data": false,
+        "pages_per_instance": 1
+      },
+      "model_used": "qwen2.5vl:32b"
+    },
+    "template": {
+      "name_pattern": "[A-Z\u00c0-\u00d6\u00d8-\u00de][a-z\u00e0-\u00f6\u00f8-\u00ff'-]+(?:[-\\s]+[A-Z\u00c0-\u00d6\u00d8-\u00de]\\.?)?(?:[-\\s]+[A-Z\u00c0-\u00d6\u00d8-\u00de][a-z\u00e0-\u00f6\u00f8-\u00ff'-]+)+(?:\\s+(?:Jr|Sr|II|III|IV|V|VI)\\.?)?",
+      "name_fmt": "first_last",
+      "names_embedded": false,
+      "name_samples": [
+        "Patrick M. Abrigo",
+        "Michael & Carolyn Abrigo"
+      ],
+      "persons_found": 2,
+      "total_located": 5,
+      "rules": [
+        {
+          "type": "EMAIL_ADDRESS",
+          "fmt": null,
+          "prox": 673,
+          "same_line": false
+        },
+        {
+          "type": "DATE_OF_BIRTH",
+          "fmt": "\\+?\\(?\\d[\\d\\s().+-]{6,}",
+          "prox": 632,
+          "same_line": false
+        },
+        {
+          "type": "PHONE_NUMBER",
+          "fmt": "\\d{3,}-\\d{3,}-\\d{4,}",
+          "prox": 331,
+          "same_line": false
+        }
+      ]
+    },
+    "extraction": {
+      "time_s": 60.81,
+      "ms_per_page": 39.4,
+      "content_pages": 1543,
+      "pages_with_records": 1543,
+      "total_records": 11233,
+      "fields": {
+        "PERSON": 11233,
+        "DATE_OF_BIRTH": 1314,
+        "LOCATION": 40,
+        "CITY_STATE_ZIP": 40
+      },
+      "static_filtered": 8785
+    },
+    "audit": {
+      "status": "PASS",
+      "confidence": 98,
+      "avg_page_confidence": 98,
+      "consistency": 97,
+      "pages_audited": 5,
+      "per_page": [
+        {
+          "page": 1,
+          "confidence": 100,
+          "checks": 7,
+          "passed": 7,
+          "field_results": {
+            "PERSON": 7
+          },
+          "status": "PASS"
+        },
+        {
+          "page": 617,
+          "confidence": 94,
+          "checks": 8,
+          "passed": 7.5,
+          "field_results": {
+            "PERSON": 7
+          },
+          "status": "PASS"
+        },
+        {
+          "page": 1224,
+          "confidence": 100,
+          "checks": 1,
+          "passed": 1,
+          "field_results": {
+            "PERSON": 1
+          },
+          "status": "PASS"
+        },
+        {
+          "page": 1831,
+          "confidence": 100,
+          "checks": 2,
+          "passed": 2,
+          "field_results": {
+            "PERSON": 2
+          },
+          "status": "PASS"
+        },
+        {
+          "page": 2443,
+          "confidence": 95,
+          "checks": 10,
+          "passed": 9.5,
+          "field_results": {
+            "PERSON": 9
+          },
+          "status": "PASS"
+        }
+      ]
+    }
+  },
+  "3738594": {
+    "filename": "3738594.pdf",
+    "total_pages": 3583,
+    "pdf_type": "text",
+    "onset_page": 0,
+    "vision": {
+      "parsed": {
+        "pii_fields": [
+          {
+            "type": "PERSON",
+            "value": "Arterm S. Abramenko",
+            "label": "Student Name",
+            "position": "top_right"
+          },
+          {
+            "type": "PERSON",
+            "value": "Sergei Abramenko & Regina Smolniakova",
+            "label": "Parent/Guardian Names",
+            "position": "top_left"
+          },
+          {
+            "type": "LOCATION",
+            "value": "18415 BLUE RIDGE DR",
+            "label": "Student Address",
+            "position": "top_left"
+          },
+          {
+            "type": "LOCATION",
+            "value": "LYNNWOOD WA 98037",
+            "label": "Student Address",
+            "position": "top_left"
+          },
+          {
+            "type": "LOCATION",
+            "value": "Meadowdale High School",
+            "label": "School Name",
+            "position": "top_center"
+          },
+          {
+            "type": "LOCATION",
+            "value": "6002 168th St SW",
+            "label": "School Address",
+            "position": "top_center"
+          },
+          {
+            "type": "LOCATION",
+            "value": "Lynnwood, WA 98037",
+            "label": "School Address",
+            "position": "top_center"
+          },
+          {
+            "type": "PHONE_NUMBER",
+            "value": "425-431-7650",
+            "label": "School Phone Number",
+            "position": "top_center"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "2010-2011",
+            "label": "Academic Year",
+            "position": "top_right"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "Semester 1 2010-11",
+            "label": "Semester",
+            "position": "top_right"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "February 14th",
+            "label": "Class Registration Date",
+            "position": "bottom"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "February 23rd",
+            "label": "Online Registration Date",
+            "position": "bottom"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "February 18-21st",
+            "label": "Winter Break Dates",
+            "position": "bottom"
+          }
+        ],
+        "structure_type": "fixed_single_page",
+        "records_per_page": 1,
+        "cross_page_data": false,
+        "pages_per_instance": 1
+      },
+      "model_used": "qwen2.5vl:32b"
+    },
+    "template": {
+      "name_pattern": "[A-Z\u00c0-\u00d6\u00d8-\u00de][a-z\u00e0-\u00f6\u00f8-\u00ff'-]+(?:[-\\s]+[A-Z\u00c0-\u00d6\u00d8-\u00de]\\.?)?(?:[-\\s]+[A-Z\u00c0-\u00d6\u00d8-\u00de][a-z\u00e0-\u00f6\u00f8-\u00ff'-]+)+(?:\\s+(?:Jr|Sr|II|III|IV|V|VI)\\.?)?",
+      "name_fmt": "first_last",
+      "names_embedded": false,
+      "name_samples": [
+        "Arterm S. Abramenko",
+        "Sergei Abramenko & Regina Smolniakova"
+      ],
+      "persons_found": 1,
+      "total_located": 12,
+      "rules": [
+        {
+          "type": "LOCATION",
+          "fmt": null,
+          "prox": 586,
+          "same_line": false
+        },
+        {
+          "type": "DATE_OF_BIRTH",
+          "fmt": "\\+?\\(?\\d[\\d\\s().+-]{6,}",
+          "prox": 800,
+          "same_line": false
+        },
+        {
+          "type": "PHONE_NUMBER",
+          "fmt": "\\d{3,}-\\d{3,}-\\d{4,}",
+          "prox": 314,
+          "same_line": false
+        }
+      ]
+    },
+    "extraction": {
+      "time_s": 75.01,
+      "ms_per_page": 34.2,
+      "content_pages": 2193,
+      "pages_with_records": 2193,
+      "total_records": 12504,
+      "fields": {
+        "PERSON": 12480,
+        "DATE_OF_BIRTH": 4996,
+        "LOCATION": 115,
+        "CITY_STATE_ZIP": 115
+      },
+      "static_filtered": 6083
+    },
+    "audit": {
+      "status": "PASS",
+      "confidence": 87,
+      "avg_page_confidence": 87,
+      "consistency": 86,
+      "pages_audited": 5,
+      "per_page": [
+        {
+          "page": 1,
+          "confidence": 89,
+          "checks": 9,
+          "passed": 8.0,
+          "field_results": {
+            "PERSON": 7
+          },
+          "status": "PASS"
+        },
+        {
+          "page": 737,
+          "confidence": 85,
+          "checks": 10,
+          "passed": 8.5,
+          "field_results": {
+            "PERSON": 7
+          },
+          "status": "PASS"
+        },
+        {
+          "page": 1413,
+          "confidence": 86,
+          "checks": 11,
+          "passed": 9.5,
+          "field_results": {
+            "PERSON": 8
+          },
+          "status": "PASS"
+        },
+        {
+          "page": 2137,
+          "confidence": 88,
+          "checks": 13,
+          "passed": 11.5,
+          "field_results": {
+            "PERSON": 10
+          },
+          "status": "PASS"
+        },
+        {
+          "page": 2867,
+          "confidence": 86,
+          "checks": 11,
+          "passed": 9.5,
+          "field_results": {
+            "PERSON": 8
+          },
+          "status": "PASS"
+        }
+      ]
+    }
+  },
+  "3738641": {
+    "filename": "3738641.pdf",
+    "total_pages": 3307,
+    "pdf_type": "mixed",
+    "onset_page": 28,
+    "vision": {
+      "parsed": {
+        "pii_fields": [
+          {
+            "type": "PERSON",
+            "value": "Carlos & Kathy Ahumada",
+            "label": "Parent/Guardian Name",
+            "position": "top_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "Christina C. Ahumada",
+            "label": "Student Name",
+            "position": "top_right"
+          },
+          {
+            "type": "LOCATION",
+            "value": "4525 164TH ST SW APT U104 LYNWOOD WA 98087",
+            "label": "Parent/Guardian Address",
+            "position": "top_left"
+          },
+          {
+            "type": "LOCATION",
+            "value": "Meadowdale High School 6002 168th St SW Lynnwood, WA 98037",
+            "label": "School Address",
+            "position": "top_center"
+          },
+          {
+            "type": "PHONE_NUMBER",
+            "value": "425-431-7650",
+            "label": "School Phone Number",
+            "position": "top_center"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "2010-2011",
+            "label": "Academic Year",
+            "position": "top_right"
+          },
+          {
+            "type": "EMAIL_ADDRESS",
+            "value": "LYNNWOOD WA 98087",
+            "label": "Parent/Guardian Email (Implied)",
+            "position": "top_left"
+          },
+          {
+            "type": "GOVERNMENT_ID",
+            "value": "483",
+            "label": "Entity ID",
+            "position": "middle_left"
+          },
+          {
+            "type": "ACCOUNT_NUMBER",
+            "value": "15.99",
+            "label": "Library Fee Amount",
+            "position": "bottom_right"
+          },
+          {
+            "type": "ACCOUNT_NUMBER",
+            "value": "75.00",
+            "label": "Algebra Fee Amount",
+            "position": "bottom_right"
+          }
+        ],
+        "structure_type": "fixed_single_page",
+        "records_per_page": 1,
+        "cross_page_data": false,
+        "pages_per_instance": 1
+      },
+      "model_used": "qwen2.5vl:32b"
+    },
+    "template": {
+      "name_pattern": "[A-Z\u00c0-\u00d6\u00d8-\u00de][a-z\u00e0-\u00f6\u00f8-\u00ff'-]+(?:[-\\s]+[A-Z\u00c0-\u00d6\u00d8-\u00de]\\.?)?(?:[-\\s]+[A-Z\u00c0-\u00d6\u00d8-\u00de][a-z\u00e0-\u00f6\u00f8-\u00ff'-]+)+(?:\\s+(?:Jr|Sr|II|III|IV|V|VI)\\.?)?",
+      "name_fmt": "first_last",
+      "names_embedded": false,
+      "name_samples": [
+        "Carlos & Kathy Ahumada",
+        "Christina C. Ahumada"
+      ],
+      "persons_found": 2,
+      "total_located": 7,
+      "rules": [
+        {
+          "type": "EMAIL_ADDRESS",
+          "fmt": null,
+          "prox": 577,
+          "same_line": false
+        },
+        {
+          "type": "DATE_OF_BIRTH",
+          "fmt": "\\+?\\(?\\d[\\d\\s().+-]{6,}",
+          "prox": 342,
+          "same_line": false
+        },
+        {
+          "type": "PHONE_NUMBER",
+          "fmt": "\\d{3,}-\\d{3,}-\\d{4,}",
+          "prox": 323,
+          "same_line": false
+        },
+        {
+          "type": "ACCOUNT_NUMBER",
+          "fmt": null,
+          "prox": 800,
+          "same_line": false
+        }
+      ]
+    },
+    "extraction": {
+      "time_s": 70.39,
+      "ms_per_page": 30.5,
+      "content_pages": 2310,
+      "pages_with_records": 2310,
+      "total_records": 21695,
+      "fields": {
+        "PERSON": 21669,
+        "DATE_OF_BIRTH": 4081,
+        "LOCATION": 67,
+        "CITY_STATE_ZIP": 67
+      },
+      "static_filtered": 4538
+    },
+    "audit": {
+      "status": "PASS",
+      "confidence": 85,
+      "avg_page_confidence": 89,
+      "consistency": 77,
+      "pages_audited": 5,
+      "per_page": [
+        {
+          "page": 1,
+          "confidence": 94,
+          "checks": 16,
+          "passed": 15.0,
+          "field_results": {
+            "PERSON": 14
+          },
+          "status": "PASS"
+        },
+        {
+          "page": 648,
+          "confidence": 79,
+          "checks": 7,
+          "passed": 5.5,
+          "field_results": {
+            "PERSON": 4
+          },
+          "status": "PARTIAL"
+        },
+        {
+          "page": 1310,
+          "confidence": 100,
+          "checks": 1,
+          "passed": 1,
+          "field_results": {
+            "PERSON": 1
+          },
+          "status": "PASS"
+        },
+        {
+          "page": 1970,
+          "confidence": 81,
+          "checks": 8,
+          "passed": 6.5,
+          "field_results": {
+            "PERSON": 5
+          },
+          "status": "PASS"
+        },
+        {
+          "page": 2637,
+          "confidence": 92,
+          "checks": 13,
+          "passed": 12.0,
+          "field_results": {
+            "PERSON": 11
+          },
+          "status": "PASS"
+        }
+      ]
+    }
+  },
+  "ABCNY_560_0001384129": {
+    "filename": "ABCNY_560_0001384129.pdf",
+    "total_pages": 67,
+    "pdf_type": "text",
+    "onset_page": 27,
+    "vision": {
+      "parsed": {
+        "pii_fields": [
+          {
+            "type": "PERSON",
+            "value": "COLOSIMO, SOFIA",
+            "label": "Employee Name",
+            "position": "top_left"
+          },
+          {
+            "type": "LOCATION",
+            "value": "651 DEGRAW ST, APT #2, BROOKLYN, NY 11217",
+            "label": "Mailing & Home Address",
+            "position": "top_left"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "06/28/1996",
+            "label": "Date of Birth",
+            "position": "top_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "CONNAUGHTON, CLARE",
+            "label": "Employee Name",
+            "position": "middle_left"
+          },
+          {
+            "type": "LOCATION",
+            "value": "16 GOODWIN PLACE, NORTHPORT, NY 11768",
+            "label": "Mailing & Home Address",
+            "position": "middle_left"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "02/16/1950",
+            "label": "Date of Birth",
+            "position": "middle_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "CUEVAS, JANET-MICHELLE MAE",
+            "label": "Employee Name",
+            "position": "bottom_left"
+          },
+          {
+            "type": "LOCATION",
+            "value": "264 WOODLANDS DRIVE, TUXEDO PARK, NY 10987",
+            "label": "Mailing & Home Address",
+            "position": "bottom_left"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "Not explicitly provided",
+            "label": "Date of Birth",
+            "position": "bottom_left"
+          },
+          {
+            "type": "US_SSN",
+            "value": "On File",
+            "label": "Social Security Number",
+            "position": "top_left"
+          },
+          {
+            "type": "US_SSN",
+            "value": "On File",
+            "label": "Social Security Number",
+            "position": "middle_left"
+          },
+          {
+            "type": "US_SSN",
+            "value": "On File",
+            "label": "Social Security Number",
+            "position": "bottom_left"
+          },
+          {
+            "type": "ACCOUNT_NUMBER",
+            "value": "XXXXXX0176",
+            "label": "Bank Account Number",
+            "position": "bottom_center"
+          },
+          {
+            "type": "ACCOUNT_NUMBER",
+            "value": "XXXXXXX X",
+            "label": "Bank Transit/ABA Number",
+            "position": "bottom_center"
+          }
+        ],
+        "structure_type": "fixed_single_page",
+        "records_per_page": 3,
+        "cross_page_data": false,
+        "pages_per_instance": 1
+      },
+      "model_used": "qwen2.5vl:32b"
+    },
+    "template": {
+      "name_pattern": "[A-Z\u00c0-\u00d6\u00d8-\u00de][A-Z\u00c0-\u00d6\u00d8-\u00dea-z\u00e0-\u00f6\u00f8-\u00ff' -]{1,30},\\s*[A-Z\u00c0-\u00d6\u00d8-\u00de][A-Z\u00c0-\u00d6\u00d8-\u00dea-z\u00e0-\u00f6\u00f8-\u00ff .'-]+",
+      "name_fmt": "last_first",
+      "names_embedded": false,
+      "name_samples": [
+        "COLOSIMO, SOFIA",
+        "CONNAUGHTON, CLARE",
+        "CUEVAS, JANET-MICHELLE MAE"
+      ],
+      "persons_found": 3,
+      "total_located": 8,
+      "rules": [
+        {
+          "type": "US_SSN",
+          "fmt": "[Oo]n\\s+[Ff]ile",
+          "prox": 428,
+          "same_line": false
+        },
+        {
+          "type": "DATE_OF_BIRTH",
+          "fmt": "\\d{2}/\\d{2}/\\d{4}",
+          "prox": 518,
+          "same_line": false
+        },
+        {
+          "type": "ACCOUNT_NUMBER",
+          "fmt": null,
+          "prox": 800,
+          "same_line": false
+        }
+      ]
+    },
+    "extraction": {
+      "time_s": 1.63,
+      "ms_per_page": 24.3,
+      "content_pages": 67,
+      "pages_with_records": 67,
+      "total_records": 169,
+      "fields": {
+        "DATE_OF_BIRTH": 169,
+        "PERSON": 150,
+        "US_SSN": 123,
+        "LOCATION": 95,
+        "CITY_STATE_ZIP": 85
+      }
+    },
+    "audit": {
+      "status": "PASS",
+      "confidence": 100,
+      "avg_page_confidence": 100,
+      "consistency": 100,
+      "pages_audited": 5,
+      "per_page": [
+        {
+          "page": 1,
+          "confidence": 100,
+          "checks": 1,
+          "passed": 1,
+          "field_results": {
+            "DATE_OF_BIRTH": 1
+          },
+          "status": "PASS"
+        },
+        {
+          "page": 14,
+          "confidence": 100,
+          "checks": 1,
+          "passed": 1,
+          "field_results": {
+            "DATE_OF_BIRTH": 1
+          },
+          "status": "PASS"
+        },
+        {
+          "page": 27,
+          "confidence": 100,
+          "checks": 12,
+          "passed": 12,
+          "field_results": {
+            "PERSON": 3,
+            "US_SSN": 3,
+            "DATE_OF_BIRTH": 3,
+            "LOCATION": 3
+          },
+          "status": "PASS"
+        },
+        {
+          "page": 40,
+          "confidence": 100,
+          "checks": 10,
+          "passed": 10,
+          "field_results": {
+            "PERSON": 3,
+            "US_SSN": 2,
+            "DATE_OF_BIRTH": 3,
+            "LOCATION": 2
+          },
+          "status": "PASS"
+        },
+        {
+          "page": 53,
+          "confidence": 100,
+          "checks": 10,
+          "passed": 10,
+          "field_results": {
+            "PERSON": 3,
+            "US_SSN": 2,
+            "DATE_OF_BIRTH": 3,
+            "LOCATION": 2
+          },
+          "status": "PASS"
+        }
+      ]
+    }
+  },
+  "AWIR-DOC.00000001.00000038.00000806": {
+    "filename": "AWIR-DOC.00000001.00000038.00000806.pdf",
+    "total_pages": 50,
+    "pdf_type": "text",
+    "onset_page": 3,
+    "vision": {
+      "error": "Both models failed. Primary: Server error '500 Internal Server Error' for url '. Fallback: timed out",
+      "parsed": null,
+      "model_used": null
+    },
+    "extraction": {
+      "error": "Vision failed"
+    }
+  },
+  "AWIR-DOC.00000001.00000098.00000939": {
+    "filename": "AWIR-DOC.00000001.00000098.00000939.pdf",
+    "total_pages": 100,
+    "pdf_type": "text",
+    "onset_page": 16,
+    "vision": {
+      "parsed": {
+        "pii_fields": [
+          {
+            "type": "NAME",
+            "value": "OWEN WENGERD JR",
+            "label": "NAME",
+            "position": "top_left"
+          },
+          {
+            "type": "TAX-ID",
+            "value": "S271909804",
+            "label": "TAX-ID",
+            "position": "top_middle"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "08/28/1985",
+            "label": "DATE_OF_BIRTH",
+            "position": "top_middle"
+          },
+          {
+            "type": "PHONE_NUMBER",
+            "value": "0440-381-1709",
+            "label": "PHONE_NUMBER",
+            "position": "middle_left"
+          },
+          {
+            "type": "PHONE_NUMBER",
+            "value": "0440-381-1709",
+            "label": "PHONE_NUMBER",
+            "position": "middle_left"
+          },
+          {
+            "type": "EMAIL_ADDRESS",
+            "value": "owengerd3@gmail.com",
+            "label": "EMAIL_ADDRESS",
+            "position": "middle_left"
+          },
+          {
+            "type": "ACCOUNT_NUMBER",
+            "value": "24975043",
+            "label": "ACCOUNT_NUMBER",
+            "position": "middle_left"
+          },
+          {
+            "type": "ACCOUNT_NUMBER",
+            "value": "24993436",
+            "label": "ACCOUNT_NUMBER",
+            "position": "middle_left"
+          },
+          {
+            "type": "ACCOUNT_NUMBER",
+            "value": "27032797",
+            "label": "ACCOUNT_NUMBER",
+            "position": "middle_left"
+          },
+          {
+            "type": "ACCOUNT_NUMBER",
+            "value": "313468",
+            "label": "ACCOUNT_NUMBER",
+            "position": "middle_left"
+          },
+          {
+            "type": "ACCOUNT_NUMBER",
+            "value": "1553580",
+            "label": "ACCOUNT_NUMBER",
+            "position": "middle_left"
+          },
+          {
+            "type": "ACCOUNT_NUMBER",
+            "value": "202262",
+            "label": "ACCOUNT_NUMBER",
+            "position": "middle_left"
+          },
+          {
+            "type": "ACCOUNT_NUMBER",
+            "value": "189448",
+            "label": "ACCOUNT_NUMBER",
+            "position": "middle_left"
+          },
+          {
+            "type": "ACCOUNT_NUMBER",
+            "value": "445645749",
+            "label": "ACCOUNT_NUMBER",
+            "position": "middle_left"
+          },
+          {
+            "type": "ACCOUNT_NUMBER",
+            "value": "1000767209",
+            "label": "ACCOUNT_NUMBER",
+            "position": "middle_left"
+          },
+          {
+            "type": "ACCOUNT_NUMBER",
+            "value": "2200077779",
+            "label": "ACCOUNT_NUMBER",
+            "position": "middle_left"
+          },
+          {
+            "type": "ACCOUNT_NUMBER",
+            "value": "2200178452",
+            "label": "ACCOUNT_NUMBER",
+            "position": "middle_left"
+          },
+          {
+            "type": "ACCOUNT_NUMBER",
+            "value": "2200502602",
+            "label": "ACCOUNT_NUMBER",
+            "position": "middle_left"
+          }
+        ],
+        "structure_type": "fixed_single_page",
+        "records_per_page": 1,
+        "cross_page_data": false,
+        "pages_per_instance": 1
+      },
+      "model_used": "qwen2.5vl:32b"
+    },
+    "template": {
+      "name_pattern": null,
+      "name_fmt": "unknown",
+      "names_embedded": false,
+      "name_samples": [],
+      "persons_found": 0,
+      "total_located": 16,
+      "rules": [
+        {
+          "type": "TAX-ID",
+          "fmt": null,
+          "prox": 800,
+          "same_line": false
+        },
+        {
+          "type": "PHONE_NUMBER",
+          "fmt": "\\d{4,}-\\d{3,}-\\d{4,}",
+          "prox": 800,
+          "same_line": false
+        },
+        {
+          "type": "EMAIL_ADDRESS",
+          "fmt": "[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}",
+          "prox": 800,
+          "same_line": false
+        },
+        {
+          "type": "DATE_OF_BIRTH",
+          "fmt": "\\d{2}/\\d{2}/\\d{4}",
+          "prox": 800,
+          "same_line": false
+        },
+        {
+          "type": "NAME",
+          "fmt": null,
+          "prox": 800,
+          "same_line": false
+        },
+        {
+          "type": "ACCOUNT_NUMBER",
+          "fmt": "\\d{8,}",
+          "prox": 800,
+          "same_line": false
+        }
+      ]
+    },
+    "extraction": {
+      "time_s": 0.91,
+      "ms_per_page": 9.1,
+      "content_pages": 100,
+      "pages_with_records": 100,
+      "total_records": 79,
+      "fields": {
+        "PHONE_NUMBER": 59,
+        "ACCOUNT_NUMBER": 79,
+        "EMAIL_ADDRESS": 12
+      },
+      "static_filtered": 100
+    },
+    "audit": {
+      "status": "PASS",
+      "confidence": 100,
+      "avg_page_confidence": 100,
+      "consistency": 100,
+      "pages_audited": 5,
+      "per_page": [
+        {
+          "page": 1,
+          "confidence": 100,
+          "checks": 2,
+          "passed": 2,
+          "field_results": {
+            "PHONE_NUMBER": 1,
+            "ACCOUNT_NUMBER": 1
+          },
+          "status": "PASS"
+        },
+        {
+          "page": 20,
+          "confidence": 100,
+          "checks": 3,
+          "passed": 3,
+          "field_results": {
+            "PHONE_NUMBER": 1,
+            "EMAIL_ADDRESS": 1,
+            "ACCOUNT_NUMBER": 1
+          },
+          "status": "PASS"
+        },
+        {
+          "page": 39,
+          "confidence": 100,
+          "checks": 1,
+          "passed": 1,
+          "field_results": {
+            "ACCOUNT_NUMBER": 1
+          },
+          "status": "PASS"
+        },
+        {
+          "page": 59,
+          "confidence": 100,
+          "checks": 3,
+          "passed": 3,
+          "field_results": {
+            "PHONE_NUMBER": 1,
+            "EMAIL_ADDRESS": 1,
+            "ACCOUNT_NUMBER": 1
+          },
+          "status": "PASS"
+        },
+        {
+          "page": 78,
+          "confidence": 100,
+          "checks": 2,
+          "passed": 2,
+          "field_results": {
+            "PHONE_NUMBER": 1,
+            "ACCOUNT_NUMBER": 1
+          },
+          "status": "PASS"
+        }
+      ]
+    }
+  },
+  "AWIR-DOC.00000001.00000103.00000993": {
+    "filename": "AWIR-DOC.00000001.00000103.00000993.pdf",
+    "total_pages": 581,
+    "pdf_type": "text",
+    "onset_page": 5,
+    "vision": {
+      "parsed": {
+        "pii_fields": [
+          {
+            "type": "PERSON",
+            "value": "D2B HOLDING COMPANY, LLC",
+            "label": "Entity Name",
+            "position": "top_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "DAVE E. AND JULIE A. EKLAND",
+            "label": "Entity Name",
+            "position": "top_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "DAVID L RUSCH REVOCABLE TRUST",
+            "label": "Entity Name",
+            "position": "top_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "DEBRA F. AND DAN P. CALLAHAN",
+            "label": "Entity Name",
+            "position": "top_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "DEBRA F. CALLAHAN TRUST",
+            "label": "Entity Name",
+            "position": "top_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "DOUGLAS R. & LORI S. WENZEL",
+            "label": "Entity Name",
+            "position": "top_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "DREW SKOGMAN REVOCABLE TRUST",
+            "label": "Entity Name",
+            "position": "top_left"
+          }
+        ],
+        "structure_type": "fixed_single_page",
+        "records_per_page": 1,
+        "cross_page_data": false,
+        "pages_per_instance": 1
+      },
+      "model_used": "qwen2.5vl:32b"
+    },
+    "template": {
+      "name_pattern": "[A-Z\u00c0-\u00d6\u00d8-\u00de][A-Z\u00c0-\u00d6\u00d8-\u00dea-z\u00e0-\u00f6\u00f8-\u00ff' -]{1,30},\\s*[A-Z\u00c0-\u00d6\u00d8-\u00de][A-Z\u00c0-\u00d6\u00d8-\u00dea-z\u00e0-\u00f6\u00f8-\u00ff .'-]+",
+      "name_fmt": "last_first",
+      "names_embedded": false,
+      "name_samples": [
+        "D2B HOLDING COMPANY, LLC",
+        "DAVE E. AND JULIE A. EKLAND",
+        "DAVID L RUSCH REVOCABLE TRUST",
+        "DEBRA F. AND DAN P. CALLAHAN",
+        "DEBRA F. CALLAHAN TRUST",
+        "DOUGLAS R. & LORI S. WENZEL",
+        "DREW SKOGMAN REVOCABLE TRUST"
+      ],
+      "persons_found": 0,
+      "total_located": 0,
+      "rules": []
+    },
+    "extraction": {
+      "time_s": 10.5,
+      "ms_per_page": 18.1,
+      "content_pages": 581,
+      "pages_with_records": 2,
+      "total_records": 2,
+      "fields": {
+        "PERSON": 2
+      }
+    },
+    "audit": {
+      "status": "PASS",
+      "confidence": 100,
+      "avg_page_confidence": 100,
+      "consistency": 100,
+      "pages_audited": 2,
+      "per_page": [
+        {
+          "page": 8,
+          "confidence": 100,
+          "checks": 1,
+          "passed": 1,
+          "field_results": {
+            "PERSON": 1
+          },
+          "status": "PASS"
+        },
+        {
+          "page": 10,
+          "confidence": 100,
+          "checks": 1,
+          "passed": 1,
+          "field_results": {
+            "PERSON": 1
+          },
+          "status": "PASS"
+        }
+      ]
+    }
+  },
+  "AWIR-DOC.00000001.00000124.00000482": {
+    "filename": "AWIR-DOC.00000001.00000124.00000482.pdf",
+    "total_pages": 316,
+    "pdf_type": "mixed",
+    "onset_page": 10,
+    "vision": {
+      "parsed": {
+        "pii_fields": [
+          {
+            "type": "ACCOUNT_NUMBER",
+            "value": "4-21047",
+            "label": "Annuity Contract Number",
+            "position": "top_left"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "01/01/2017",
+            "label": "Start Date of Period",
+            "position": "top_right"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "02/14/2017",
+            "label": "End Date of Period",
+            "position": "top_right"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "02/15/2017",
+            "label": "Document Date",
+            "position": "top_center"
+          },
+          {
+            "type": "PHONE_NUMBER",
+            "value": "1-800-547-7754",
+            "label": "Contact Phone Number",
+            "position": "bottom_center"
+          },
+          {
+            "type": "EMAIL_ADDRESS",
+            "value": "www.principal.com",
+            "label": "Website",
+            "position": "bottom_center"
+          },
+          {
+            "type": "GOVERNMENT_ID",
+            "value": "50392",
+            "label": "ZIP Code",
+            "position": "bottom_right"
+          }
+        ],
+        "structure_type": "fixed_single_page",
+        "records_per_page": 1,
+        "cross_page_data": false,
+        "pages_per_instance": 1
+      },
+      "model_used": "qwen2.5vl:32b"
+    },
+    "template": {
+      "name_pattern": null,
+      "name_fmt": "unknown",
+      "names_embedded": false,
+      "name_samples": [],
+      "persons_found": 0,
+      "total_located": 7,
+      "rules": [
+        {
+          "type": "PHONE_NUMBER",
+          "fmt": "\\+?\\(?\\d[\\d\\s().+-]{6,}",
+          "prox": 800,
+          "same_line": false
+        },
+        {
+          "type": "EMAIL_ADDRESS",
+          "fmt": null,
+          "prox": 800,
+          "same_line": false
+        },
+        {
+          "type": "DATE_OF_BIRTH",
+          "fmt": "\\d{2}/\\d{2}/\\d{4}",
+          "prox": 800,
+          "same_line": false
+        },
+        {
+          "type": "GOVERNMENT_ID",
+          "fmt": "\\d{5,}",
+          "prox": 800,
+          "same_line": false
+        },
+        {
+          "type": "ACCOUNT_NUMBER",
+          "fmt": "\\+?\\(?\\d[\\d\\s().+-]{6,}",
+          "prox": 800,
+          "same_line": false
+        }
+      ]
+    },
+    "extraction": {
+      "time_s": 4.9,
+      "ms_per_page": 15.7,
+      "content_pages": 311,
+      "pages_with_records": 311,
+      "total_records": 308,
+      "fields": {
+        "PHONE_NUMBER": 36,
+        "GOVERNMENT_ID": 308,
+        "ACCOUNT_NUMBER": 36,
+        "DATE_OF_BIRTH": 2
+      },
+      "static_filtered": 859
+    },
+    "audit": {
+      "status": "PASS",
+      "confidence": 100,
+      "avg_page_confidence": 100,
+      "consistency": 100,
+      "pages_audited": 5,
+      "per_page": [
+        {
+          "page": 1,
+          "confidence": 100,
+          "checks": 3,
+          "passed": 3,
+          "field_results": {
+            "PHONE_NUMBER": 1,
+            "GOVERNMENT_ID": 1,
+            "ACCOUNT_NUMBER": 1
+          },
+          "status": "PASS"
+        },
+        {
+          "page": 69,
+          "confidence": 100,
+          "checks": 1,
+          "passed": 1,
+          "field_results": {
+            "GOVERNMENT_ID": 1
+          },
+          "status": "PASS"
+        },
+        {
+          "page": 130,
+          "confidence": 100,
+          "checks": 1,
+          "passed": 1,
+          "field_results": {
+            "GOVERNMENT_ID": 1
+          },
+          "status": "PASS"
+        },
+        {
+          "page": 191,
+          "confidence": 100,
+          "checks": 1,
+          "passed": 1,
+          "field_results": {
+            "GOVERNMENT_ID": 1
+          },
+          "status": "PASS"
+        },
+        {
+          "page": 252,
+          "confidence": 100,
+          "checks": 1,
+          "passed": 1,
+          "field_results": {
+            "GOVERNMENT_ID": 1
+          },
+          "status": "PASS"
+        }
+      ]
+    }
+  },
+  "AWIR-DOC.00000038.15": {
+    "filename": "AWIR-DOC.00000038.15.pdf",
+    "total_pages": 15,
+    "pdf_type": "text",
+    "onset_page": 13,
+    "vision": {
+      "parsed": {
+        "pii_fields": [
+          {
+            "type": "ACCOUNT_NUMBER",
+            "value": "9000002331",
+            "label": "Account Number",
+            "position": "top_left"
+          },
+          {
+            "type": "NAME",
+            "value": "Edward Babcock",
+            "label": "Name",
+            "position": "top_left"
+          },
+          {
+            "type": "ADDRESS",
+            "value": "Box 110, Chardon, OH 44024-0110",
+            "label": "Address",
+            "position": "top_left"
+          },
+          {
+            "type": "ACCOUNT_NUMBER",
+            "value": "9000001790",
+            "label": "Account Number",
+            "position": "top_left"
+          },
+          {
+            "type": "NAME",
+            "value": "Ned Bailey and Donna Bailey",
+            "label": "Name",
+            "position": "top_left"
+          },
+          {
+            "type": "ADDRESS",
+            "value": "6175 Inverness Terrace, Fairview, PA 16415-3279",
+            "label": "Address",
+            "position": "top_left"
+          },
+          {
+            "type": "ACCOUNT_NUMBER",
+            "value": "900002273",
+            "label": "Account Number",
+            "position": "top_left"
+          },
+          {
+            "type": "NAME",
+            "value": "James M. Ball",
+            "label": "Name",
+            "position": "top_left"
+          },
+          {
+            "type": "ADDRESS",
+            "value": "786 Crestway Drive, Columbus, OH 43235-3464",
+            "label": "Address",
+            "position": "top_left"
+          },
+          {
+            "type": "ACCOUNT_NUMBER",
+            "value": "900001023",
+            "label": "Account Number",
+            "position": "top_left"
+          },
+          {
+            "type": "NAME",
+            "value": "Donna Barnett",
+            "label": "Name",
+            "position": "top_left"
+          },
+          {
+            "type": "ADDRESS",
+            "value": "19065 Lison Ledge Road, Garrettsville, OH 44231-9527",
+            "label": "Address",
+            "position": "top_left"
+          },
+          {
+            "type": "ACCOUNT_NUMBER",
+            "value": "900001659",
+            "label": "Account Number",
+            "position": "top_left"
+          },
+          {
+            "type": "NAME",
+            "value": "Joanna R. Bell",
+            "label": "Name",
+            "position": "top_left"
+          },
+          {
+            "type": "ADDRESS",
+            "value": "308 Cresthaven Drive, Gaffney, SC 29341-1210",
+            "label": "Address",
+            "position": "top_left"
+          },
+          {
+            "type": "ACCOUNT_NUMBER",
+            "value": "9000001031",
+            "label": "Account Number",
+            "position": "top_left"
+          },
+          {
+            "type": "NAME",
+            "value": "Fred W. Bemberg and Jennie Bemberg",
+            "label": "Name",
+            "position": "top_left"
+          },
+          {
+            "type": "ADDRESS",
+            "value": "15131 Tavern Road, Burton, OH 44021-9419",
+            "label": "Address",
+            "position": "top_left"
+          },
+          {
+            "type": "ACCOUNT_NUMBER",
+            "value": "9000002139",
+            "label": "Account Number",
+            "position": "top_left"
+          },
+          {
+            "type": "NAME",
+            "value": "Ken P. Bevington and Pamela K. Bevington",
+            "label": "Name",
+            "position": "top_left"
+          },
+          {
+            "type": "ADDRESS",
+            "value": "8335 King Memorial Road, Mentor, OH 44060-7906",
+            "label": "Address",
+            "position": "top_left"
+          },
+          {
+            "type": "ACCOUNT_NUMBER",
+            "value": "9000002274",
+            "label": "Account Number",
+            "position": "top_left"
+          },
+          {
+            "type": "NAME",
+            "value": "Philip J. Bialcalana",
+            "label": "Name",
+            "position": "top_left"
+          },
+          {
+            "type": "ADDRESS",
+            "value": "2401 Creekwood Court, Keller, TX 76248-8359",
+            "label": "Address",
+            "position": "top_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "TIM A FRANK & DELORES A FRANK JT TEN",
+            "label": "Account: 9000001123",
+            "position": "top_left"
+          }
+        ],
+        "structure_type": "table",
+        "records_per_page": 15,
+        "cross_page_data": false,
+        "pages_per_instance": 15
+      },
+      "model_used": "llama3.2-vision:latest"
+    },
+    "onset_alt": true,
+    "template": {
+      "name_pattern": "(?:DR\\s+)?[A-Z]{2,}(?:\\s+[A-Z]\\.?\\s*)*[A-Z]{2,}(?:\\s+(?:JR|SR|II|III|IV|V|VI|VII|VIII|ESQ|MD|PHD))?",
+      "name_fmt": "all_caps",
+      "names_embedded": false,
+      "name_samples": [
+        "TIM A FRANK & DELORES A FRANK JT TEN"
+      ],
+      "persons_found": 1,
+      "total_located": 1,
+      "rules": []
+    },
+    "extraction": {
+      "time_s": 0.16,
+      "ms_per_page": 10.4,
+      "content_pages": 15,
+      "pages_with_records": 14,
+      "total_records": 141,
+      "fields": {
+        "PERSON": 141,
+        "LOCATION": 131,
+        "CITY_STATE_ZIP": 118
+      }
+    },
+    "audit": {
+      "status": "PASS",
+      "confidence": 100,
+      "avg_page_confidence": 100,
+      "consistency": 100,
+      "pages_audited": 5,
+      "per_page": [
+        {
+          "page": 2,
+          "confidence": 100,
+          "checks": 13,
+          "passed": 13,
+          "field_results": {
+            "PERSON": 7,
+            "LOCATION": 6
+          },
+          "status": "PASS"
+        },
+        {
+          "page": 4,
+          "confidence": 100,
+          "checks": 25,
+          "passed": 25,
+          "field_results": {
+            "PERSON": 13,
+            "LOCATION": 12
+          },
+          "status": "PASS"
+        },
+        {
+          "page": 6,
+          "confidence": 100,
+          "checks": 28,
+          "passed": 28,
+          "field_results": {
+            "PERSON": 14,
+            "LOCATION": 14
+          },
+          "status": "PASS"
+        },
+        {
+          "page": 8,
+          "confidence": 100,
+          "checks": 20,
+          "passed": 20,
+          "field_results": {
+            "PERSON": 10,
+            "LOCATION": 10
+          },
+          "status": "PASS"
+        },
+        {
+          "page": 10,
+          "confidence": 100,
+          "checks": 16,
+          "passed": 16,
+          "field_results": {
+            "PERSON": 8,
+            "LOCATION": 8
+          },
+          "status": "PASS"
+        }
+      ]
+    }
+  },
+  "CMG_Inc_0000414153": {
+    "filename": "CMG_Inc_0000414153.pdf",
+    "total_pages": 1354,
+    "pdf_type": "text",
+    "onset_page": 16,
+    "vision": {
+      "parsed": {
+        "pii_fields": [
+          {
+            "type": "LOCATION",
+            "value": "229 WEST 28TH STREET, 11TH FLOOR, NEW YORK, NY 10001, USA",
+            "label": "Company Address",
+            "position": "top_center"
+          },
+          {
+            "type": "LOCATION",
+            "value": "1745 BROADWAY, MAILDROP 3-2, NEW YORK, NY 10019, USA",
+            "label": "Client Address",
+            "position": "top_right"
+          },
+          {
+            "type": "PHONE_NUMBER",
+            "value": "+1 (212) 541 6600",
+            "label": "Company Telephone",
+            "position": "top_center"
+          },
+          {
+            "type": "PHONE_NUMBER",
+            "value": "+1 (212) 586 6155",
+            "label": "Company Fax",
+            "position": "top_center"
+          },
+          {
+            "type": "ACCOUNT_NUMBER",
+            "value": "(000144) ALFRED A. KNOPF, INC.",
+            "label": "Client Account Number",
+            "position": "top_left"
+          },
+          {
+            "type": "TAX_ID",
+            "value": "13-2558190",
+            "label": "Client Tax Number",
+            "position": "top_left"
+          },
+          {
+            "type": "STATEMENT_NUMBER",
+            "value": "1121817",
+            "label": "Statement Number",
+            "position": "top_left"
+          },
+          {
+            "type": "DATE",
+            "value": "30/06/2020",
+            "label": "Transaction Date",
+            "position": "middle_left"
+          },
+          {
+            "type": "DATE",
+            "value": "30/06/2020",
+            "label": "Transaction Date",
+            "position": "middle_left"
+          },
+          {
+            "type": "DATE",
+            "value": "30/06/2020",
+            "label": "Transaction Date",
+            "position": "middle_left"
+          },
+          {
+            "type": "DATE",
+            "value": "30/06/2020",
+            "label": "Transaction Date",
+            "position": "middle_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "ALEXANDER, ELIZABETH",
+            "label": "Client Name",
+            "position": "top_left"
+          }
+        ],
+        "structure_type": "fixed_single_page",
+        "records_per_page": 1,
+        "cross_page_data": false,
+        "pages_per_instance": 1
+      },
+      "model_used": "qwen2.5vl:32b"
+    },
+    "onset_alt": true,
+    "template": {
+      "name_pattern": "[A-Z\u00c0-\u00d6\u00d8-\u00de][A-Z\u00c0-\u00d6\u00d8-\u00dea-z\u00e0-\u00f6\u00f8-\u00ff' -]{1,30},\\s*[A-Z\u00c0-\u00d6\u00d8-\u00de][A-Z\u00c0-\u00d6\u00d8-\u00dea-z\u00e0-\u00f6\u00f8-\u00ff .'-]+",
+      "name_fmt": "last_first",
+      "names_embedded": true,
+      "name_samples": [
+        "ALEXANDER, ELIZABETH"
+      ],
+      "persons_found": 1,
+      "total_located": 4,
+      "rules": [
+        {
+          "type": "LOCATION",
+          "fmt": null,
+          "prox": 383,
+          "same_line": false
+        },
+        {
+          "type": "PHONE_NUMBER",
+          "fmt": "\\+?\\(?\\d[\\d\\s().+-]{6,}",
+          "prox": 426,
+          "same_line": false
+        }
+      ]
+    },
+    "extraction": {
+      "time_s": 14.28,
+      "ms_per_page": 10.5,
+      "content_pages": 1354,
+      "pages_with_records": 1354,
+      "total_records": 1517,
+      "fields": {
+        "PERSON": 1427,
+        "PHONE_NUMBER": 1517,
+        "LOCATION": 3
+      }
+    },
+    "audit": {
+      "status": "PASS",
+      "confidence": 100,
+      "avg_page_confidence": 100,
+      "consistency": 100,
+      "pages_audited": 5,
+      "per_page": [
+        {
+          "page": 1,
+          "confidence": 100,
+          "checks": 2,
+          "passed": 2,
+          "field_results": {
+            "PERSON": 1,
+            "PHONE_NUMBER": 1
+          },
+          "status": "PASS"
+        },
+        {
+          "page": 271,
+          "confidence": 100,
+          "checks": 2,
+          "passed": 2,
+          "field_results": {
+            "PERSON": 1,
+            "PHONE_NUMBER": 1
+          },
+          "status": "PASS"
+        },
+        {
+          "page": 541,
+          "confidence": 100,
+          "checks": 2,
+          "passed": 2,
+          "field_results": {
+            "PERSON": 1,
+            "PHONE_NUMBER": 1
+          },
+          "status": "PASS"
+        },
+        {
+          "page": 811,
+          "confidence": 100,
+          "checks": 2,
+          "passed": 2,
+          "field_results": {
+            "PERSON": 1,
+            "PHONE_NUMBER": 1
+          },
+          "status": "PASS"
+        },
+        {
+          "page": 1081,
+          "confidence": 100,
+          "checks": 2,
+          "passed": 2,
+          "field_results": {
+            "PERSON": 1,
+            "PHONE_NUMBER": 1
+          },
+          "status": "PASS"
+        }
+      ]
+    }
+  },
+  "CMG_Inc_0001352703": {
+    "filename": "CMG_Inc_0001352703.pdf",
+    "total_pages": 453,
+    "pdf_type": "text",
+    "onset_page": 1,
+    "vision": {
+      "parsed": {
+        "pii_fields": [
+          {
+            "type": "PERSON",
+            "value": "Mr K P Acheampong",
+            "label": "Member's Name",
+            "position": "top_left"
+          },
+          {
+            "type": "LOCATION",
+            "value": "85 Waltings Gardens, Shoot Up Hill, London, NW2 3UD",
+            "label": "Last known address",
+            "position": "top_left"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "10-Aug-1959",
+            "label": "Date of Birth",
+            "position": "top_left"
+          },
+          {
+            "type": "GOVERNMENT_ID",
+            "value": "NE724362D",
+            "label": "National Insurance Number",
+            "position": "top_left"
+          },
+          {
+            "type": "DATE",
+            "value": "01-Dec-1986",
+            "label": "Date employment commenced",
+            "position": "top_left"
+          },
+          {
+            "type": "DATE",
+            "value": "01-Oct-1999",
+            "label": "Date Contracted Out employment commenced",
+            "position": "top_left"
+          },
+          {
+            "type": "DATE",
+            "value": "01-Oct-1999",
+            "label": "Date pensionable service commenced",
+            "position": "top_left"
+          },
+          {
+            "type": "DATE",
+            "value": "30-Nov-2001",
+            "label": "Date pensionable service ended",
+            "position": "top_left"
+          }
+        ],
+        "structure_type": "fixed_single_page",
+        "records_per_page": 1,
+        "cross_page_data": false,
+        "pages_per_instance": 1
+      },
+      "model_used": "qwen2.5vl:32b"
+    },
+    "template": {
+      "name_pattern": "(?:Mr|Mrs|Ms|Dr|Miss)\\.?\\s+[A-Z\u00c0-\u00d6\u00d8-\u00de][A-Z\u00c0-\u00d6\u00d8-\u00dea-z\u00e0-\u00f6\u00f8-\u00ff'-]*(?:\\s+[A-Z\u00c0-\u00d6\u00d8-\u00de][A-Z\u00c0-\u00d6\u00d8-\u00dea-z\u00e0-\u00f6\u00f8-\u00ff'-]*)+",
+      "name_fmt": "titled",
+      "names_embedded": false,
+      "name_samples": [
+        "Mr K P Acheampong"
+      ],
+      "persons_found": 1,
+      "total_located": 6,
+      "rules": [
+        {
+          "type": "DATE",
+          "fmt": null,
+          "prox": 463,
+          "same_line": false
+        },
+        {
+          "type": "DATE_OF_BIRTH",
+          "fmt": null,
+          "prox": 133,
+          "same_line": false
+        },
+        {
+          "type": "GOVERNMENT_ID",
+          "fmt": "[A-Z]{2}\\s?\\d{2}\\s?\\d{2}\\s?\\d{2}\\s?[A-Z]",
+          "prox": 297,
+          "same_line": false
+        }
+      ]
+    },
+    "extraction": {
+      "time_s": 4.57,
+      "ms_per_page": 10.1,
+      "content_pages": 453,
+      "pages_with_records": 451,
+      "total_records": 451,
+      "fields": {
+        "PERSON": 288,
+        "GOVERNMENT_ID": 307,
+        "LOCATION": 119
+      }
+    },
+    "audit": {
+      "status": "PASS",
+      "confidence": 93,
+      "avg_page_confidence": 90,
+      "consistency": 100,
+      "pages_audited": 5,
+      "per_page": [
+        {
+          "page": 1,
+          "confidence": 100,
+          "checks": 1,
+          "passed": 1,
+          "field_results": {
+            "PERSON": 1
+          },
+          "status": "PASS"
+        },
+        {
+          "page": 91,
+          "confidence": 100,
+          "checks": 1,
+          "passed": 1,
+          "field_results": {
+            "PERSON": 1
+          },
+          "status": "PASS"
+        },
+        {
+          "page": 181,
+          "confidence": 50,
+          "checks": 1,
+          "passed": 0.5,
+          "field_results": {},
+          "status": "PARTIAL"
+        },
+        {
+          "page": 271,
+          "confidence": 100,
+          "checks": 1,
+          "passed": 1,
+          "field_results": {
+            "PERSON": 1
+          },
+          "status": "PASS"
+        },
+        {
+          "page": 361,
+          "confidence": 100,
+          "checks": 1,
+          "passed": 1,
+          "field_results": {
+            "PERSON": 1
+          },
+          "status": "PASS"
+        }
+      ]
+    }
+  },
+  "Complex1": {
+    "filename": "Complex1.pdf",
+    "total_pages": 4200,
+    "pdf_type": "text",
+    "onset_page": 4,
+    "vision": {
+      "parsed": {
+        "pii_fields": [
+          {
+            "type": "PERSON",
+            "value": "RICHARD C KRISTOFF",
+            "label": "Caller Name",
+            "position": "top_left"
+          },
+          {
+            "type": "LOCATION",
+            "value": "7245 CASCADE RD, CONCORD OH 44077-9403",
+            "label": "Address",
+            "position": "top_left"
+          },
+          {
+            "type": "PHONE_NUMBER",
+            "value": "440-339-7510",
+            "label": "Home Phone",
+            "position": "middle_left"
+          },
+          {
+            "type": "PHONE_NUMBER",
+            "value": "440-352-4444",
+            "label": "Business Phone",
+            "position": "middle_left"
+          },
+          {
+            "type": "EMAIL_ADDRESS",
+            "value": "richard.kristoff@yahoo.com",
+            "label": "Email Address",
+            "position": "middle_left"
+          },
+          {
+            "type": "ACCOUNT_NUMBER",
+            "value": "54506806",
+            "label": "Account Number",
+            "position": "middle_right"
+          },
+          {
+            "type": "ACCOUNT_NUMBER",
+            "value": "54513909",
+            "label": "Primary Account",
+            "position": "middle_right"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "6/24/2008",
+            "label": "Date Opened",
+            "position": "middle_right"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "12/21/2015",
+            "label": "Date Opened",
+            "position": "bottom_left"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "12/31/2018",
+            "label": "Date Last Access",
+            "position": "middle_right"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "12/03/2018",
+            "label": "Date Last Access",
+            "position": "bottom_left"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "11/01/2018",
+            "label": "Password Expired",
+            "position": "middle_right"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "10/03/2018",
+            "label": "Password Expired",
+            "position": "bottom_left"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "10/15/2018",
+            "label": "Disclosure Acceptance Date",
+            "position": "middle_right"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "10/15/2018",
+            "label": "Disclosure Acceptance Date",
+            "position": "bottom_left"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "12/25/2018",
+            "label": "DDA ESTMT Date",
+            "position": "middle_right"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "7/05/2018",
+            "label": "FISERV Mobile Money Date",
+            "position": "bottom_right"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "9/02/2018",
+            "label": "FISERV Mobile Money Date",
+            "position": "middle_right"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "12/31/2018",
+            "label": "DDA Last Date",
+            "position": "middle_right"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "12/31/2018",
+            "label": "ESTMT Date",
+            "position": "bottom_right"
+          },
+          {
+            "type": "GOVERNMENT_ID",
+            "value": "S 297-46-2014",
+            "label": "TAX ID NUMBER",
+            "position": "middle_right"
+          },
+          {
+            "type": "GOVERNMENT_ID",
+            "value": "S 287-48-5813",
+            "label": "TAX ID NUMBER",
+            "position": "bottom_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "ANITA M ELTZROTH",
+            "label": "Caller Name",
+            "position": "bottom_left"
+          },
+          {
+            "type": "LOCATION",
+            "value": "515 NORTH ST, CHARDON OH 44024",
+            "label": "Address",
+            "position": "bottom_left"
+          }
+        ],
+        "structure_type": "fixed_single_page",
+        "records_per_page": 2,
+        "cross_page_data": false,
+        "pages_per_instance": 1
+      },
+      "model_used": "qwen2.5vl:32b"
+    },
+    "template": {
+      "name_pattern": "(?:DR\\s+)?[A-Z]{2,}(?:\\s+[A-Z]\\.?\\s*)*[A-Z]{2,}(?:\\s+(?:JR|SR|II|III|IV|V|VI|VII|VIII|ESQ|MD|PHD))?",
+      "name_fmt": "all_caps",
+      "names_embedded": true,
+      "name_samples": [
+        "RICHARD C KRISTOFF",
+        "ANITA M ELTZROTH"
+      ],
+      "persons_found": 2,
+      "total_located": 19,
+      "rules": [
+        {
+          "type": "PHONE_NUMBER",
+          "fmt": "\\d{3,}-\\d{3,}-\\d{4,}",
+          "prox": 279,
+          "same_line": true
+        },
+        {
+          "type": "EMAIL_ADDRESS",
+          "fmt": "[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}",
+          "prox": 407,
+          "same_line": false
+        },
+        {
+          "type": "DATE_OF_BIRTH",
+          "fmt": "\\d{1,2}/\\d{1,2}/\\d{2,4}",
+          "prox": 625,
+          "same_line": true
+        },
+        {
+          "type": "GOVERNMENT_ID",
+          "fmt": null,
+          "prox": 391,
+          "same_line": true
+        },
+        {
+          "type": "ACCOUNT_NUMBER",
+          "fmt": "\\d{8,}",
+          "prox": 268,
+          "same_line": true
+        }
+      ]
+    },
+    "extraction": {
+      "time_s": 157.32,
+      "ms_per_page": 37.5,
+      "content_pages": 4200,
+      "pages_with_records": 4200,
+      "total_records": 8617,
+      "fields": {
+        "PERSON": 8617,
+        "PHONE_NUMBER": 5089,
+        "EMAIL_ADDRESS": 5256,
+        "ACCOUNT_NUMBER": 8533,
+        "DATE_OF_BIRTH": 4415
+      },
+      "static_filtered": 4202
+    },
+    "audit": {
+      "status": "PASS",
+      "confidence": 100,
+      "avg_page_confidence": 100,
+      "consistency": 100,
+      "pages_audited": 5,
+      "per_page": [
+        {
+          "page": 1,
+          "confidence": 100,
+          "checks": 4,
+          "passed": 4,
+          "field_results": {
+            "PERSON": 1,
+            "PHONE_NUMBER": 1,
+            "EMAIL_ADDRESS": 1,
+            "ACCOUNT_NUMBER": 1
+          },
+          "status": "PASS"
+        },
+        {
+          "page": 841,
+          "confidence": 100,
+          "checks": 8,
+          "passed": 8,
+          "field_results": {
+            "PERSON": 2,
+            "PHONE_NUMBER": 2,
+            "EMAIL_ADDRESS": 1,
+            "DATE_OF_BIRTH": 1,
+            "ACCOUNT_NUMBER": 2
+          },
+          "status": "PASS"
+        },
+        {
+          "page": 1681,
+          "confidence": 100,
+          "checks": 9,
+          "passed": 9,
+          "field_results": {
+            "PERSON": 2,
+            "PHONE_NUMBER": 2,
+            "EMAIL_ADDRESS": 2,
+            "ACCOUNT_NUMBER": 2,
+            "DATE_OF_BIRTH": 1
+          },
+          "status": "PASS"
+        },
+        {
+          "page": 2521,
+          "confidence": 100,
+          "checks": 7,
+          "passed": 7,
+          "field_results": {
+            "PERSON": 2,
+            "PHONE_NUMBER": 1,
+            "EMAIL_ADDRESS": 1,
+            "ACCOUNT_NUMBER": 2,
+            "DATE_OF_BIRTH": 1
+          },
+          "status": "PASS"
+        },
+        {
+          "page": 3361,
+          "confidence": 100,
+          "checks": 4,
+          "passed": 4,
+          "field_results": {
+            "PERSON": 1,
+            "PHONE_NUMBER": 1,
+            "EMAIL_ADDRESS": 1,
+            "ACCOUNT_NUMBER": 1
+          },
+          "status": "PASS"
+        }
+      ]
+    }
+  },
+  "EdmondsSD_0003650859": {
+    "filename": "EdmondsSD_0003650859.pdf",
+    "total_pages": 484,
+    "pdf_type": "text",
+    "onset_page": 23,
+    "vision": {
+      "parsed": {
+        "pii_fields": [
+          {
+            "type": "PERSON",
+            "value": "Badjan, Abdalah",
+            "label": "Student Name",
+            "position": "top_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "Badrbigi, Nasim",
+            "label": "Student Name",
+            "position": "top_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "Badrbigi, Seema",
+            "label": "Student Name",
+            "position": "top_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "Baek, Myong",
+            "label": "Student Name",
+            "position": "top_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "Baez, Daisy",
+            "label": "Student Name",
+            "position": "top_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "Baez, Kristina",
+            "label": "Student Name",
+            "position": "top_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "Baez, Maribel",
+            "label": "Student Name",
+            "position": "top_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "Baez, Rosangela",
+            "label": "Student Name",
+            "position": "top_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "Baez-Lopez, Julio",
+            "label": "Student Name",
+            "position": "top_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "Bagdonas, Candice",
+            "label": "Student Name",
+            "position": "top_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "Bahr, Jason",
+            "label": "Student Name",
+            "position": "top_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "Bahrami, Ali",
+            "label": "Student Name",
+            "position": "top_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "Bahta, Ben",
+            "label": "Student Name",
+            "position": "top_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "Bailey, Jakob",
+            "label": "Student Name",
+            "position": "top_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "Bailey, Jeffrey",
+            "label": "Student Name",
+            "position": "top_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "Bailey, Lyneve",
+            "label": "Student Name",
+            "position": "top_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "Bailey, Mason",
+            "label": "Student Name",
+            "position": "top_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "Bailey, Micheal",
+            "label": "Student Name",
+            "position": "top_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "Bain, Alyssa",
+            "label": "Student Name",
+            "position": "top_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "Bain, Griffin",
+            "label": "Student Name",
+            "position": "top_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "Baird, Desiree",
+            "label": "Student Name",
+            "position": "top_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "Baird-Carlson, Whitney",
+            "label": "Student Name",
+            "position": "top_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "Bajo, Kebba",
+            "label": "Student Name",
+            "position": "top_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "Bakare, Adeola",
+            "label": "Student Name",
+            "position": "top_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "Baker, Jack",
+            "label": "Student Name",
+            "position": "top_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "Baker, Jessica",
+            "label": "Student Name",
+            "position": "top_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "Baker, Joshua",
+            "label": "Student Name",
+            "position": "top_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "Baker, Kristen",
+            "label": "Student Name",
+            "position": "top_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "Baker, Krystin",
+            "label": "Student Name",
+            "position": "top_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "Baker, Mat",
+            "label": "Student Name",
+            "position": "top_left"
+          }
+        ],
+        "structure_type": "fixed_single_page",
+        "records_per_page": 15,
+        "cross_page_data": false,
+        "pages_per_instance": 1
+      },
+      "model_used": "qwen2.5vl:32b"
+    },
+    "template": {
+      "name_pattern": "[A-Z\u00c0-\u00d6\u00d8-\u00de][A-Z\u00c0-\u00d6\u00d8-\u00dea-z\u00e0-\u00f6\u00f8-\u00ff' -]{1,30},\\s*[A-Z\u00c0-\u00d6\u00d8-\u00de][A-Z\u00c0-\u00d6\u00d8-\u00dea-z\u00e0-\u00f6\u00f8-\u00ff .'-]+",
+      "name_fmt": "last_first",
+      "names_embedded": true,
+      "name_samples": [
+        "Badjan, Abdalah",
+        "Badrbigi, Nasim",
+        "Badrbigi, Seema",
+        "Baek, Myong",
+        "Baez, Daisy",
+        "Baez, Kristina",
+        "Baez, Maribel",
+        "Baez, Rosangela",
+        "Baez-Lopez, Julio",
+        "Bagdonas, Candice",
+        "Bahr, Jason",
+        "Bahrami, Ali",
+        "Bahta, Ben",
+        "Bailey, Jakob",
+        "Bailey, Jeffrey",
+        "Bailey, Lyneve",
+        "Bailey, Mason",
+        "Bailey, Micheal",
+        "Bain, Alyssa",
+        "Bain, Griffin",
+        "Baird, Desiree",
+        "Baird-Carlson, Whitney",
+        "Bajo, Kebba",
+        "Bakare, Adeola",
+        "Baker, Jack",
+        "Baker, Jessica",
+        "Baker, Joshua",
+        "Baker, Kristen",
+        "Baker, Krystin",
+        "Baker, Mat"
+      ],
+      "persons_found": 30,
+      "total_located": 30,
+      "rules": []
+    },
+    "extraction": {
+      "time_s": 8.33,
+      "ms_per_page": 17.2,
+      "content_pages": 484,
+      "pages_with_records": 484,
+      "total_records": 9764,
+      "fields": {
+        "PERSON": 9764
+      }
+    },
+    "audit": {
+      "status": "PASS",
+      "confidence": 100,
+      "avg_page_confidence": 100,
+      "consistency": 100,
+      "pages_audited": 5,
+      "per_page": [
+        {
+          "page": 1,
+          "confidence": 100,
+          "checks": 21,
+          "passed": 21,
+          "field_results": {
+            "PERSON": 21
+          },
+          "status": "PASS"
+        },
+        {
+          "page": 97,
+          "confidence": 100,
+          "checks": 18,
+          "passed": 18,
+          "field_results": {
+            "PERSON": 18
+          },
+          "status": "PASS"
+        },
+        {
+          "page": 193,
+          "confidence": 100,
+          "checks": 27,
+          "passed": 27,
+          "field_results": {
+            "PERSON": 27
+          },
+          "status": "PASS"
+        },
+        {
+          "page": 289,
+          "confidence": 100,
+          "checks": 18,
+          "passed": 18,
+          "field_results": {
+            "PERSON": 18
+          },
+          "status": "PASS"
+        },
+        {
+          "page": 385,
+          "confidence": 100,
+          "checks": 24,
+          "passed": 24,
+          "field_results": {
+            "PERSON": 24
+          },
+          "status": "PASS"
+        }
+      ]
+    }
+  },
+  "TPHS2_656_0000067171": {
+    "filename": "TPHS2_656_0000067171.pdf",
+    "total_pages": 902,
+    "pdf_type": "text",
+    "onset_page": 7,
+    "vision": {
+      "parsed": {
+        "pii_fields": [
+          {
+            "type": "PERSON",
+            "value": "ALLEN, AMY LEIGH",
+            "label": "Employee Name",
+            "position": "top_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "ALLEN, MELISSA LEIGH",
+            "label": "Employee Name",
+            "position": "middle_left"
+          },
+          {
+            "type": "US_SSN",
+            "value": "XXX-XX-7058",
+            "label": "Social Security Number",
+            "position": "top_middle"
+          },
+          {
+            "type": "US_SSN",
+            "value": "XXX-XX-0924",
+            "label": "Social Security Number",
+            "position": "middle_middle"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "03/04/75",
+            "label": "Birthdate",
+            "position": "top_middle"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "05/03/89",
+            "label": "Birthdate",
+            "position": "middle_middle"
+          },
+          {
+            "type": "LOCATION",
+            "value": "330 EAST 39TH STREET",
+            "label": "Address",
+            "position": "middle_left"
+          },
+          {
+            "type": "LOCATION",
+            "value": "NEW YORK NY 10016",
+            "label": "Address",
+            "position": "middle_left"
+          },
+          {
+            "type": "ACCOUNT_NUMBER",
+            "value": "888859530",
+            "label": "EFT Account Number",
+            "position": "bottom_middle"
+          }
+        ],
+        "structure_type": "fixed_single_page",
+        "records_per_page": 2,
+        "cross_page_data": false,
+        "pages_per_instance": 1
+      },
+      "model_used": "qwen2.5vl:32b"
+    },
+    "template": {
+      "name_pattern": "[A-Z\u00c0-\u00d6\u00d8-\u00de][A-Z\u00c0-\u00d6\u00d8-\u00dea-z\u00e0-\u00f6\u00f8-\u00ff' -]{1,30},\\s*[A-Z\u00c0-\u00d6\u00d8-\u00de][A-Z\u00c0-\u00d6\u00d8-\u00dea-z\u00e0-\u00f6\u00f8-\u00ff .'-]+",
+      "name_fmt": "last_first",
+      "names_embedded": true,
+      "name_samples": [
+        "ALLEN, AMY LEIGH",
+        "ALLEN, MELISSA LEIGH"
+      ],
+      "persons_found": 2,
+      "total_located": 9,
+      "rules": [
+        {
+          "type": "US_SSN",
+          "fmt": "XXX-XX-\\d{4}",
+          "prox": 800,
+          "same_line": true
+        },
+        {
+          "type": "DATE_OF_BIRTH",
+          "fmt": "\\d{1,2}/\\d{1,2}/\\d{2,4}",
+          "prox": 800,
+          "same_line": true
+        },
+        {
+          "type": "LOCATION",
+          "fmt": null,
+          "prox": 800,
+          "same_line": true
+        },
+        {
+          "type": "ACCOUNT_NUMBER",
+          "fmt": "\\d{9,}",
+          "prox": 800,
+          "same_line": true
+        }
+      ]
+    },
+    "extraction": {
+      "time_s": 17.7,
+      "ms_per_page": 19.6,
+      "content_pages": 902,
+      "pages_with_records": 902,
+      "total_records": 1859,
+      "fields": {
+        "PERSON": 1846,
+        "US_SSN": 1205,
+        "DATE_OF_BIRTH": 1859,
+        "ACCOUNT_NUMBER": 1117
+      }
+    },
+    "audit": {
+      "status": "PASS",
+      "confidence": 100,
+      "avg_page_confidence": 100,
+      "consistency": 100,
+      "pages_audited": 5,
+      "per_page": [
+        {
+          "page": 1,
+          "confidence": 100,
+          "checks": 7,
+          "passed": 7,
+          "field_results": {
+            "PERSON": 2,
+            "US_SSN": 2,
+            "DATE_OF_BIRTH": 2,
+            "ACCOUNT_NUMBER": 1
+          },
+          "status": "PASS"
+        },
+        {
+          "page": 181,
+          "confidence": 100,
+          "checks": 8,
+          "passed": 8,
+          "field_results": {
+            "PERSON": 3,
+            "US_SSN": 2,
+            "DATE_OF_BIRTH": 3
+          },
+          "status": "PASS"
+        },
+        {
+          "page": 361,
+          "confidence": 100,
+          "checks": 6,
+          "passed": 6,
+          "field_results": {
+            "PERSON": 2,
+            "US_SSN": 1,
+            "DATE_OF_BIRTH": 2,
+            "ACCOUNT_NUMBER": 1
+          },
+          "status": "PASS"
+        },
+        {
+          "page": 541,
+          "confidence": 100,
+          "checks": 4,
+          "passed": 4,
+          "field_results": {
+            "PERSON": 1,
+            "US_SSN": 1,
+            "DATE_OF_BIRTH": 1,
+            "ACCOUNT_NUMBER": 1
+          },
+          "status": "PASS"
+        },
+        {
+          "page": 721,
+          "confidence": 100,
+          "checks": 11,
+          "passed": 11,
+          "field_results": {
+            "PERSON": 3,
+            "US_SSN": 2,
+            "DATE_OF_BIRTH": 3,
+            "ACCOUNT_NUMBER": 3
+          },
+          "status": "PASS"
+        }
+      ]
+    }
+  },
+  "TPHS2_656_0000070715": {
+    "filename": "TPHS2_656_0000070715.pdf",
+    "total_pages": 132,
+    "pdf_type": "text",
+    "onset_page": 18,
+    "vision": {
+      "parsed": {
+        "pii_fields": [
+          {
+            "type": "PERSON",
+            "value": "Employee Name",
+            "label": "Employee Name",
+            "position": "top_left"
+          },
+          {
+            "type": "LOCATION",
+            "value": "Address",
+            "label": "Address",
+            "position": "top_left"
+          },
+          {
+            "type": "US_SSN",
+            "value": "SSN",
+            "label": "SSN",
+            "position": "top_right"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "Date of Birth",
+            "label": "Date of Birth",
+            "position": "middle_left"
+          },
+          {
+            "type": "PHONE_NUMBER",
+            "value": "Phone Number",
+            "label": "Phone Number",
+            "position": "middle_right"
+          },
+          {
+            "type": "EMAIL_ADDRESS",
+            "value": "Email Address",
+            "label": "Email Address",
+            "position": "bottom_left"
+          },
+          {
+            "type": "GOVERNMENT_ID",
+            "value": "Government ID",
+            "label": "Government ID",
+            "position": "bottom_right"
+          },
+          {
+            "type": "ACCOUNT_NUMBER",
+            "value": "Account Number",
+            "label": "Account Number",
+            "position": "bottom_left"
+          }
+        ],
+        "structure_type": "table",
+        "records_per_page": 19,
+        "cross_page_data": false,
+        "pages_per_instance": 1
+      },
+      "model_used": "llama3.2-vision:latest"
+    },
+    "template": {
+      "name_pattern": "[A-Z\u00c0-\u00d6\u00d8-\u00de][a-z\u00e0-\u00f6\u00f8-\u00ff'-]+(?:[-\\s]+[A-Z\u00c0-\u00d6\u00d8-\u00de]\\.?)?(?:[-\\s]+[A-Z\u00c0-\u00d6\u00d8-\u00de][a-z\u00e0-\u00f6\u00f8-\u00ff'-]+)+(?:\\s+(?:Jr|Sr|II|III|IV|V|VI)\\.?)?",
+      "name_fmt": "first_last",
+      "names_embedded": true,
+      "name_samples": [
+        "Employee Name"
+      ],
+      "persons_found": 1,
+      "total_located": 2,
+      "rules": [
+        {
+          "type": "LOCATION",
+          "fmt": null,
+          "prox": 15,
+          "same_line": false
+        }
+      ]
+    },
+    "extraction": {
+      "time_s": 1.74,
+      "ms_per_page": 13.1,
+      "content_pages": 132,
+      "pages_with_records": 0,
+      "total_records": 0,
+      "fields": {}
+    }
+  },
+  "TPHS2_656_0000071913": {
+    "filename": "TPHS2_656_0000071913.pdf",
+    "total_pages": 211,
+    "pdf_type": "text",
+    "onset_page": 8,
+    "vision": {
+      "parsed": {
+        "pii_fields": [
+          {
+            "type": "US_SSN",
+            "value": "XXX-XX-1173",
+            "label": "Employee SSN",
+            "position": "top_left"
+          },
+          {
+            "type": "US_SSN",
+            "value": "XXX-XX-2123",
+            "label": "Spouse SSN",
+            "position": "middle"
+          },
+          {
+            "type": "US_SSN",
+            "value": "XXX-XX-0549",
+            "label": "Dependent SSN",
+            "position": "middle"
+          },
+          {
+            "type": "US_SSN",
+            "value": "XXX-XX-1446",
+            "label": "Dependent SSN",
+            "position": "middle"
+          },
+          {
+            "type": "US_SSN",
+            "value": "XXX-XX-4529",
+            "label": "Dependent SSN",
+            "position": "middle"
+          },
+          {
+            "type": "US_SSN",
+            "value": "XXX-XX-4143",
+            "label": "Dependent SSN",
+            "position": "middle"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "08/02/1968",
+            "label": "Employee DOB",
+            "position": "middle"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "08/02/1968",
+            "label": "Spouse DOB",
+            "position": "middle"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "08/02/1968",
+            "label": "Dependent DOB",
+            "position": "middle"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "08/02/1968",
+            "label": "Dependent DOB",
+            "position": "middle"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "08/02/1968",
+            "label": "Dependent DOB",
+            "position": "middle"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "08/02/1968",
+            "label": "Dependent DOB",
+            "position": "middle"
+          },
+          {
+            "type": "PERSON",
+            "value": "ROBERT MASON BAYLER JR",
+            "label": "Employee Name",
+            "position": "top_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "KRISTEN B BAYLER",
+            "label": "Spouse Name",
+            "position": "middle"
+          },
+          {
+            "type": "PERSON",
+            "value": "GEORGIA K BAYLER",
+            "label": "Dependent Name",
+            "position": "middle"
+          },
+          {
+            "type": "PERSON",
+            "value": "CHARLES M BAYLER",
+            "label": "Dependent Name",
+            "position": "middle"
+          },
+          {
+            "type": "PERSON",
+            "value": "ELIZABETH C BAYLER",
+            "label": "Dependent Name",
+            "position": "middle"
+          },
+          {
+            "type": "PERSON",
+            "value": "ANNABEL ELYSE BAYLER",
+            "label": "Dependent Name",
+            "position": "middle"
+          },
+          {
+            "type": "LOCATION",
+            "value": "205 BANBURY ROAD, RICHMOND, ST VA, 23221",
+            "label": "Address",
+            "position": "top_left"
+          }
+        ],
+        "structure_type": "fixed_single_page",
+        "records_per_page": 1,
+        "cross_page_data": false,
+        "pages_per_instance": 1
+      },
+      "model_used": "qwen2.5vl:32b"
+    },
+    "template": {
+      "name_pattern": "(?:DR\\s+)?[A-Z]{2,}(?:\\s+[A-Z]\\.?\\s*)*[A-Z]{2,}(?:\\s+(?:JR|SR|II|III|IV|V|VI|VII|VIII|ESQ|MD|PHD))?",
+      "name_fmt": "all_caps",
+      "names_embedded": true,
+      "name_samples": [
+        "ROBERT MASON BAYLER JR",
+        "KRISTEN B BAYLER",
+        "GEORGIA K BAYLER",
+        "CHARLES M BAYLER",
+        "ELIZABETH C BAYLER",
+        "ANNABEL ELYSE BAYLER"
+      ],
+      "persons_found": 6,
+      "total_located": 13,
+      "rules": [
+        {
+          "type": "US_SSN",
+          "fmt": "XXX-XX-\\d{4}",
+          "prox": 590,
+          "same_line": true
+        },
+        {
+          "type": "DATE_OF_BIRTH",
+          "fmt": "\\d{2}/\\d{2}/\\d{4}",
+          "prox": 536,
+          "same_line": true
+        }
+      ]
+    },
+    "extraction": {
+      "time_s": 2.38,
+      "ms_per_page": 11.3,
+      "content_pages": 211,
+      "pages_with_records": 211,
+      "total_records": 1650,
+      "fields": {
+        "PERSON": 1650,
+        "US_SSN": 903,
+        "DATE_OF_BIRTH": 213
+      }
+    },
+    "audit": {
+      "status": "PASS",
+      "confidence": 100,
+      "avg_page_confidence": 100,
+      "consistency": 100,
+      "pages_audited": 5,
+      "per_page": [
+        {
+          "page": 1,
+          "confidence": 100,
+          "checks": 3,
+          "passed": 3,
+          "field_results": {
+            "PERSON": 3
+          },
+          "status": "PASS"
+        },
+        {
+          "page": 43,
+          "confidence": 100,
+          "checks": 13,
+          "passed": 13,
+          "field_results": {
+            "PERSON": 8,
+            "US_SSN": 4,
+            "DATE_OF_BIRTH": 1
+          },
+          "status": "PASS"
+        },
+        {
+          "page": 85,
+          "confidence": 100,
+          "checks": 17,
+          "passed": 17,
+          "field_results": {
+            "PERSON": 10,
+            "US_SSN": 6,
+            "DATE_OF_BIRTH": 1
+          },
+          "status": "PASS"
+        },
+        {
+          "page": 127,
+          "confidence": 100,
+          "checks": 14,
+          "passed": 14,
+          "field_results": {
+            "PERSON": 8,
+            "US_SSN": 5,
+            "DATE_OF_BIRTH": 1
+          },
+          "status": "PASS"
+        },
+        {
+          "page": 169,
+          "confidence": 100,
+          "checks": 14,
+          "passed": 14,
+          "field_results": {
+            "PERSON": 7,
+            "US_SSN": 6,
+            "DATE_OF_BIRTH": 1
+          },
+          "status": "PASS"
+        }
+      ]
+    }
+  },
+  "Vamp0000071981": {
+    "filename": "Vamp0000071981.pdf",
+    "total_pages": 1,
+    "pdf_type": "scanned",
+    "extraction": {
+      "error": "Scanned"
+    }
+  },
+  "Vamp0000071987": {
+    "filename": "Vamp0000071987.pdf",
+    "total_pages": 1,
+    "pdf_type": "scanned",
+    "extraction": {
+      "error": "Scanned"
+    }
+  },
+  "Vamp0000072380": {
+    "filename": "Vamp0000072380.pdf",
+    "total_pages": 17,
+    "pdf_type": "text",
+    "onset_page": 3,
+    "vision": {
+      "parsed": {
+        "pii_fields": [],
+        "structure_type": "fixed_single_page",
+        "records_per_page": 1,
+        "cross_page_data": false,
+        "pages_per_instance": 17
+      },
+      "model_used": "qwen2.5vl:32b"
+    },
+    "template": {
+      "name_pattern": null,
+      "name_fmt": "unknown",
+      "names_embedded": false,
+      "name_samples": [],
+      "persons_found": 0,
+      "total_located": 0,
+      "rules": []
+    },
+    "extraction": {
+      "error": "Template empty \u2014 no values located"
+    }
+  },
+  "Vamp0000074646": {
+    "filename": "Vamp0000074646.pdf",
+    "total_pages": 3,
+    "pdf_type": "scanned",
+    "extraction": {
+      "error": "Scanned"
+    }
+  },
+  "WashingtonCMD_0000102080": {
+    "filename": "WashingtonCMD_0000102080.pdf",
+    "total_pages": 594,
+    "pdf_type": "text",
+    "onset_page": 14,
+    "vision": {
+      "parsed": {
+        "pii_fields": [
+          {
+            "type": "PERSON",
+            "value": "Christine B Ellis",
+            "label": "Employee Name",
+            "position": "top_left"
+          },
+          {
+            "type": "LOCATION",
+            "value": "1116 West Irvin Avenue, Hagerstown, MD 21742-0000",
+            "label": "Employee Address",
+            "position": "top_left"
+          },
+          {
+            "type": "GOVERNMENT_ID",
+            "value": "001733",
+            "label": "Employee ID",
+            "position": "top_middle"
+          },
+          {
+            "type": "ACCOUNT_NUMBER",
+            "value": "0143499301",
+            "label": "Bank Account Number",
+            "position": "bottom_right"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "01/16/2009",
+            "label": "Advice Date",
+            "position": "bottom_middle"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "12/27/2008",
+            "label": "Pay Begin Date",
+            "position": "top_right"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "01/09/2009",
+            "label": "Pay End Date",
+            "position": "top_right"
+          },
+          {
+            "type": "PHONE_NUMBER",
+            "value": "Not applicable",
+            "label": "Not applicable",
+            "position": "top_right"
+          },
+          {
+            "type": "EMAIL_ADDRESS",
+            "value": "Not applicable",
+            "label": "Not applicable",
+            "position": "top_right"
+          },
+          {
+            "type": "US_SSN",
+            "value": "Not applicable",
+            "label": "Not applicable",
+            "position": "top_right"
+          }
+        ],
+        "structure_type": "fixed_single_page",
+        "records_per_page": 1,
+        "cross_page_data": false,
+        "pages_per_instance": 1
+      },
+      "model_used": "qwen2.5vl:32b"
+    },
+    "template": {
+      "name_pattern": "[A-Z\u00c0-\u00d6\u00d8-\u00de][a-z\u00e0-\u00f6\u00f8-\u00ff'-]+(?:[-\\s]+[A-Z\u00c0-\u00d6\u00d8-\u00de]\\.?)?(?:[-\\s]+[A-Z\u00c0-\u00d6\u00d8-\u00de][a-z\u00e0-\u00f6\u00f8-\u00ff'-]+)+(?:\\s+(?:Jr|Sr|II|III|IV|V|VI)\\.?)?",
+      "name_fmt": "first_last",
+      "names_embedded": false,
+      "name_samples": [
+        "Christine B Ellis"
+      ],
+      "persons_found": 1,
+      "total_located": 7,
+      "rules": [
+        {
+          "type": "DATE_OF_BIRTH",
+          "fmt": "\\d{2}/\\d{2}/\\d{4}",
+          "prox": 713,
+          "same_line": false
+        },
+        {
+          "type": "GOVERNMENT_ID",
+          "fmt": "\\d{6,}",
+          "prox": 337,
+          "same_line": true
+        },
+        {
+          "type": "PHONE_NUMBER",
+          "fmt": null,
+          "prox": 687,
+          "same_line": false
+        },
+        {
+          "type": "ACCOUNT_NUMBER",
+          "fmt": "\\d{10,}",
+          "prox": 800,
+          "same_line": false
+        }
+      ]
+    },
+    "extraction": {
+      "time_s": 6.42,
+      "ms_per_page": 10.8,
+      "content_pages": 594,
+      "pages_with_records": 594,
+      "total_records": 4121,
+      "fields": {
+        "PERSON": 4121,
+        "GOVERNMENT_ID": 3980,
+        "ACCOUNT_NUMBER": 1630,
+        "LOCATION": 45,
+        "CITY_STATE_ZIP": 1
+      },
+      "static_filtered": 3508
+    },
+    "audit": {
+      "status": "PASS",
+      "confidence": 100,
+      "avg_page_confidence": 100,
+      "consistency": 100,
+      "pages_audited": 5,
+      "per_page": [
+        {
+          "page": 1,
+          "confidence": 100,
+          "checks": 20,
+          "passed": 20,
+          "field_results": {
+            "PERSON": 8,
+            "GOVERNMENT_ID": 7,
+            "ACCOUNT_NUMBER": 4,
+            "LOCATION": 1
+          },
+          "status": "PASS"
+        },
+        {
+          "page": 119,
+          "confidence": 100,
+          "checks": 15,
+          "passed": 15,
+          "field_results": {
+            "PERSON": 6,
+            "GOVERNMENT_ID": 6,
+            "ACCOUNT_NUMBER": 3
+          },
+          "status": "PASS"
+        },
+        {
+          "page": 237,
+          "confidence": 100,
+          "checks": 16,
+          "passed": 16,
+          "field_results": {
+            "PERSON": 7,
+            "GOVERNMENT_ID": 7,
+            "ACCOUNT_NUMBER": 2
+          },
+          "status": "PASS"
+        },
+        {
+          "page": 355,
+          "confidence": 100,
+          "checks": 16,
+          "passed": 16,
+          "field_results": {
+            "PERSON": 7,
+            "GOVERNMENT_ID": 6,
+            "ACCOUNT_NUMBER": 3
+          },
+          "status": "PASS"
+        },
+        {
+          "page": 473,
+          "confidence": 100,
+          "checks": 21,
+          "passed": 21,
+          "field_results": {
+            "PERSON": 9,
+            "GOVERNMENT_ID": 9,
+            "ACCOUNT_NUMBER": 3
+          },
+          "status": "PASS"
+        }
+      ]
+    }
+  }
+}

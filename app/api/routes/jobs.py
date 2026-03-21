@@ -1,6 +1,7 @@
 """Job management routes — full implementation.
 
 POST /jobs/upload saves uploaded files and returns an upload_id.
+POST /jobs/{job_id}/upload adds files to an existing job (Step 24b).
 POST /jobs runs the synchronous pipeline (JSON response).
 POST /jobs/run runs the pipeline with SSE streaming progress.
 
@@ -45,18 +46,20 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
-# Supported extensions for upload (matches reader registry)
-SUPPORTED_EXTENSIONS = frozenset({
-    ".pdf", ".xlsx", ".xls", ".docx", ".csv",
-    ".html", ".htm", ".xml", ".eml", ".msg",
-    ".parquet", ".avro",
-})
+# Supported extensions for upload (matches reader registry + archives)
+from app.api.upload_helpers import (
+    ARCHIVE_EXTENSIONS,
+    EMAIL_EXTENSIONS,
+    SKIP_EXTENSIONS,
+    SUPPORTED_EXTENSIONS,
+    extract_archive as _extract_archive,
+    extract_email_attachments as _extract_email_attachments,
+    is_supported as _is_supported,
+    process_uploaded_file as _process_uploaded_file,
+    safe_filename as _safe_filename,
+    should_skip as _should_skip,
+)
 
-# Extensions to silently skip during upload
-SKIP_EXTENSIONS = frozenset({
-    ".ds_store", ".txt", ".log", ".tmp", ".swp",
-    ".gitignore", ".gitkeep",
-})
 
 
 # ---------------------------------------------------------------------------
@@ -122,38 +125,6 @@ def _masked_subject(ns: NotificationSubject) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Upload helpers
-# ---------------------------------------------------------------------------
-
-def _is_supported(filename: str) -> bool:
-    """Return True if the file extension is supported by a reader."""
-    ext = Path(filename).suffix.lower()
-    return ext in SUPPORTED_EXTENSIONS
-
-
-def _should_skip(filename: str) -> bool:
-    """Return True if the file should be silently skipped."""
-    name = Path(filename).name.lower()
-    ext = Path(filename).suffix.lower()
-    return ext in SKIP_EXTENSIONS or name.startswith(".")
-
-
-def _safe_filename(directory: Path, original_name: str) -> Path:
-    """Return a unique path under directory, adding _1, _2 suffix for dupes."""
-    target = directory / original_name
-    if not target.exists():
-        return target
-    stem = Path(original_name).stem
-    suffix = Path(original_name).suffix
-    counter = 1
-    while True:
-        candidate = directory / f"{stem}_{counter}{suffix}"
-        if not candidate.exists():
-            return candidate
-        counter += 1
-
-
-# ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
 
@@ -194,7 +165,9 @@ def list_recent_jobs(
 async def upload_files(files: list[UploadFile] = File(...)):
     """Save uploaded files to a temp directory and return an upload_id.
 
-    Unsupported files (e.g. .DS_Store, .txt) are silently skipped.
+    Handles all 47 supported formats. Archives (ZIP/7z) are extracted
+    recursively. Email attachments (EML/MSG) are saved alongside the
+    email body. Unsupported files are silently skipped.
     Returns 400 if no supported files remain after filtering.
     """
     settings = get_settings()
@@ -234,13 +207,8 @@ async def upload_files(files: list[UploadFile] = File(...)):
                     detail=f"Total upload exceeds {settings.upload_max_total_size_mb}MB limit",
                 )
 
-            dest = _safe_filename(upload_path, filename)
-            dest.write_bytes(content)
-            saved_files.append({
-                "name": dest.name,
-                "size_bytes": file_size,
-                "extension": Path(filename).suffix.lower(),
-            })
+            produced = _process_uploaded_file(content, filename, upload_path)
+            saved_files.extend(produced)
 
         if not saved_files:
             raise HTTPException(
@@ -264,6 +232,95 @@ async def upload_files(files: list[UploadFile] = File(...)):
     except Exception:
         shutil.rmtree(upload_path, ignore_errors=True)
         raise
+
+
+@router.post("/{job_id}/upload", summary="Upload additional files to an existing job")
+async def upload_to_job(
+    job_id: UUID,
+    files: list[UploadFile] = File(...),
+    db: Session = Depends(get_db),
+):
+    """Add files to an existing job's source directory.
+
+    The job must exist and have status 'pending' or 'analyzed' (not yet
+    extracting or complete). Handles all 47 supported formats: archives
+    are extracted, email attachments are saved alongside their parent.
+
+    Returns the list of files added and updated totals.
+    """
+    settings = get_settings()
+    max_file_bytes = settings.upload_max_file_size_mb * 1024 * 1024
+    max_total_bytes = settings.upload_max_total_size_mb * 1024 * 1024
+
+    # Look up the job
+    run = db.execute(
+        select(IngestionRun).where(IngestionRun.id == job_id)
+    ).scalar_one_or_none()
+
+    if run is None:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+
+    # Only allow uploads to jobs that haven't started extraction
+    if run.status not in ("pending", "analyzed", "analysis_complete"):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cannot upload to job with status '{run.status}'. "
+                   "Job must be pending or analyzed.",
+        )
+
+    # Resolve the job's source directory
+    source_dir = Path(run.source_path)
+    if not source_dir.is_dir():
+        raise HTTPException(
+            status_code=404,
+            detail=f"Job source directory not found: {run.source_path}",
+        )
+
+    saved_files: list[dict] = []
+    total_bytes = 0
+
+    for f in files:
+        filename = f.filename or "unknown"
+
+        if _should_skip(filename) or not _is_supported(filename):
+            continue
+
+        content = await f.read()
+        file_size = len(content)
+
+        if file_size > max_file_bytes:
+            raise HTTPException(
+                status_code=413,
+                detail=f"File {filename!r} exceeds {settings.upload_max_file_size_mb}MB limit",
+            )
+
+        total_bytes += file_size
+        if total_bytes > max_total_bytes:
+            raise HTTPException(
+                status_code=413,
+                detail=f"Total upload exceeds {settings.upload_max_total_size_mb}MB limit",
+            )
+
+        produced = _process_uploaded_file(content, filename, source_dir)
+        saved_files.extend(produced)
+
+    if not saved_files:
+        raise HTTPException(
+            status_code=400,
+            detail="No supported files in upload. Supported: "
+                   + ", ".join(sorted(SUPPORTED_EXTENSIONS)),
+        )
+
+    # Count total files now in the directory
+    existing_count = sum(1 for p in source_dir.iterdir() if p.is_file())
+
+    return {
+        "job_id": str(job_id),
+        "files_added": len(saved_files),
+        "total_bytes_added": total_bytes,
+        "total_files_in_job": existing_count,
+        "files": saved_files,
+    }
 
 
 # ---------------------------------------------------------------------------

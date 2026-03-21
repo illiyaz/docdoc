@@ -1953,6 +1953,13 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                                         "failed": verification.failed_pages,
                                         "field_rates": verification.field_rates,
                                         "is_acceptable": verification.is_acceptable,
+                                        # Coordinate audit (Step 23)
+                                        "audit_status": verification.audit_status,
+                                        "audit_confidence": verification.audit_confidence,
+                                        "audit_consistency": verification.audit_consistency,
+                                        "pages_audited": verification.pages_audited,
+                                        # Static filter (Step 23d)
+                                        "removed_static": removed_static if 'removed_static' in dir() else {},
                                     },
                                 )
                             except Exception:

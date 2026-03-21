@@ -1,0 +1,5 @@
+Employer ID,Member ID,SSN,Other ID,Gender,Last Name,First Name,Middle Initial,Address Line #1,Address Line #2,City,State,Zip,Home Phone Number,E-mail Address,Date of Birth,Date of Hire,Employment Termination Date,Employee Status,Payroll Deductions/Funding Frequency,Employer Health Insurance Six Character Code ,Employer Health Insurance Effective Date,Coverage Code,User Defined 1   ,User Defined 2,SSO Value,Account Type,Election Effective Date,Per Pay Deduction,Full Election
+161391624,52721216,52721216,,M,FRANK,PETER,,340 Haley Road,,Ontario,NY,14519,5854240055,pete.frank@johnstonehvac-ny.com,19740809,20160229,,FT,B,NoMED,,,,,,MED ,20190101,$96.15 ,"$2,500.00 "
+161391624,67488244,67488244,,M,DILLMAN,EDWARD,,,,,,,,,,,,FT,B,MED,,,,,,MED ,20190101,$25.00 ,$650.00 
+161391624,69567080,69567080,,F,CRAFT,KAREN,,,,,,,,,,,,FT,B,MED,,,,,,MED ,,$20.00 ,$520.00 
+161391624,112643743,112643743,,M,ADAMS,TOREY,L,4945 State Route 96,,Shortsville,NY,14548,5855093410,torey.adams@johnstonehvac-ny.com,19720428,20090518,,FT,B,NoMED,,,,,,MED ,20190101,$101.92 ,"$2,650.00 "

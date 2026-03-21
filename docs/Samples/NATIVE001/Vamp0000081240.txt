@@ -1,0 +1,9 @@
+Name:	2022-11-01T11:58:36.266Z - 2022-11-01T14:18:51.160Z: 4 participants
+MIME Type:	Microsoft Teams Chat Conversation
+
+Communication Participants:	{"8:orgid:f9ddef10-2326-4b78-bb3a-e91b8c558f8d",amaynard@jswallacegroup.com,ann.maynard,erodriguez@jswallacegroup.com}
+Conversation First Present Time:	2022-11-01T11:58:37.923Z
+Conversation Last Updated Time:	2022-11-01T18:41:52.784Z
+First Communication:	2022-11-01T11:58:36.266Z
+Last Communication:	2022-11-01T14:18:51.160Z
+Number of Communications:	17

@@ -1,0 +1,6945 @@
+{
+  "3046246": {
+    "filename": "3046246.pdf",
+    "total_pages": 158,
+    "pdf_type": {
+      "type": "text",
+      "text_pages": 7,
+      "image_pages": 0,
+      "total_checked": 7,
+      "avg_text_len": 2142.0
+    },
+    "onset_page": 0,
+    "vision": {
+      "parsed": {
+        "pii_fields": [
+          {
+            "type": "PERSON",
+            "value": "Catiis, Joshua",
+            "label": "Athlete",
+            "position": "top_left"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "10/18/1988",
+            "label": "Age: 23",
+            "position": "middle_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "Cox, Jim",
+            "label": "Athlete",
+            "position": "middle_left"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "01/23/1959",
+            "label": "Age: 53",
+            "position": "middle_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "Henry, Mike",
+            "label": "Athlete",
+            "position": "middle_left"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "10/03/1959",
+            "label": "Age: 52",
+            "position": "middle_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "Lefebvre, Adam",
+            "label": "Athlete",
+            "position": "middle_left"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "04/14/1999",
+            "label": "Age: 13",
+            "position": "middle_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "Lefebvre, Ben",
+            "label": "Athlete",
+            "position": "middle_left"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "08/20/2000",
+            "label": "Age: 11",
+            "position": "middle_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "Marr, Ahna",
+            "label": "Athlete",
+            "position": "middle_left"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "04/21/1999",
+            "label": "Age: 13",
+            "position": "middle_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "Musick, Jake",
+            "label": "Athlete",
+            "position": "bottom_left"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "06/06/1995",
+            "label": "Age: 16",
+            "position": "bottom_left"
+          }
+        ],
+        "structure_type": "table",
+        "records_per_page": 7,
+        "cross_page_data": false,
+        "pages_per_instance": 1
+      }
+    },
+    "patterns": [
+      {
+        "type": "PERSON",
+        "label": "Athlete",
+        "test_matches": 0,
+        "regex": "Athlete[\\s:]*\\n?\\s*([A-Z][a-z'-]+,\\s+[A-Z][A-Za-z .'-]+)"
+      },
+      {
+        "type": "DATE_OF_BIRTH",
+        "label": "Age: 23",
+        "test_matches": 0,
+        "regex": "Age:\\ 23[\\s:]*\\n?\\s*(\\d{2}/\\d{2}/\\d{4})"
+      },
+      {
+        "type": "DATE_OF_BIRTH",
+        "label": "Age: 53",
+        "test_matches": 0,
+        "regex": "Age:\\ 53[\\s:]*\\n?\\s*(\\d{2}/\\d{2}/\\d{4})"
+      },
+      {
+        "type": "DATE_OF_BIRTH",
+        "label": "Age: 52",
+        "test_matches": 0,
+        "regex": "Age:\\ 52[\\s:]*\\n?\\s*(\\d{2}/\\d{2}/\\d{4})"
+      },
+      {
+        "type": "DATE_OF_BIRTH",
+        "label": "Age: 13",
+        "test_matches": 0,
+        "regex": "Age:\\ 13[\\s:]*\\n?\\s*(\\d{2}/\\d{2}/\\d{4})"
+      },
+      {
+        "type": "DATE_OF_BIRTH",
+        "label": "Age: 11",
+        "test_matches": 0,
+        "regex": "Age:\\ 11[\\s:]*\\n?\\s*(\\d{2}/\\d{2}/\\d{4})"
+      },
+      {
+        "type": "DATE_OF_BIRTH",
+        "label": "Age: 16",
+        "test_matches": 0,
+        "regex": "Age:\\ 16[\\s:]*\\n?\\s*(\\d{2}/\\d{2}/\\d{4})"
+      }
+    ],
+    "extraction": {
+      "error": "No patterns matched"
+    }
+  },
+  "3666752": {
+    "filename": "3666752.pdf",
+    "total_pages": 595,
+    "pdf_type": {
+      "type": "text",
+      "text_pages": 6,
+      "image_pages": 0,
+      "total_checked": 6,
+      "avg_text_len": 2624.0
+    },
+    "onset_page": 7,
+    "vision": {
+      "parsed": {
+        "pii_fields": [
+          {
+            "type": "PERSON",
+            "value": "ALEXANDER, JOSEPH",
+            "label": "Student Name",
+            "position": "top_left"
+          },
+          {
+            "type": "LOCATION",
+            "value": "6303 ST ALBION WAY APT L103 MOUNTLAKE TERRACE WA 98043",
+            "label": "Address",
+            "position": "top_left"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "01/21/1995",
+            "label": "Birth Date",
+            "position": "top_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "ROBERT WEISS",
+            "label": "First Family",
+            "position": "middle_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "JOY WEISS",
+            "label": "First Family",
+            "position": "middle_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "ALEXANDER, RACHEL",
+            "label": "Student Name",
+            "position": "middle_left"
+          },
+          {
+            "type": "LOCATION",
+            "value": "943 ALDER ST EDMONDS WA 98020",
+            "label": "Address",
+            "position": "middle_left"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "05/24/1996",
+            "label": "Birth Date",
+            "position": "middle_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "ROBYN ALEXANDER",
+            "label": "First Family",
+            "position": "middle_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "ALEXIOU, JAMES",
+            "label": "Student Name",
+            "position": "bottom_left"
+          },
+          {
+            "type": "LOCATION",
+            "value": "7916 196TH PL SW EDMONDS WA 98026",
+            "label": "Address",
+            "position": "bottom_left"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "02/24/1995",
+            "label": "Birth Date",
+            "position": "bottom_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "THOMAS ALEXIOU",
+            "label": "First Family",
+            "position": "bottom_left"
+          }
+        ],
+        "structure_type": "multi_page_template",
+        "records_per_page": 3,
+        "cross_page_data": false,
+        "pages_per_instance": 1
+      }
+    },
+    "patterns": [
+      {
+        "type": "PERSON",
+        "label": "Student Name",
+        "test_matches": 0,
+        "regex": "Student\\ Name[\\s:]*\\n?\\s*([A-Z][A-Z'-]+,\\s*[A-Z][A-Za-z .'-]+)"
+      },
+      {
+        "type": "LOCATION",
+        "label": "Address",
+        "test_matches": 0,
+        "regex": "Address[\\s:]*\\n?\\s*(.+?)"
+      },
+      {
+        "type": "DATE_OF_BIRTH",
+        "label": "Birth Date",
+        "test_matches": 0,
+        "regex": "Birth\\ Date[\\s:]*\\n?\\s*(\\d{2}/\\d{2}/\\d{4})"
+      },
+      {
+        "type": "PERSON",
+        "label": "First Family",
+        "test_matches": 3,
+        "regex": "First\\ Family[\\s:]*\\n?\\s*([A-Z][A-Z'-]+(?:\\s+[A-Z][A-Z.'-]*)+)"
+      }
+    ],
+    "extraction": {
+      "total_pages": 595,
+      "pages_scanned": 595,
+      "fields": {
+        "PERSON": {
+          "count": 1771,
+          "label": "First Family",
+          "sample_value": "ROBERT WEISS",
+          "samples": [
+            {
+              "page": 1,
+              "value": "EMBEAT TAYE\n \n \n \nABRAHAM BEKELE\n \n \n \nD"
+            },
+            {
+              "page": 1,
+              "value": "OCBAMICAEL ABRAHAM\n \n \n \nMESKALA TECLAY\n \n \n \nD"
+            },
+            {
+              "page": 1,
+              "value": "OCBAMICAEL ABRAHAM\n \n \n \nMESKALA TECLAY\n \n \n \nD"
+            },
+            {
+              "page": 2,
+              "value": "BLANCA ABREGO\n \n \n \nD"
+            },
+            {
+              "page": 2,
+              "value": "LISA ADAMS\n \n \n \nSTEPHEN ADAMS\n \n \n \nD"
+            },
+            {
+              "page": 2,
+              "value": "DEBORAH ADAMS\n \n \n \nMARTIN ADAMS\n \n \n \nD"
+            },
+            {
+              "page": 3,
+              "value": "DEBORAH ADAMS\n \n \n \nMARTIN ADAMS\n \n \n \nD"
+            },
+            {
+              "page": 3,
+              "value": "NORMAN ADAMSON\n \n \n \nSHAWNA ADAMSON\n \n \n \nD"
+            },
+            {
+              "page": 3,
+              "value": "ANGELA ADDISON\n \n \n \nELSON NIX\n \n \n \nD"
+            },
+            {
+              "page": 4,
+              "value": "ANGELA ADDISON\n \n \n \nELSON NIX\n \n \n \nD"
+            }
+          ]
+        }
+      },
+      "time_s": 0.89,
+      "ms_per_page": 1.5
+    },
+    "audit": {
+      "status": "NEEDS_REVIEW",
+      "summary": "Flagged 5 pages, auditing 5: {'BOUNDARY': 5}",
+      "pages_audited": 5,
+      "pages_checked": 5,
+      "avg_agreement": 0,
+      "per_page": [
+        {
+          "page": 1,
+          "status": "AUDITED",
+          "regex_found": {
+            "PERSON": [
+              "EMBEAT TAYE\n \n \n \nABRAHAM BEKELE\n \n \n \nD",
+              "OCBAMICAEL ABRAHAM\n \n \n \nMESKALA TECLAY\n \n \n \nD",
+              "OCBAMICAEL ABRAHAM\n \n \n \nMESKALA TECLAY\n \n \n \nD"
+            ]
+          },
+          "vision_found": {
+            "PERSON": [
+              "ABRAHAM, DAVID",
+              "ABRAHAM, MESGANA",
+              "ABRAHAM, RAHEL"
+            ],
+            "US_SSN": [
+              "7322 224TH ST SW",
+              "8515 236TH ST SW",
+              "8515 236TH ST SW"
+            ],
+            "DATE_OF_BIRTH": [
+              "06/14/1994",
+              "10/16/1994",
+              "02/12/1996"
+            ],
+            "LOCATION": [
+              "EDMONDS WA 98026",
+              "EDMONDS WA 98026",
+              "EDMONDS WA 98026"
+            ]
+          },
+          "comparison": {
+            "matches": [],
+            "missed_by_regex": [
+              {
+                "type": "US_SSN",
+                "vision_values": [
+                  "7322 224TH ST SW",
+                  "8515 236TH ST SW",
+                  "8515 236TH ST SW"
+                ]
+              },
+              {
+                "type": "LOCATION",
+                "vision_values": [
+                  "EDMONDS WA 98026",
+                  "EDMONDS WA 98026",
+                  "EDMONDS WA 98026"
+                ]
+              },
+              {
+                "type": "PERSON",
+                "vision_values": [
+                  "ABRAHAM DAVID",
+                  "ABRAHAM RAHEL",
+                  "ABRAHAM MESGANA"
+                ]
+              },
+              {
+                "type": "DATE_OF_BIRTH",
+                "vision_values": [
+                  "06/14/1994",
+                  "10/16/1994",
+                  "02/12/1996"
+                ]
+              }
+            ],
+            "regex_extra": [],
+            "value_mismatches": [],
+            "agreement_rate": 0,
+            "vision_total": 12,
+            "matched_total": 0
+          },
+          "flag_reason": "BOUNDARY \u2014 structural check"
+        },
+        {
+          "page": 298,
+          "status": "AUDITED",
+          "regex_found": {
+            "PERSON": [
+              "MICHELLE LANGDALE\n \n \n \nD",
+              "MICHELLE LANGDALE\n \n \n \nD",
+              "DOUGLAS LANGSTED\n \n \n \nMARGARET LANGSTED\n \n \n \nD"
+            ]
+          },
+          "vision_found": {
+            "PERSON": [
+              "LANGDALE, CONNOR",
+              "LANGDALE, LUKAS",
+              "LANGSTED, JESSICA"
+            ],
+            "US_SSN": [
+              "9324 216TH ST SW",
+              "9324 216TH ST SW",
+              "750 HEMLOCK ST"
+            ],
+            "DATE_OF_BIRTH": [
+              "11/07/1993",
+              "08/10/1995",
+              "03/01/1995"
+            ],
+            "LOCATION": [
+              "EDMONDS WA 98020",
+              "EDMONDS WA 98020",
+              "EDMONDS WA 98020"
+            ]
+          },
+          "comparison": {
+            "matches": [],
+            "missed_by_regex": [
+              {
+                "type": "US_SSN",
+                "vision_values": [
+                  "9324 216TH ST SW",
+                  "9324 216TH ST SW",
+                  "750 HEMLOCK ST"
+                ]
+              },
+              {
+                "type": "LOCATION",
+                "vision_values": [
+                  "EDMONDS WA 98020",
+                  "EDMONDS WA 98020",
+                  "EDMONDS WA 98020"
+                ]
+              },
+              {
+                "type": "PERSON",
+                "vision_values": [
+                  "LANGDALE CONNOR",
+                  "LANGDALE LUKAS",
+                  "LANGSTED JESSICA"
+                ]
+              },
+              {
+                "type": "DATE_OF_BIRTH",
+                "vision_values": [
+                  "11/07/1993",
+                  "08/10/1995",
+                  "03/01/1995"
+                ]
+              }
+            ],
+            "regex_extra": [],
+            "value_mismatches": [],
+            "agreement_rate": 0,
+            "vision_total": 12,
+            "matched_total": 0
+          },
+          "flag_reason": "BOUNDARY \u2014 structural check"
+        },
+        {
+          "page": 595,
+          "status": "AUDITED",
+          "regex_found": {
+            "PERSON": [
+              "MICHAEL ZORKO\n \n \n \nCHERYL ZORKO\n \n \n \nD",
+              "NITHAD ZUKANOVIC\n \n \n \nNURA NOVAKOVIC\n \n \n \nD"
+            ]
+          },
+          "vision_found": {
+            "PERSON": [
+              "ZORKO, NOAH",
+              "ZUKANOVIC, DAMIR"
+            ],
+            "US_SSN": [
+              "ZORKO0A000",
+              "ZUKANDAM000"
+            ],
+            "DATE_OF_BIRTH": [
+              "07/22/1995",
+              "09/29/1994"
+            ],
+            "LOCATION": [
+              "22810 EDMONDS WAY, EDMONDS WA 98020",
+              "20828 59TH PL W, LYNNWOOD WA 98036"
+            ]
+          },
+          "comparison": {
+            "matches": [],
+            "missed_by_regex": [
+              {
+                "type": "US_SSN",
+                "vision_values": [
+                  "ZORKO0A000",
+                  "ZUKANDAM000"
+                ]
+              },
+              {
+                "type": "LOCATION",
+                "vision_values": [
+                  "22810 EDMONDS WAY, EDMONDS WA 98020",
+                  "20828 59TH PL W, LYNNWOOD WA 98036"
+                ]
+              },
+              {
+                "type": "PERSON",
+                "vision_values": [
+                  "ZORKO NOAH",
+                  "ZUKANOVIC DAMIR"
+                ]
+              },
+              {
+                "type": "DATE_OF_BIRTH",
+                "vision_values": [
+                  "07/22/1995",
+                  "09/29/1994"
+                ]
+              }
+            ],
+            "regex_extra": [],
+            "value_mismatches": [],
+            "agreement_rate": 0,
+            "vision_total": 8,
+            "matched_total": 0
+          },
+          "flag_reason": "BOUNDARY \u2014 structural check"
+        },
+        {
+          "page": 149,
+          "status": "AUDITED",
+          "regex_found": {
+            "PERSON": [
+              "JENNIFER EUTSLER\n \n \n \nD",
+              "RUSSELL EVANS\n \n \n \nSUZANNE EVANS\n \n \n \nD",
+              "BOIAN EVSTATIEV\n \n \n \nDIANA EVSTATIEVA\n \n \n \nD"
+            ]
+          },
+          "vision_found": {
+            "PERSON": [
+              "EUTSLER, ETHAN",
+              "EVANS, ERIN",
+              "EVSTATIEVA, GLORIA"
+            ],
+            "US_SSN": [
+              "WT09C",
+              "HH12B",
+              "WN10A"
+            ],
+            "DATE_OF_BIRTH": [
+              "09/07/1995",
+              "11/19/1993",
+              "01/18/1995"
+            ],
+            "LOCATION": [
+              "8415 221ST PL SW, EDMONDS WA 98026",
+              "23309 92ND AVE W, EDMONDS WA 98020",
+              "9401 244TH ST SW APT W203, EDMONDS WA 98020"
+            ]
+          },
+          "comparison": {
+            "matches": [],
+            "missed_by_regex": [
+              {
+                "type": "US_SSN",
+                "vision_values": [
+                  "WT09C",
+                  "HH12B",
+                  "WN10A"
+                ]
+              },
+              {
+                "type": "LOCATION",
+                "vision_values": [
+                  "8415 221ST PL SW, EDMONDS WA 98026",
+                  "23309 92ND AVE W, EDMONDS WA 98020",
+                  "9401 244TH ST SW APT W203, EDMONDS WA 98020"
+                ]
+              },
+              {
+                "type": "PERSON",
+                "vision_values": [
+                  "EVANS ERIN",
+                  "EVSTATIEVA GLORIA",
+                  "EUTSLER ETHAN"
+                ]
+              },
+              {
+                "type": "DATE_OF_BIRTH",
+                "vision_values": [
+                  "09/07/1995",
+                  "11/19/1993",
+                  "01/18/1995"
+                ]
+              }
+            ],
+            "regex_extra": [],
+            "value_mismatches": [],
+            "agreement_rate": 0,
+            "vision_total": 12,
+            "matched_total": 0
+          },
+          "flag_reason": "BOUNDARY \u2014 structural check"
+        },
+        {
+          "page": 447,
+          "status": "AUDITED",
+          "regex_found": {
+            "PERSON": [
+              "LISA RHEINFORD\n \n \n \nKEVIN RHEINFORD\n \n \n \nD",
+              "CORY RICE\n \n \n \nD",
+              "DARREN RICH\n \n \n \nJENNIFER RICH\n \n \n \nD"
+            ]
+          },
+          "vision_found": {
+            "PERSON": [
+              "RHEINORD, TROY",
+              "RICE, BRAD",
+              "RICH, IAN"
+            ],
+            "US_SSN": [
+              "WN09B",
+              "ET12B",
+              "ET11B"
+            ],
+            "DATE_OF_BIRTH": [
+              "03/18/1995",
+              "01/06/1995",
+              "06/18/1995"
+            ],
+            "LOCATION": [
+              "9301 217TH PL SW, EDMONDS WA 98020",
+              "23406 HUMBER LN, EDMONDS WA 98020",
+              "8006 213TH ST SW, EDMONDS WA 98026"
+            ]
+          },
+          "comparison": {
+            "matches": [],
+            "missed_by_regex": [
+              {
+                "type": "US_SSN",
+                "vision_values": [
+                  "WN09B",
+                  "ET12B",
+                  "ET11B"
+                ]
+              },
+              {
+                "type": "LOCATION",
+                "vision_values": [
+                  "9301 217TH PL SW, EDMONDS WA 98020",
+                  "23406 HUMBER LN, EDMONDS WA 98020",
+                  "8006 213TH ST SW, EDMONDS WA 98026"
+                ]
+              },
+              {
+                "type": "PERSON",
+                "vision_values": [
+                  "RHEINORD TROY",
+                  "RICE BRAD",
+                  "RICH IAN"
+                ]
+              },
+              {
+                "type": "DATE_OF_BIRTH",
+                "vision_values": [
+                  "03/18/1995",
+                  "01/06/1995",
+                  "06/18/1995"
+                ]
+              }
+            ],
+            "regex_extra": [],
+            "value_mismatches": [],
+            "agreement_rate": 0,
+            "vision_total": 12,
+            "matched_total": 0
+          },
+          "flag_reason": "BOUNDARY \u2014 structural check"
+        }
+      ],
+      "missed_field_summary": {
+        "US_SSN": 5,
+        "LOCATION": 5,
+        "PERSON": 5,
+        "DATE_OF_BIRTH": 5
+      },
+      "recommendation": "Review needed \u2014 avg agreement 0%, missed: {'US_SSN': 5, 'LOCATION': 5, 'PERSON': 5, 'DATE_OF_BIRTH': 5}"
+    }
+  },
+  "3733050": {
+    "filename": "3733050.pdf",
+    "total_pages": 3063,
+    "pdf_type": {
+      "type": "text",
+      "text_pages": 7,
+      "image_pages": 0,
+      "total_checked": 7,
+      "avg_text_len": 2119.0
+    },
+    "onset_page": 10,
+    "vision": {
+      "parsed": {
+        "pii_fields": [
+          {
+            "type": "PERSON",
+            "value": "Dale Ackley",
+            "label": "Recipient Name",
+            "position": "middle_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "Kathren J. Ackley",
+            "label": "Student Name",
+            "position": "middle_right"
+          },
+          {
+            "type": "LOCATION",
+            "value": "18410 67TH AVE W",
+            "label": "Recipient Address",
+            "position": "middle_left"
+          },
+          {
+            "type": "LOCATION",
+            "value": "LYNNWOOD, WA 98037",
+            "label": "Recipient Address",
+            "position": "middle_left"
+          },
+          {
+            "type": "LOCATION",
+            "value": "Meadowdale High School",
+            "label": "School Name",
+            "position": "top_center"
+          },
+          {
+            "type": "LOCATION",
+            "value": "6002 168th St SW",
+            "label": "School Address",
+            "position": "top_center"
+          },
+          {
+            "type": "LOCATION",
+            "value": "Lynnwood, WA 98037",
+            "label": "School Address",
+            "position": "top_center"
+          },
+          {
+            "type": "PHONE_NUMBER",
+            "value": "425-431-6400",
+            "label": "School Phone",
+            "position": "top_center"
+          }
+        ],
+        "structure_type": "fixed_single_page",
+        "records_per_page": 1,
+        "cross_page_data": false,
+        "pages_per_instance": 1
+      }
+    },
+    "patterns": [
+      {
+        "type": "PERSON",
+        "label": "Recipient Name",
+        "test_matches": 0,
+        "regex": "Recipient\\ Name[\\s:]*\\n?\\s*([A-Z][a-z'-]+(?:\\s+[A-Z][a-z'-]*)+)"
+      },
+      {
+        "type": "PERSON",
+        "label": "Student Name",
+        "test_matches": 0,
+        "regex": "Student\\ Name[\\s:]*\\n?\\s*([A-Z][a-z'-]+(?:\\s+[A-Z][a-z'-]*)+)"
+      },
+      {
+        "type": "LOCATION",
+        "label": "Recipient Address",
+        "test_matches": 0,
+        "regex": "Recipient\\ Address[\\s:]*\\n?\\s*(.+?)"
+      },
+      {
+        "type": "LOCATION",
+        "label": "School Name",
+        "test_matches": 0,
+        "regex": "School\\ Name[\\s:]*\\n?\\s*(.+?)"
+      },
+      {
+        "type": "LOCATION",
+        "label": "School Address",
+        "test_matches": 0,
+        "regex": "School\\ Address[\\s:]*\\n?\\s*(.+?)"
+      },
+      {
+        "type": "PHONE_NUMBER",
+        "label": "School Phone",
+        "test_matches": 0,
+        "regex": "School\\ Phone[\\s:]*\\n?\\s*(\\d{3}-\\d{3}-\\d{4})"
+      }
+    ],
+    "extraction": {
+      "error": "No patterns matched"
+    }
+  },
+  "3738594": {
+    "filename": "3738594.pdf",
+    "total_pages": 3583,
+    "pdf_type": {
+      "type": "text",
+      "text_pages": 7,
+      "image_pages": 0,
+      "total_checked": 7,
+      "avg_text_len": 2425.0
+    },
+    "onset_page": 0,
+    "vision": {
+      "parsed": {
+        "pii_fields": [
+          {
+            "type": "PERSON",
+            "value": "Arterm S. Abramenko",
+            "label": "Student Name",
+            "position": "middle_right"
+          },
+          {
+            "type": "PERSON",
+            "value": "Sergei Abramenko & Regina Smolniakova",
+            "label": "Parent/Guardian Name",
+            "position": "middle_left"
+          },
+          {
+            "type": "LOCATION",
+            "value": "18415 BLUE RIDGE DR",
+            "label": "Address",
+            "position": "middle_left"
+          },
+          {
+            "type": "LOCATION",
+            "value": "LYNNWOOD WA 98037",
+            "label": "Address",
+            "position": "middle_left"
+          },
+          {
+            "type": "LOCATION",
+            "value": "Meadowdale High School",
+            "label": "School Name",
+            "position": "top_center"
+          },
+          {
+            "type": "LOCATION",
+            "value": "6002 168th St SW",
+            "label": "School Address",
+            "position": "top_center"
+          },
+          {
+            "type": "LOCATION",
+            "value": "Lynnwood, WA 98037",
+            "label": "School Address",
+            "position": "top_center"
+          },
+          {
+            "type": "PHONE_NUMBER",
+            "value": "425-431-7650",
+            "label": "School Phone",
+            "position": "top_center"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "2010-2011",
+            "label": "Academic Year",
+            "position": "middle_right"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "Semester 1 2010-11",
+            "label": "Semester",
+            "position": "middle_right"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "February 14th",
+            "label": "Class Registration Date",
+            "position": "bottom_left"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "February 23rd",
+            "label": "Online Registration Date",
+            "position": "bottom_left"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "February 18-21st",
+            "label": "Winter Break Dates",
+            "position": "bottom_left"
+          }
+        ],
+        "structure_type": "fixed_single_page",
+        "records_per_page": 1,
+        "cross_page_data": false,
+        "pages_per_instance": 1
+      }
+    },
+    "patterns": [
+      {
+        "type": "PERSON",
+        "label": "Student Name",
+        "test_matches": 0,
+        "regex": "Student\\ Name[\\s:]*\\n?\\s*([A-Z][a-z'-]+(?:\\s+[A-Z][a-z'-]*)+)"
+      },
+      {
+        "type": "PERSON",
+        "label": "Parent/Guardian Name",
+        "test_matches": 0,
+        "regex": "Parent/Guardian\\ Name[\\s:]*\\n?\\s*([A-Z][a-z'-]+(?:\\s+[A-Z][a-z'-]*)+)"
+      },
+      {
+        "type": "LOCATION",
+        "label": "Address",
+        "test_matches": 0,
+        "regex": "Address[\\s:]*\\n?\\s*(.+?)"
+      },
+      {
+        "type": "LOCATION",
+        "label": "School Name",
+        "test_matches": 0,
+        "regex": "School\\ Name[\\s:]*\\n?\\s*(.+?)"
+      },
+      {
+        "type": "LOCATION",
+        "label": "School Address",
+        "test_matches": 0,
+        "regex": "School\\ Address[\\s:]*\\n?\\s*(.+?)"
+      },
+      {
+        "type": "PHONE_NUMBER",
+        "label": "School Phone",
+        "test_matches": 0,
+        "regex": "School\\ Phone[\\s:]*\\n?\\s*(\\d{3}-\\d{3}-\\d{4})"
+      },
+      {
+        "type": "DATE_OF_BIRTH",
+        "label": "Academic Year",
+        "test_matches": 0,
+        "regex": "Academic\\ Year[\\s:]*\\n?\\s*(\\S+)"
+      },
+      {
+        "type": "DATE_OF_BIRTH",
+        "label": "Semester",
+        "test_matches": 4,
+        "regex": "Semester[\\s:]*\\n?\\s*(\\S+)"
+      },
+      {
+        "type": "DATE_OF_BIRTH",
+        "label": "Class Registration Date",
+        "test_matches": 0,
+        "regex": "Class\\ Registration\\ Date[\\s:]*\\n?\\s*(\\S+)"
+      },
+      {
+        "type": "DATE_OF_BIRTH",
+        "label": "Online Registration Date",
+        "test_matches": 0,
+        "regex": "Online\\ Registration\\ Date[\\s:]*\\n?\\s*(\\S+)"
+      },
+      {
+        "type": "DATE_OF_BIRTH",
+        "label": "Winter Break Dates",
+        "test_matches": 0,
+        "regex": "Winter\\ Break\\ Dates[\\s:]*\\n?\\s*(\\S+)"
+      }
+    ],
+    "extraction": {
+      "total_pages": 3583,
+      "pages_scanned": 2193,
+      "fields": {
+        "DATE_OF_BIRTH": {
+          "count": 188,
+          "label": "Semester",
+          "sample_value": "Semester 1 2010-11",
+          "samples": [
+            {
+              "page": 15,
+              "value": "Poor"
+            },
+            {
+              "page": 27,
+              "value": "Needs"
+            },
+            {
+              "page": 53,
+              "value": "Needs"
+            },
+            {
+              "page": 53,
+              "value": "GEOMETRY"
+            },
+            {
+              "page": 57,
+              "value": "for"
+            },
+            {
+              "page": 73,
+              "value": "Poor"
+            },
+            {
+              "page": 83,
+              "value": "Poor"
+            },
+            {
+              "page": 83,
+              "value": "GPA"
+            },
+            {
+              "page": 85,
+              "value": "Poor"
+            },
+            {
+              "page": 85,
+              "value": "GPA"
+            }
+          ]
+        }
+      },
+      "time_s": 2.26,
+      "ms_per_page": 1.0
+    },
+    "audit": {
+      "status": "NEEDS_REVIEW",
+      "summary": "Flagged 2039 pages, auditing 8: {'EMPTY': 8}",
+      "pages_audited": 8,
+      "pages_checked": 8,
+      "avg_agreement": 0,
+      "per_page": [
+        {
+          "page": 3,
+          "status": "AUDITED",
+          "regex_found": {},
+          "vision_found": {
+            "PERSON": [
+              "Patrick M. Abrigo",
+              "Michael & Carolyn Abrigo",
+              "Matthew Vanni",
+              "Myrnie VanKempen",
+              "Dan Rauch"
+            ],
+            "LOCATION": [
+              "6118 183RD PL SW, LYNNWOOD WA 98037",
+              "6118 183RD PL SW, LYNNWOOD WA 98037"
+            ]
+          },
+          "comparison": {
+            "matches": [],
+            "missed_by_regex": [
+              {
+                "type": "LOCATION",
+                "vision_values": [
+                  "6118 183RD PL SW, LYNNWOOD WA 98037",
+                  "6118 183RD PL SW, LYNNWOOD WA 98037"
+                ]
+              },
+              {
+                "type": "PERSON",
+                "vision_values": [
+                  "Patrick M. Abrigo",
+                  "Michael & Carolyn Abrigo",
+                  "Matthew Vanni"
+                ]
+              }
+            ],
+            "regex_extra": [],
+            "value_mismatches": [],
+            "agreement_rate": 0,
+            "vision_total": 11,
+            "matched_total": 0
+          },
+          "flag_reason": "EMPTY \u2014 content page with zero extractions"
+        },
+        {
+          "page": 5,
+          "status": "AUDITED",
+          "regex_found": {},
+          "vision_found": {
+            "PERSON": [
+              "William T. Ackerman",
+              "John & Terumi Ackerman",
+              "Natasha Miller",
+              "Troy Parker",
+              "Sally Blackham"
+            ],
+            "LOCATION": [
+              "16023 2ND PL W, LYNNWOOD WA 98087",
+              "16023 2ND PL W, LYNNWOOD WA 98087"
+            ]
+          },
+          "comparison": {
+            "matches": [],
+            "missed_by_regex": [
+              {
+                "type": "LOCATION",
+                "vision_values": [
+                  "16023 2ND PL W, LYNNWOOD WA 98087",
+                  "16023 2ND PL W, LYNNWOOD WA 98087"
+                ]
+              },
+              {
+                "type": "PERSON",
+                "vision_values": [
+                  "William T. Ackerman",
+                  "John & Terumi Ackerman",
+                  "Natasha Miller"
+                ]
+              }
+            ],
+            "regex_extra": [],
+            "value_mismatches": [],
+            "agreement_rate": 0,
+            "vision_total": 11,
+            "matched_total": 0
+          },
+          "flag_reason": "EMPTY \u2014 content page with zero extractions"
+        },
+        {
+          "page": 6,
+          "status": "AUDITED",
+          "regex_found": {},
+          "vision_found": {
+            "PERSON": [
+              "William T. Ackerman",
+              "John & Terumi Ackerman"
+            ],
+            "LOCATION": [
+              "16023 2ND PL W, LYNNWOOD WA 98087",
+              "16023 2ND PL W, LYNNWOOD WA 98087"
+            ]
+          },
+          "comparison": {
+            "matches": [],
+            "missed_by_regex": [
+              {
+                "type": "LOCATION",
+                "vision_values": [
+                  "16023 2ND PL W, LYNNWOOD WA 98087",
+                  "16023 2ND PL W, LYNNWOOD WA 98087"
+                ]
+              },
+              {
+                "type": "PERSON",
+                "vision_values": [
+                  "William T. Ackerman",
+                  "John & Terumi Ackerman"
+                ]
+              }
+            ],
+            "regex_extra": [],
+            "value_mismatches": [],
+            "agreement_rate": 0,
+            "vision_total": 4,
+            "matched_total": 0
+          },
+          "flag_reason": "EMPTY \u2014 content page with zero extractions"
+        },
+        {
+          "page": 7,
+          "status": "AUDITED",
+          "regex_found": {},
+          "vision_found": {
+            "PERSON": [
+              "Jonathan D. Ackley",
+              "Dale Ackley",
+              "Dan Rauch",
+              "Claire Beach",
+              "Eric Clem"
+            ],
+            "LOCATION": [
+              "18410 67TH AVE W, LYNNWOOD WA 98037",
+              "18410 67TH AVE W, LYNNWOOD WA 98037"
+            ]
+          },
+          "comparison": {
+            "matches": [],
+            "missed_by_regex": [
+              {
+                "type": "LOCATION",
+                "vision_values": [
+                  "18410 67TH AVE W, LYNNWOOD WA 98037",
+                  "18410 67TH AVE W, LYNNWOOD WA 98037"
+                ]
+              },
+              {
+                "type": "PERSON",
+                "vision_values": [
+                  "Jonathan D. Ackley",
+                  "Dale Ackley",
+                  "Dan Rauch"
+                ]
+              }
+            ],
+            "regex_extra": [],
+            "value_mismatches": [],
+            "agreement_rate": 0,
+            "vision_total": 10,
+            "matched_total": 0
+          },
+          "flag_reason": "EMPTY \u2014 content page with zero extractions"
+        },
+        {
+          "page": 9,
+          "status": "AUDITED",
+          "regex_found": {},
+          "vision_found": {
+            "PERSON": [
+              "Alexandra T. Adams",
+              "Troy & Eileen Adams",
+              "Jeffrey Brender",
+              "Robert Youngken",
+              "Robin McNabb"
+            ],
+            "LOCATION": [
+              "17102 67TH AVE W, EDMONDS WA 98026",
+              "17102 67TH AVE W, EDMONDS WA 98026"
+            ]
+          },
+          "comparison": {
+            "matches": [],
+            "missed_by_regex": [
+              {
+                "type": "LOCATION",
+                "vision_values": [
+                  "17102 67TH AVE W, EDMONDS WA 98026",
+                  "17102 67TH AVE W, EDMONDS WA 98026"
+                ]
+              },
+              {
+                "type": "PERSON",
+                "vision_values": [
+                  "Alexandra T. Adams",
+                  "Troy & Eileen Adams",
+                  "Jeffrey Brender"
+                ]
+              }
+            ],
+            "regex_extra": [],
+            "value_mismatches": [],
+            "agreement_rate": 0,
+            "vision_total": 10,
+            "matched_total": 0
+          },
+          "flag_reason": "EMPTY \u2014 content page with zero extractions"
+        },
+        {
+          "page": 11,
+          "status": "AUDITED",
+          "regex_found": {},
+          "vision_found": {
+            "PERSON": [
+              "Brittany A. Adams",
+              "Glenn Adams & Molly Weber",
+              "Daniel DeJoy",
+              "Casey Selfridge",
+              "Carol Smith"
+            ],
+            "LOCATION": [
+              "5202 150TH PL SW, EDMONDS WA 98026",
+              "5202 150TH PL SW, EDMONDS WA 98026"
+            ]
+          },
+          "comparison": {
+            "matches": [],
+            "missed_by_regex": [
+              {
+                "type": "LOCATION",
+                "vision_values": [
+                  "5202 150TH PL SW, EDMONDS WA 98026",
+                  "5202 150TH PL SW, EDMONDS WA 98026"
+                ]
+              },
+              {
+                "type": "PERSON",
+                "vision_values": [
+                  "Brittany A. Adams",
+                  "Glenn Adams & Molly Weber",
+                  "Daniel DeJoy"
+                ]
+              }
+            ],
+            "regex_extra": [],
+            "value_mismatches": [],
+            "agreement_rate": 0,
+            "vision_total": 10,
+            "matched_total": 0
+          },
+          "flag_reason": "EMPTY \u2014 content page with zero extractions"
+        },
+        {
+          "page": 13,
+          "status": "AUDITED",
+          "regex_found": {},
+          "vision_found": {
+            "PERSON": [
+              "Jade E. Adams",
+              "Alicia & Todd Adams",
+              "Jill Van Berkom",
+              "Jeffrey Brender",
+              "Maria Serka"
+            ],
+            "LOCATION": [
+              "4904 147TH PL SW, EDMONDS WA 98026",
+              "4904 147TH PL SW, EDMONDS WA 98026"
+            ]
+          },
+          "comparison": {
+            "matches": [],
+            "missed_by_regex": [
+              {
+                "type": "LOCATION",
+                "vision_values": [
+                  "4904 147TH PL SW, EDMONDS WA 98026",
+                  "4904 147TH PL SW, EDMONDS WA 98026"
+                ]
+              },
+              {
+                "type": "PERSON",
+                "vision_values": [
+                  "Jade E. Adams",
+                  "Alicia & Todd Adams",
+                  "Jill Van Berkom"
+                ]
+              }
+            ],
+            "regex_extra": [],
+            "value_mismatches": [],
+            "agreement_rate": 0,
+            "vision_total": 10,
+            "matched_total": 0
+          },
+          "flag_reason": "EMPTY \u2014 content page with zero extractions"
+        },
+        {
+          "page": 17,
+          "status": "AUDITED",
+          "regex_found": {},
+          "vision_found": {
+            "PERSON": [
+              "Matthew A. Adams",
+              "Jane & Paul Nelson",
+              "Claire Beach",
+              "Beth Marriott",
+              "Alison Ersfeld"
+            ],
+            "LOCATION": [
+              "15817 53RD PL W, EDMONDS WA 98026"
+            ]
+          },
+          "comparison": {
+            "matches": [],
+            "missed_by_regex": [
+              {
+                "type": "LOCATION",
+                "vision_values": [
+                  "15817 53RD PL W, EDMONDS WA 98026"
+                ]
+              },
+              {
+                "type": "PERSON",
+                "vision_values": [
+                  "Matthew A. Adams",
+                  "Jane & Paul Nelson",
+                  "Claire Beach"
+                ]
+              }
+            ],
+            "regex_extra": [],
+            "value_mismatches": [],
+            "agreement_rate": 0,
+            "vision_total": 8,
+            "matched_total": 0
+          },
+          "flag_reason": "EMPTY \u2014 content page with zero extractions"
+        }
+      ],
+      "missed_field_summary": {
+        "LOCATION": 8,
+        "PERSON": 8
+      },
+      "recommendation": "Review needed \u2014 avg agreement 0%, missed: {'LOCATION': 8, 'PERSON': 8}"
+    }
+  },
+  "3738641": {
+    "filename": "3738641.pdf",
+    "total_pages": 3307,
+    "pdf_type": {
+      "type": "mixed",
+      "text_pages": 6,
+      "image_pages": 1,
+      "total_checked": 7,
+      "avg_text_len": 2086.0
+    },
+    "onset_page": 0,
+    "vision": {
+      "parsed": {
+        "pii_fields": [
+          {
+            "type": "PERSON",
+            "value": "Arterm S. Abramenko",
+            "label": "Student Name",
+            "position": "middle_right"
+          },
+          {
+            "type": "PERSON",
+            "value": "Sergei Abramenko & Regina Smolniakova",
+            "label": "Parent/Guardian Name",
+            "position": "middle_left"
+          },
+          {
+            "type": "LOCATION",
+            "value": "18415 BLUE RIDGE DR",
+            "label": "Address",
+            "position": "middle_left"
+          },
+          {
+            "type": "LOCATION",
+            "value": "LYNNWOOD WA 98037",
+            "label": "Address",
+            "position": "middle_left"
+          },
+          {
+            "type": "LOCATION",
+            "value": "Meadowdale High School",
+            "label": "School Name",
+            "position": "top_center"
+          },
+          {
+            "type": "LOCATION",
+            "value": "6002 168th St SW",
+            "label": "School Address",
+            "position": "top_center"
+          },
+          {
+            "type": "LOCATION",
+            "value": "Lynnwood, WA 98037",
+            "label": "School Address",
+            "position": "top_center"
+          },
+          {
+            "type": "PHONE_NUMBER",
+            "value": "425-431-7650",
+            "label": "School Phone",
+            "position": "top_center"
+          }
+        ],
+        "structure_type": "fixed_single_page",
+        "records_per_page": 1,
+        "cross_page_data": false,
+        "pages_per_instance": 1
+      }
+    },
+    "patterns": [
+      {
+        "type": "PERSON",
+        "label": "Student Name",
+        "test_matches": 0,
+        "regex": "Student\\ Name[\\s:]*\\n?\\s*([A-Z][a-z'-]+(?:\\s+[A-Z][a-z'-]*)+)"
+      },
+      {
+        "type": "PERSON",
+        "label": "Parent/Guardian Name",
+        "test_matches": 0,
+        "regex": "Parent/Guardian\\ Name[\\s:]*\\n?\\s*([A-Z][a-z'-]+(?:\\s+[A-Z][a-z'-]*)+)"
+      },
+      {
+        "type": "LOCATION",
+        "label": "Address",
+        "test_matches": 0,
+        "regex": "Address[\\s:]*\\n?\\s*(.+?)"
+      },
+      {
+        "type": "LOCATION",
+        "label": "School Name",
+        "test_matches": 0,
+        "regex": "School\\ Name[\\s:]*\\n?\\s*(.+?)"
+      },
+      {
+        "type": "LOCATION",
+        "label": "School Address",
+        "test_matches": 0,
+        "regex": "School\\ Address[\\s:]*\\n?\\s*(.+?)"
+      },
+      {
+        "type": "PHONE_NUMBER",
+        "label": "School Phone",
+        "test_matches": 0,
+        "regex": "School\\ Phone[\\s:]*\\n?\\s*(\\d{3}-\\d{3}-\\d{4})"
+      }
+    ],
+    "extraction": {
+      "error": "No patterns matched"
+    }
+  },
+  "ABCNY_560_0001384129": {
+    "filename": "ABCNY_560_0001384129.pdf",
+    "total_pages": 67,
+    "pdf_type": {
+      "type": "text",
+      "text_pages": 7,
+      "image_pages": 0,
+      "total_checked": 7,
+      "avg_text_len": 3246.0
+    },
+    "onset_page": 26,
+    "vision": {
+      "parsed": {
+        "pii_fields": [
+          {
+            "type": "PERSON",
+            "value": "CHEN,LYNN",
+            "label": "PERSONNEL",
+            "position": "top_left"
+          },
+          {
+            "type": "LOCATION",
+            "value": "32 SAGE STREET",
+            "label": "Mailing & Home Address",
+            "position": "top_left"
+          },
+          {
+            "type": "LOCATION",
+            "value": "HOLMDEL,NJ 07733",
+            "label": "Mailing & Home Address",
+            "position": "top_left"
+          },
+          {
+            "type": "US_SSN",
+            "value": "XXXXX-XX-XXXX",
+            "label": "SSN",
+            "position": "middle_left"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "05/22/1993",
+            "label": "Dates",
+            "position": "middle_left"
+          },
+          {
+            "type": "ACCOUNT_NUMBER",
+            "value": "XXXXXX2483",
+            "label": "Direct Deposits",
+            "position": "middle_left"
+          },
+          {
+            "type": "ACCOUNT_NUMBER",
+            "value": "XXXXXXX X",
+            "label": "Direct Deposits",
+            "position": "middle_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "CLAUDIO-BLUM,LILLIAN",
+            "label": "PERSONNEL",
+            "position": "middle_left"
+          },
+          {
+            "type": "LOCATION",
+            "value": "42 QUARTZ LANE",
+            "label": "Mailing & Home Address",
+            "position": "middle_left"
+          },
+          {
+            "type": "LOCATION",
+            "value": "PATTERSON,NJ 07501",
+            "label": "Mailing & Home Address",
+            "position": "middle_left"
+          },
+          {
+            "type": "US_SSN",
+            "value": "XXXXX-XX-XXXX",
+            "label": "SSN",
+            "position": "middle_left"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "03/28/1965",
+            "label": "Dates",
+            "position": "middle_left"
+          },
+          {
+            "type": "ACCOUNT_NUMBER",
+            "value": "XXXXX3657",
+            "label": "Direct Deposits",
+            "position": "middle_left"
+          },
+          {
+            "type": "ACCOUNT_NUMBER",
+            "value": "XXXXXXX X",
+            "label": "Direct Deposits",
+            "position": "middle_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "COELHO,HELDER",
+            "label": "PERSONNEL",
+            "position": "bottom_left"
+          },
+          {
+            "type": "LOCATION",
+            "value": "6471 POTTERS WAY",
+            "label": "Mailing & Home Address",
+            "position": "bottom_left"
+          },
+          {
+            "type": "LOCATION",
+            "value": "POWELL,OH 43065",
+            "label": "Mailing & Home Address",
+            "position": "bottom_left"
+          },
+          {
+            "type": "US_SSN",
+            "value": "XXXXX-XX-XXXX",
+            "label": "SSN",
+            "position": "bottom_left"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "03/08/1966",
+            "label": "Dates",
+            "position": "bottom_left"
+          },
+          {
+            "type": "ACCOUNT_NUMBER",
+            "value": "XXXXX3657",
+            "label": "Direct Deposits",
+            "position": "bottom_left"
+          },
+          {
+            "type": "ACCOUNT_NUMBER",
+            "value": "XXXXXXX X",
+            "label": "Direct Deposits",
+            "position": "bottom_left"
+          }
+        ],
+        "structure_type": "fixed_single_page",
+        "records_per_page": 3,
+        "cross_page_data": false,
+        "pages_per_instance": 1
+      }
+    },
+    "patterns": [
+      {
+        "type": "PERSON",
+        "label": "PERSONNEL",
+        "test_matches": 0,
+        "regex": "PERSONNEL[\\s:]*\\n?\\s*([A-Z][A-Z'-]+,\\s*[A-Z][A-Za-z .'-]+)"
+      },
+      {
+        "type": "LOCATION",
+        "label": "Mailing & Home Address",
+        "test_matches": 3,
+        "regex": "Mailing\\ \\&\\ Home\\ Address[\\s:]*\\n?\\s*(.+?)"
+      },
+      {
+        "type": "US_SSN",
+        "label": "SSN",
+        "test_matches": 3,
+        "regex": "SSN[\\s:]*\\n?\\s*(\\S+)"
+      },
+      {
+        "type": "DATE_OF_BIRTH",
+        "label": "Dates",
+        "test_matches": 0,
+        "regex": "Dates[\\s:]*\\n?\\s*(\\d{2}/\\d{2}/\\d{4})"
+      },
+      {
+        "type": "ACCOUNT_NUMBER",
+        "label": "Direct Deposits",
+        "test_matches": 2,
+        "regex": "Direct\\ Deposits[\\s:]*\\n?\\s*(\\S+)"
+      }
+    ],
+    "extraction": {
+      "total_pages": 67,
+      "pages_scanned": 67,
+      "fields": {
+        "LOCATION": {
+          "count": 0,
+          "label": "Mailing & Home Address",
+          "sample_value": "32 SAGE STREET",
+          "samples": []
+        },
+        "US_SSN": {
+          "count": 123,
+          "label": "SSN",
+          "sample_value": "XXXXX-XX-XXXX",
+          "samples": [
+            {
+              "page": 3,
+              "value": "BUSINESS"
+            },
+            {
+              "page": 5,
+              "value": "BUSINESS"
+            },
+            {
+              "page": 14,
+              "value": "BUSINESS"
+            },
+            {
+              "page": 19,
+              "value": "Basis"
+            },
+            {
+              "page": 19,
+              "value": "Dates"
+            },
+            {
+              "page": 19,
+              "value": "Basis"
+            },
+            {
+              "page": 20,
+              "value": "Ac"
+            },
+            {
+              "page": 20,
+              "value": "Ac"
+            },
+            {
+              "page": 21,
+              "value": "Basis"
+            },
+            {
+              "page": 21,
+              "value": "Basis"
+            }
+          ]
+        },
+        "ACCOUNT_NUMBER": {
+          "count": 54,
+          "label": "Direct Deposits",
+          "sample_value": "XXXXXXX X",
+          "samples": [
+            {
+              "page": 20,
+              "value": "XXXXXXXX"
+            },
+            {
+              "page": 21,
+              "value": "XXXXXXXX5307"
+            },
+            {
+              "page": 23,
+              "value": "Acct"
+            },
+            {
+              "page": 23,
+              "value": "Acct"
+            },
+            {
+              "page": 24,
+              "value": "XXXXX0200"
+            },
+            {
+              "page": 25,
+              "value": "Code"
+            },
+            {
+              "page": 25,
+              "value": "Acct"
+            },
+            {
+              "page": 26,
+              "value": "Race:"
+            },
+            {
+              "page": 27,
+              "value": "Race:"
+            },
+            {
+              "page": 28,
+              "value": "Code"
+            }
+          ]
+        }
+      },
+      "time_s": 0.38,
+      "ms_per_page": 5.7
+    },
+    "audit": {
+      "status": "NEEDS_REVIEW",
+      "summary": "Flagged 18 pages, auditing 8: {'EMPTY': 8}",
+      "pages_audited": 8,
+      "pages_checked": 8,
+      "avg_agreement": 0,
+      "per_page": [
+        {
+          "page": 1,
+          "status": "AUDITED",
+          "regex_found": {},
+          "vision_found": {},
+          "comparison": {
+            "matches": [],
+            "missed_by_regex": [],
+            "regex_extra": [],
+            "value_mismatches": [],
+            "agreement_rate": 0,
+            "vision_total": 0,
+            "matched_total": 0
+          },
+          "flag_reason": "EMPTY \u2014 content page with zero extractions"
+        },
+        {
+          "page": 2,
+          "status": "AUDITED",
+          "regex_found": {},
+          "vision_found": {},
+          "comparison": {
+            "matches": [],
+            "missed_by_regex": [],
+            "regex_extra": [],
+            "value_mismatches": [],
+            "agreement_rate": 0,
+            "vision_total": 0,
+            "matched_total": 0
+          },
+          "flag_reason": "EMPTY \u2014 content page with zero extractions"
+        },
+        {
+          "page": 4,
+          "status": "AUDITED",
+          "regex_found": {},
+          "vision_found": {},
+          "comparison": {
+            "matches": [],
+            "missed_by_regex": [],
+            "regex_extra": [],
+            "value_mismatches": [],
+            "agreement_rate": 0,
+            "vision_total": 0,
+            "matched_total": 0
+          },
+          "flag_reason": "EMPTY \u2014 content page with zero extractions"
+        },
+        {
+          "page": 6,
+          "status": "AUDITED",
+          "regex_found": {},
+          "vision_found": {},
+          "comparison": {
+            "matches": [],
+            "missed_by_regex": [],
+            "regex_extra": [],
+            "value_mismatches": [],
+            "agreement_rate": 0,
+            "vision_total": 0,
+            "matched_total": 0
+          },
+          "flag_reason": "EMPTY \u2014 content page with zero extractions"
+        },
+        {
+          "page": 7,
+          "status": "AUDITED",
+          "regex_found": {},
+          "vision_found": {},
+          "comparison": {
+            "matches": [],
+            "missed_by_regex": [],
+            "regex_extra": [],
+            "value_mismatches": [],
+            "agreement_rate": 0,
+            "vision_total": 0,
+            "matched_total": 0
+          },
+          "flag_reason": "EMPTY \u2014 content page with zero extractions"
+        },
+        {
+          "page": 8,
+          "status": "AUDITED",
+          "regex_found": {},
+          "vision_found": {},
+          "comparison": {
+            "matches": [],
+            "missed_by_regex": [],
+            "regex_extra": [],
+            "value_mismatches": [],
+            "agreement_rate": 0,
+            "vision_total": 0,
+            "matched_total": 0
+          },
+          "flag_reason": "EMPTY \u2014 content page with zero extractions"
+        },
+        {
+          "page": 9,
+          "status": "AUDITED",
+          "regex_found": {},
+          "vision_found": {},
+          "comparison": {
+            "matches": [],
+            "missed_by_regex": [],
+            "regex_extra": [],
+            "value_mismatches": [],
+            "agreement_rate": 0,
+            "vision_total": 0,
+            "matched_total": 0
+          },
+          "flag_reason": "EMPTY \u2014 content page with zero extractions"
+        },
+        {
+          "page": 10,
+          "status": "AUDITED",
+          "regex_found": {},
+          "vision_found": {},
+          "comparison": {
+            "matches": [],
+            "missed_by_regex": [],
+            "regex_extra": [],
+            "value_mismatches": [],
+            "agreement_rate": 0,
+            "vision_total": 0,
+            "matched_total": 0
+          },
+          "flag_reason": "EMPTY \u2014 content page with zero extractions"
+        }
+      ],
+      "missed_field_summary": {},
+      "recommendation": "Review needed \u2014 avg agreement 0%, missed: {}"
+    }
+  },
+  "AWIR-DOC.00000001.00000038.00000806": {
+    "filename": "AWIR-DOC.00000001.00000038.00000806.pdf",
+    "total_pages": 50,
+    "pdf_type": {
+      "type": "text",
+      "text_pages": 6,
+      "image_pages": 0,
+      "total_checked": 6,
+      "avg_text_len": 2633.0
+    },
+    "onset_page": 3,
+    "vision": {
+      "error": "Server error '500 Internal Server Error' for url 'http://localhost:11434/api/generate'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500",
+      "parsed": null
+    },
+    "extraction": {
+      "error": "Vision failed"
+    }
+  },
+  "AWIR-DOC.00000001.00000098.00000939": {
+    "filename": "AWIR-DOC.00000001.00000098.00000939.pdf",
+    "total_pages": 100,
+    "pdf_type": {
+      "type": "text",
+      "text_pages": 6,
+      "image_pages": 0,
+      "total_checked": 6,
+      "avg_text_len": 2196.0
+    },
+    "onset_page": 23,
+    "vision": {
+      "error": "Server error '500 Internal Server Error' for url 'http://localhost:11434/api/generate'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500",
+      "parsed": null
+    },
+    "extraction": {
+      "error": "Vision failed"
+    }
+  },
+  "AWIR-DOC.00000001.00000103.00000993": {
+    "filename": "AWIR-DOC.00000001.00000103.00000993.pdf",
+    "total_pages": 581,
+    "pdf_type": {
+      "type": "text",
+      "text_pages": 6,
+      "image_pages": 0,
+      "total_checked": 6,
+      "avg_text_len": 2376.0
+    },
+    "onset_page": 2,
+    "vision": {
+      "parsed": {
+        "pii_fields": [
+          {
+            "type": "LOCATION",
+            "value": "CEDAR RAPIDS, IA 52406",
+            "label": "Prepared for",
+            "position": "middle_left"
+          },
+          {
+            "type": "LOCATION",
+            "value": "CEDAR RAPIDS, IA 52401",
+            "label": "Prepared by",
+            "position": "middle_left"
+          }
+        ],
+        "structure_type": "fixed_single_page",
+        "records_per_page": 1,
+        "cross_page_data": false,
+        "pages_per_instance": 1
+      }
+    },
+    "patterns": [
+      {
+        "type": "LOCATION",
+        "label": "Prepared for",
+        "test_matches": 2,
+        "regex": "Prepared\\ for[\\s:]*\\n?\\s*(.+?)"
+      },
+      {
+        "type": "LOCATION",
+        "label": "Prepared by",
+        "test_matches": 1,
+        "regex": "Prepared\\ by[\\s:]*\\n?\\s*(.+?)"
+      }
+    ],
+    "extraction": {
+      "total_pages": 581,
+      "pages_scanned": 581,
+      "fields": {
+        "LOCATION": {
+          "count": 0,
+          "label": "Prepared for",
+          "sample_value": "CEDAR RAPIDS, IA 52406",
+          "samples": []
+        }
+      },
+      "time_s": 0.65,
+      "ms_per_page": 1.1
+    },
+    "audit": {
+      "status": "NEEDS_REVIEW",
+      "summary": "Flagged 580 pages, auditing 8: {'EMPTY': 8}",
+      "pages_audited": 8,
+      "pages_checked": 8,
+      "avg_agreement": 0,
+      "per_page": [
+        {
+          "page": 1,
+          "status": "AUDITED",
+          "regex_found": {},
+          "vision_found": {},
+          "comparison": {
+            "matches": [],
+            "missed_by_regex": [],
+            "regex_extra": [],
+            "value_mismatches": [],
+            "agreement_rate": 0,
+            "vision_total": 0,
+            "matched_total": 0
+          },
+          "flag_reason": "EMPTY \u2014 content page with zero extractions"
+        },
+        {
+          "page": 2,
+          "status": "AUDITED",
+          "regex_found": {},
+          "vision_found": {
+            "PERSON": [
+              "BRITTANY GIBBS"
+            ],
+            "LOCATION": [
+              "201 First St SE, Suite 800, Cedar Rapids, IA 52401"
+            ],
+            "PHONE_NUMBER": [
+              "319.298.5333"
+            ]
+          },
+          "comparison": {
+            "matches": [],
+            "missed_by_regex": [
+              {
+                "type": "LOCATION",
+                "vision_values": [
+                  "201 First St SE, Suite 800, Cedar Rapids, IA 52401"
+                ]
+              },
+              {
+                "type": "PERSON",
+                "vision_values": [
+                  "BRITTANY GIBBS"
+                ]
+              },
+              {
+                "type": "PHONE_NUMBER",
+                "vision_values": [
+                  "319.298.5333"
+                ]
+              }
+            ],
+            "regex_extra": [],
+            "value_mismatches": [],
+            "agreement_rate": 0,
+            "vision_total": 3,
+            "matched_total": 0
+          },
+          "flag_reason": "EMPTY \u2014 content page with zero extractions"
+        },
+        {
+          "page": 4,
+          "status": "AUDITED",
+          "regex_found": {},
+          "vision_found": {},
+          "comparison": {
+            "matches": [],
+            "missed_by_regex": [],
+            "regex_extra": [],
+            "value_mismatches": [],
+            "agreement_rate": 0,
+            "vision_total": 0,
+            "matched_total": 0
+          },
+          "flag_reason": "EMPTY \u2014 content page with zero extractions"
+        },
+        {
+          "page": 5,
+          "status": "AUDITED",
+          "regex_found": {},
+          "vision_found": {
+            "PERSON": [
+              "BARRIE W. & JANE E. ERNST",
+              "BARRON AND BRITT BREMNER A",
+              "BB INVESTMENTS, LLC (VANCURA)",
+              "TIGERHAWK PARTNERS, LLC",
+              "BRENDA AND DAVE WALLRICHS"
+            ]
+          },
+          "comparison": {
+            "matches": [],
+            "missed_by_regex": [
+              {
+                "type": "PERSON",
+                "vision_values": [
+                  "BARRIE W. & JANE E. ERNST",
+                  "BARRON AND BRITT BREMNER A",
+                  "BB INVESTMENTS, LLC (VANCURA)"
+                ]
+              }
+            ],
+            "regex_extra": [],
+            "value_mismatches": [],
+            "agreement_rate": 0,
+            "vision_total": 7,
+            "matched_total": 0
+          },
+          "flag_reason": "EMPTY \u2014 content page with zero extractions"
+        },
+        {
+          "page": 6,
+          "status": "AUDITED",
+          "regex_found": {},
+          "vision_found": {
+            "PERSON": [
+              "D2B HOLDING COMPANY, LLC",
+              "DAVE E. AND JULIE A. EKLAND REVOCABLE TRUST",
+              "DAVID L RUSCH REVOCABLE TRUST",
+              "DEBRA F. AND DAN P. CALLAHAN REVOCABLE TRUST",
+              "DEBRA F. CALLAHAN REVOCABLE TRUST"
+            ]
+          },
+          "comparison": {
+            "matches": [],
+            "missed_by_regex": [
+              {
+                "type": "PERSON",
+                "vision_values": [
+                  "D2B HOLDING COMPANY, LLC",
+                  "DAVE E. AND JULIE A. EKLAND REVOCABLE TRUST",
+                  "DAVID L RUSCH REVOCABLE TRUST"
+                ]
+              }
+            ],
+            "regex_extra": [],
+            "value_mismatches": [],
+            "agreement_rate": 0,
+            "vision_total": 7,
+            "matched_total": 0
+          },
+          "flag_reason": "EMPTY \u2014 content page with zero extractions"
+        },
+        {
+          "page": 7,
+          "status": "AUDITED",
+          "regex_found": {},
+          "vision_found": {
+            "PERSON": [
+              "DUDLEY FLECK",
+              "ERICK J SKOGMAN",
+              "HARRIS REALTY HOLDINGS, LLC",
+              "NANCY EVANS REVOCABLE TRUST",
+              "JENNIFER SKOGNMAN AND KI"
+            ]
+          },
+          "comparison": {
+            "matches": [],
+            "missed_by_regex": [
+              {
+                "type": "PERSON",
+                "vision_values": [
+                  "DUDLEY FLECK",
+                  "ERICK J SKOGMAN",
+                  "HARRIS REALTY HOLDINGS, LLC"
+                ]
+              }
+            ],
+            "regex_extra": [],
+            "value_mismatches": [],
+            "agreement_rate": 0,
+            "vision_total": 7,
+            "matched_total": 0
+          },
+          "flag_reason": "EMPTY \u2014 content page with zero extractions"
+        },
+        {
+          "page": 8,
+          "status": "AUDITED",
+          "regex_found": {},
+          "vision_found": {
+            "PERSON": [
+              "KYLE D. SKOGMAN",
+              "LARRY AND KERRY HELVEY",
+              "EQUITY TRUST COMPANY CUSTODIAN",
+              "MATT BURGER",
+              "MATT AND JENNY SKOGMAN, AS JOINT TENANTS"
+            ]
+          },
+          "comparison": {
+            "matches": [],
+            "missed_by_regex": [
+              {
+                "type": "PERSON",
+                "vision_values": [
+                  "KYLE D. SKOGMAN",
+                  "LARRY AND KERRY HELVEY",
+                  "EQUITY TRUST COMPANY CUSTODIAN"
+                ]
+              }
+            ],
+            "regex_extra": [],
+            "value_mismatches": [],
+            "agreement_rate": 0,
+            "vision_total": 7,
+            "matched_total": 0
+          },
+          "flag_reason": "EMPTY \u2014 content page with zero extractions"
+        },
+        {
+          "page": 9,
+          "status": "AUDITED",
+          "regex_found": {},
+          "vision_found": {
+            "PERSON": [
+              "PAKAR, LLC",
+              "PAT BAIRD REVOCABLE TRUST",
+              "PAULA M SANDER",
+              "PRIMEVEST, LLC (STEVE LINT)",
+              "ERICK J SKOGMAN REVOCABLE TRUST"
+            ]
+          },
+          "comparison": {
+            "matches": [],
+            "missed_by_regex": [
+              {
+                "type": "PERSON",
+                "vision_values": [
+                  "PAKAR, LLC",
+                  "PAT BAIRD REVOCABLE TRUST",
+                  "PAULA M SANDER"
+                ]
+              }
+            ],
+            "regex_extra": [],
+            "value_mismatches": [],
+            "agreement_rate": 0,
+            "vision_total": 7,
+            "matched_total": 0
+          },
+          "flag_reason": "EMPTY \u2014 content page with zero extractions"
+        }
+      ],
+      "missed_field_summary": {
+        "LOCATION": 1,
+        "PERSON": 6,
+        "PHONE_NUMBER": 1
+      },
+      "recommendation": "Review needed \u2014 avg agreement 0%, missed: {'LOCATION': 1, 'PERSON': 6, 'PHONE_NUMBER': 1}"
+    }
+  },
+  "AWIR-DOC.00000001.00000124.00000482": {
+    "filename": "AWIR-DOC.00000001.00000124.00000482.pdf",
+    "total_pages": 316,
+    "pdf_type": {
+      "type": "mixed",
+      "text_pages": 5,
+      "image_pages": 1,
+      "total_checked": 6,
+      "avg_text_len": 3656.0
+    },
+    "onset_page": 13,
+    "vision": {
+      "parsed": {
+        "pii_fields": [
+          {
+            "type": "ACCOUNT_NUMBER",
+            "value": "4-21047",
+            "label": "ANNUITY CONTRACT NUMBER",
+            "position": "middle_left"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "01/01/2017",
+            "label": "BALANCE ON",
+            "position": "middle_left"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "02/14/2017",
+            "label": "BALANCE ON",
+            "position": "middle_left"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "01/01/2017",
+            "label": "BALANCE ON",
+            "position": "middle_left"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "02/14/2017",
+            "label": "BALANCE ON",
+            "position": "middle_left"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "01/01/2017",
+            "label": "FOR THE PERIOD",
+            "position": "top_right"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "02/14/2017",
+            "label": "FOR THE PERIOD",
+            "position": "top_right"
+          },
+          {
+            "type": "PHONE_NUMBER",
+            "value": "1-800-547-7754",
+            "label": "call",
+            "position": "middle_left"
+          },
+          {
+            "type": "EMAIL_ADDRESS",
+            "value": "www.principal.com",
+            "label": "visit",
+            "position": "middle_left"
+          },
+          {
+            "type": "EMAIL_ADDRESS",
+            "value": "www.sipc.org",
+            "label": "SIPC",
+            "position": "middle_left"
+          }
+        ],
+        "structure_type": "fixed_single_page",
+        "records_per_page": 1,
+        "cross_page_data": false,
+        "pages_per_instance": 1
+      }
+    },
+    "patterns": [
+      {
+        "type": "ACCOUNT_NUMBER",
+        "label": "ANNUITY CONTRACT NUMBER",
+        "test_matches": 1,
+        "regex": "ANNUITY\\ CONTRACT\\ NUMBER[\\s:]*\\n?\\s*(\\S+)"
+      },
+      {
+        "type": "DATE_OF_BIRTH",
+        "label": "BALANCE ON",
+        "test_matches": 4,
+        "regex": "BALANCE\\ ON[\\s:]*\\n?\\s*(\\d{2}/\\d{2}/\\d{4})"
+      },
+      {
+        "type": "DATE_OF_BIRTH",
+        "label": "FOR THE PERIOD",
+        "test_matches": 0,
+        "regex": "FOR\\ THE\\ PERIOD[\\s:]*\\n?\\s*(\\d{2}/\\d{2}/\\d{4})"
+      },
+      {
+        "type": "PHONE_NUMBER",
+        "label": "call",
+        "test_matches": 1,
+        "regex": "call[\\s:]*\\n?\\s*(\\S+)"
+      },
+      {
+        "type": "EMAIL_ADDRESS",
+        "label": "visit",
+        "test_matches": 1,
+        "regex": "visit[\\s:]*\\n?\\s*(\\S+)"
+      },
+      {
+        "type": "EMAIL_ADDRESS",
+        "label": "SIPC",
+        "test_matches": 1,
+        "regex": "SIPC[\\s:]*\\n?\\s*(\\S+)"
+      }
+    ],
+    "extraction": {
+      "total_pages": 316,
+      "pages_scanned": 311,
+      "fields": {
+        "ACCOUNT_NUMBER": {
+          "count": 230,
+          "label": "ANNUITY CONTRACT NUMBER",
+          "sample_value": "4-21047",
+          "samples": [
+            {
+              "page": 1,
+              "value": "4-21047"
+            },
+            {
+              "page": 2,
+              "value": "4-21047"
+            },
+            {
+              "page": 3,
+              "value": "4-21047"
+            },
+            {
+              "page": 4,
+              "value": "4-21047"
+            },
+            {
+              "page": 5,
+              "value": "4-21047"
+            },
+            {
+              "page": 6,
+              "value": "4-21047"
+            },
+            {
+              "page": 7,
+              "value": "4-21047"
+            },
+            {
+              "page": 8,
+              "value": "4-21047"
+            },
+            {
+              "page": 9,
+              "value": "4-21047"
+            },
+            {
+              "page": 10,
+              "value": "4-21047"
+            }
+          ]
+        },
+        "DATE_OF_BIRTH": {
+          "count": 1712,
+          "label": "BALANCE ON",
+          "sample_value": "01/01/2017",
+          "samples": [
+            {
+              "page": 1,
+              "value": "01/01/2017"
+            },
+            {
+              "page": 1,
+              "value": "02/14/2017"
+            },
+            {
+              "page": 1,
+              "value": "01/01/2017"
+            },
+            {
+              "page": 1,
+              "value": "02/14/2017"
+            },
+            {
+              "page": 1,
+              "value": "01/01/2017"
+            },
+            {
+              "page": 1,
+              "value": "02/14/2017"
+            },
+            {
+              "page": 2,
+              "value": "01/01/2017"
+            },
+            {
+              "page": 2,
+              "value": "02/14/2017"
+            },
+            {
+              "page": 2,
+              "value": "01/01/2017"
+            },
+            {
+              "page": 2,
+              "value": "02/14/2017"
+            }
+          ]
+        },
+        "PHONE_NUMBER": {
+          "count": 10,
+          "label": "call",
+          "sample_value": "1-800-547-7754",
+          "samples": [
+            {
+              "page": 11,
+              "value": "1-800-547-7754"
+            },
+            {
+              "page": 14,
+              "value": "1-800-547-7754"
+            },
+            {
+              "page": 25,
+              "value": "1-800-547-7754"
+            },
+            {
+              "page": 33,
+              "value": "1-800-547-7754"
+            },
+            {
+              "page": 37,
+              "value": "1-800-547-7754"
+            },
+            {
+              "page": 39,
+              "value": "1-800-547-7754"
+            },
+            {
+              "page": 50,
+              "value": "1-800-547-7754"
+            },
+            {
+              "page": 52,
+              "value": "1-800-547-7754"
+            },
+            {
+              "page": 65,
+              "value": "1-800-547-7754"
+            },
+            {
+              "page": 290,
+              "value": "1-800-547-7754"
+            }
+          ]
+        },
+        "EMAIL_ADDRESS": {
+          "count": 21,
+          "label": "visit",
+          "sample_value": "www.principal.com",
+          "samples": [
+            {
+              "page": 11,
+              "value": "the"
+            },
+            {
+              "page": 11,
+              "value": ".org,"
+            },
+            {
+              "page": 14,
+              "value": "the"
+            },
+            {
+              "page": 14,
+              "value": ".org,"
+            },
+            {
+              "page": 25,
+              "value": "the"
+            },
+            {
+              "page": 25,
+              "value": ".org,"
+            },
+            {
+              "page": 33,
+              "value": "the"
+            },
+            {
+              "page": 33,
+              "value": ".org,"
+            },
+            {
+              "page": 35,
+              "value": "and/or"
+            },
+            {
+              "page": 37,
+              "value": "the"
+            }
+          ]
+        }
+      },
+      "time_s": 0.62,
+      "ms_per_page": 2.0
+    },
+    "audit": {
+      "status": "NEEDS_REVIEW",
+      "summary": "Flagged 6 pages, auditing 6: {'EMPTY': 1, 'BOUNDARY': 5}",
+      "pages_audited": 6,
+      "pages_checked": 6,
+      "avg_agreement": 0,
+      "per_page": [
+        {
+          "page": 56,
+          "status": "AUDITED",
+          "regex_found": {},
+          "vision_found": {},
+          "comparison": {
+            "matches": [],
+            "missed_by_regex": [],
+            "regex_extra": [],
+            "value_mismatches": [],
+            "agreement_rate": 0,
+            "vision_total": 0,
+            "matched_total": 0
+          },
+          "flag_reason": "EMPTY \u2014 content page with zero extractions"
+        },
+        {
+          "page": 1,
+          "status": "AUDITED",
+          "regex_found": {
+            "ACCOUNT_NUMBER": [
+              "4-21047"
+            ],
+            "DATE_OF_BIRTH": [
+              "01/01/2017",
+              "02/14/2017",
+              "01/01/2017",
+              "02/14/2017",
+              "01/01/2017"
+            ]
+          },
+          "vision_found": {},
+          "comparison": {
+            "matches": [],
+            "missed_by_regex": [],
+            "regex_extra": [
+              {
+                "type": "ACCOUNT_NUMBER",
+                "regex_values": [
+                  "4-21047"
+                ]
+              },
+              {
+                "type": "DATE_OF_BIRTH",
+                "regex_values": [
+                  "01/01/2017",
+                  "02/14/2017",
+                  "01/01/2017"
+                ]
+              }
+            ],
+            "value_mismatches": [],
+            "agreement_rate": 0,
+            "vision_total": 0,
+            "matched_total": 0
+          },
+          "flag_reason": "BOUNDARY \u2014 structural check"
+        },
+        {
+          "page": 238,
+          "status": "AUDITED",
+          "regex_found": {
+            "ACCOUNT_NUMBER": [
+              "4-21047"
+            ],
+            "DATE_OF_BIRTH": [
+              "01/01/2017",
+              "02/14/2017",
+              "01/01/2017",
+              "02/14/2017"
+            ]
+          },
+          "vision_found": {
+            "PERSON": [
+              "SMITH, DENISE R"
+            ],
+            "US_SSN": [
+              "XXX-XX-7474"
+            ],
+            "DATE_OF_BIRTH": [
+              "05/24/1966"
+            ]
+          },
+          "comparison": {
+            "matches": [],
+            "missed_by_regex": [
+              {
+                "type": "US_SSN",
+                "vision_values": [
+                  "XXX-XX-7474"
+                ]
+              },
+              {
+                "type": "PERSON",
+                "vision_values": [
+                  "SMITH, DENISE R"
+                ]
+              },
+              {
+                "type": "DATE_OF_BIRTH",
+                "vision_values": [
+                  "05/24/1966"
+                ]
+              }
+            ],
+            "regex_extra": [
+              {
+                "type": "ACCOUNT_NUMBER",
+                "regex_values": [
+                  "4-21047"
+                ]
+              }
+            ],
+            "value_mismatches": [],
+            "agreement_rate": 0,
+            "vision_total": 3,
+            "matched_total": 0
+          },
+          "flag_reason": "BOUNDARY \u2014 structural check"
+        },
+        {
+          "page": 82,
+          "status": "AUDITED",
+          "regex_found": {
+            "DATE_OF_BIRTH": [
+              "01/01/2017",
+              "02/14/2017"
+            ]
+          },
+          "vision_found": {
+            "PERSON": [
+              "DOROTHY J BROWN"
+            ],
+            "US_SSN": [
+              "XXXXX4851"
+            ],
+            "DATE_OF_BIRTH": [
+              "4-21047"
+            ]
+          },
+          "comparison": {
+            "matches": [],
+            "missed_by_regex": [
+              {
+                "type": "US_SSN",
+                "vision_values": [
+                  "XXXXX4851"
+                ]
+              },
+              {
+                "type": "PERSON",
+                "vision_values": [
+                  "DOROTHY J BROWN"
+                ]
+              },
+              {
+                "type": "DATE_OF_BIRTH",
+                "vision_values": [
+                  "4-21047"
+                ]
+              }
+            ],
+            "regex_extra": [],
+            "value_mismatches": [],
+            "agreement_rate": 0,
+            "vision_total": 3,
+            "matched_total": 0
+          },
+          "flag_reason": "BOUNDARY \u2014 structural check"
+        },
+        {
+          "page": 315,
+          "status": "AUDITED",
+          "regex_found": {
+            "ACCOUNT_NUMBER": [
+              "4-21047"
+            ],
+            "DATE_OF_BIRTH": [
+              "01/01/2017",
+              "02/14/2017",
+              "01/01/2017",
+              "02/14/2017"
+            ]
+          },
+          "vision_found": {
+            "PERSON": [
+              "PORT, KATRINA L"
+            ],
+            "US_SSN": [
+              "XXXXX5568"
+            ],
+            "DATE_OF_BIRTH": [
+              "01/07/1981"
+            ]
+          },
+          "comparison": {
+            "matches": [],
+            "missed_by_regex": [
+              {
+                "type": "US_SSN",
+                "vision_values": [
+                  "XXXXX5568"
+                ]
+              },
+              {
+                "type": "PERSON",
+                "vision_values": [
+                  "PORT, KATRINA L"
+                ]
+              },
+              {
+                "type": "DATE_OF_BIRTH",
+                "vision_values": [
+                  "01/07/1981"
+                ]
+              }
+            ],
+            "regex_extra": [
+              {
+                "type": "ACCOUNT_NUMBER",
+                "regex_values": [
+                  "4-21047"
+                ]
+              }
+            ],
+            "value_mismatches": [],
+            "agreement_rate": 0,
+            "vision_total": 3,
+            "matched_total": 0
+          },
+          "flag_reason": "BOUNDARY \u2014 structural check"
+        },
+        {
+          "page": 160,
+          "status": "AUDITED",
+          "regex_found": {
+            "ACCOUNT_NUMBER": [
+              "4-21047"
+            ],
+            "DATE_OF_BIRTH": [
+              "01/01/2017",
+              "02/14/2017",
+              "01/01/2017",
+              "02/14/2017"
+            ]
+          },
+          "vision_found": {
+            "PERSON": [
+              "HOUGH, FELICIA M"
+            ],
+            "US_SSN": [
+              "XXX-XX-2879"
+            ],
+            "DATE_OF_BIRTH": [
+              "11/07/1964"
+            ]
+          },
+          "comparison": {
+            "matches": [],
+            "missed_by_regex": [
+              {
+                "type": "US_SSN",
+                "vision_values": [
+                  "XXX-XX-2879"
+                ]
+              },
+              {
+                "type": "PERSON",
+                "vision_values": [
+                  "HOUGH, FELICIA M"
+                ]
+              },
+              {
+                "type": "DATE_OF_BIRTH",
+                "vision_values": [
+                  "11/07/1964"
+                ]
+              }
+            ],
+            "regex_extra": [
+              {
+                "type": "ACCOUNT_NUMBER",
+                "regex_values": [
+                  "4-21047"
+                ]
+              }
+            ],
+            "value_mismatches": [],
+            "agreement_rate": 0,
+            "vision_total": 3,
+            "matched_total": 0
+          },
+          "flag_reason": "BOUNDARY \u2014 structural check"
+        }
+      ],
+      "missed_field_summary": {
+        "US_SSN": 4,
+        "PERSON": 4,
+        "DATE_OF_BIRTH": 4
+      },
+      "recommendation": "Review needed \u2014 avg agreement 0%, missed: {'US_SSN': 4, 'PERSON': 4, 'DATE_OF_BIRTH': 4}"
+    }
+  },
+  "CMG_Inc_0000414153": {
+    "filename": "CMG_Inc_0000414153.pdf",
+    "total_pages": 1354,
+    "pdf_type": {
+      "type": "text",
+      "text_pages": 7,
+      "image_pages": 0,
+      "total_checked": 7,
+      "avg_text_len": 1090.0
+    },
+    "onset_page": 18,
+    "vision": {
+      "parsed": {
+        "pii_fields": [
+          {
+            "type": "LOCATION",
+            "value": "229 WEST 28TH STREET, 11TH FLOOR, NEW YORK, NY 10001, USA",
+            "label": "BOOSEY & HAWKES, INC. address",
+            "position": "top_left"
+          },
+          {
+            "type": "LOCATION",
+            "value": "1745 BROADWAY, MAILDROP 3-2, NEW YORK, NY 10019, USA",
+            "label": "ALFRED A. KNOPF, INC. address",
+            "position": "middle_left"
+          },
+          {
+            "type": "PHONE_NUMBER",
+            "value": "+1 (212) 541 6600",
+            "label": "Tel",
+            "position": "top_left"
+          },
+          {
+            "type": "PHONE_NUMBER",
+            "value": "+1 (212) 586 6155",
+            "label": "Fax",
+            "position": "top_left"
+          },
+          {
+            "type": "GOVERNMENT_ID",
+            "value": "13-2558190",
+            "label": "Tax No.",
+            "position": "middle_left"
+          },
+          {
+            "type": "ACCOUNT_NUMBER",
+            "value": "1121817",
+            "label": "Statement Nr.",
+            "position": "middle_left"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "30/06/2020",
+            "label": "Date",
+            "position": "middle_left"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "30/06/2020",
+            "label": "Date",
+            "position": "middle_left"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "30/06/2020",
+            "label": "Date",
+            "position": "middle_left"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "30/06/2020",
+            "label": "Date",
+            "position": "middle_left"
+          }
+        ],
+        "structure_type": "fixed_single_page",
+        "records_per_page": 1,
+        "cross_page_data": false,
+        "pages_per_instance": 1
+      }
+    },
+    "patterns": [
+      {
+        "type": "LOCATION",
+        "label": "BOOSEY & HAWKES, INC. address",
+        "test_matches": 0,
+        "regex": "BOOSEY\\ \\&\\ HAWKES,\\ INC\\.\\ address[\\s:]*\\n?\\s*(.+?)"
+      },
+      {
+        "type": "LOCATION",
+        "label": "ALFRED A. KNOPF, INC. address",
+        "test_matches": 0,
+        "regex": "ALFRED\\ A\\.\\ KNOPF,\\ INC\\.\\ address[\\s:]*\\n?\\s*(.+?)"
+      },
+      {
+        "type": "PHONE_NUMBER",
+        "label": "Tel",
+        "test_matches": 1,
+        "regex": "Tel[\\s:]*\\n?\\s*(\\S+)"
+      },
+      {
+        "type": "PHONE_NUMBER",
+        "label": "Fax",
+        "test_matches": 1,
+        "regex": "Fax[\\s:]*\\n?\\s*(\\S+)"
+      },
+      {
+        "type": "GOVERNMENT_ID",
+        "label": "Tax No.",
+        "test_matches": 1,
+        "regex": "Tax\\ No\\.[\\s:]*\\n?\\s*(\\d{2}-\\d{7})"
+      },
+      {
+        "type": "ACCOUNT_NUMBER",
+        "label": "Statement Nr.",
+        "test_matches": 1,
+        "regex": "Statement\\ Nr\\.[\\s:]*\\n?\\s*([X\\d]{5,})"
+      },
+      {
+        "type": "DATE_OF_BIRTH",
+        "label": "Date",
+        "test_matches": 0,
+        "regex": "Date[\\s:]*\\n?\\s*(\\d{2}/\\d{2}/\\d{4})"
+      }
+    ],
+    "extraction": {
+      "total_pages": 1354,
+      "pages_scanned": 1354,
+      "fields": {
+        "PHONE_NUMBER": {
+          "count": 2730,
+          "label": "Tel",
+          "sample_value": "+1 (212) 541 6600",
+          "samples": [
+            {
+              "page": 1,
+              "value": "+1"
+            },
+            {
+              "page": 1,
+              "value": "+1"
+            },
+            {
+              "page": 2,
+              "value": "+1"
+            },
+            {
+              "page": 2,
+              "value": "+1"
+            },
+            {
+              "page": 3,
+              "value": "+1"
+            },
+            {
+              "page": 3,
+              "value": "+1"
+            },
+            {
+              "page": 4,
+              "value": "+1"
+            },
+            {
+              "page": 4,
+              "value": "+1"
+            },
+            {
+              "page": 5,
+              "value": "+1"
+            },
+            {
+              "page": 5,
+              "value": "+1"
+            }
+          ]
+        },
+        "GOVERNMENT_ID": {
+          "count": 169,
+          "label": "Tax No.",
+          "sample_value": "13-2558190",
+          "samples": [
+            {
+              "page": 10,
+              "value": "98-0367093"
+            },
+            {
+              "page": 19,
+              "value": "13-2558190"
+            },
+            {
+              "page": 21,
+              "value": "13-2558190"
+            },
+            {
+              "page": 36,
+              "value": "95-3912785"
+            },
+            {
+              "page": 38,
+              "value": "98-0361009"
+            },
+            {
+              "page": 76,
+              "value": "98-0367674"
+            },
+            {
+              "page": 77,
+              "value": "98-0367674"
+            },
+            {
+              "page": 78,
+              "value": "13-3165181"
+            },
+            {
+              "page": 114,
+              "value": "98-0368296"
+            },
+            {
+              "page": 127,
+              "value": "04-2103550"
+            }
+          ]
+        },
+        "ACCOUNT_NUMBER": {
+          "count": 1354,
+          "label": "Statement Nr.",
+          "sample_value": "1121817",
+          "samples": [
+            {
+              "page": 1,
+              "value": "1121799"
+            },
+            {
+              "page": 2,
+              "value": "1121800"
+            },
+            {
+              "page": 3,
+              "value": "1121801"
+            },
+            {
+              "page": 4,
+              "value": "1121802"
+            },
+            {
+              "page": 5,
+              "value": "1121803"
+            },
+            {
+              "page": 6,
+              "value": "1121804"
+            },
+            {
+              "page": 7,
+              "value": "1121805"
+            },
+            {
+              "page": 8,
+              "value": "1121806"
+            },
+            {
+              "page": 9,
+              "value": "1121807"
+            },
+            {
+              "page": 10,
+              "value": "1121808"
+            }
+          ]
+        }
+      },
+      "time_s": 0.91,
+      "ms_per_page": 0.7
+    },
+    "audit": {
+      "status": "NEEDS_REVIEW",
+      "summary": "Flagged 5 pages, auditing 5: {'BOUNDARY': 5}",
+      "pages_audited": 5,
+      "pages_checked": 5,
+      "avg_agreement": 0,
+      "per_page": [
+        {
+          "page": 1,
+          "status": "AUDITED",
+          "regex_found": {
+            "PHONE_NUMBER": [
+              "+1",
+              "+1"
+            ],
+            "ACCOUNT_NUMBER": [
+              "1121799"
+            ]
+          },
+          "vision_found": {
+            "PERSON": [
+              "ADELINE CHANDLER",
+              "CLIFFORD BARNES"
+            ],
+            "US_SSN": [
+              "285-07-5085"
+            ],
+            "LOCATION": [
+              "3708 GRAHAM ROAD, ROCK CREEK, OH 44084, USA"
+            ]
+          },
+          "comparison": {
+            "matches": [],
+            "missed_by_regex": [
+              {
+                "type": "PERSON",
+                "vision_values": [
+                  "ADELINE CHANDLER",
+                  "CLIFFORD BARNES"
+                ]
+              },
+              {
+                "type": "US_SSN",
+                "vision_values": [
+                  "285-07-5085"
+                ]
+              },
+              {
+                "type": "LOCATION",
+                "vision_values": [
+                  "3708 GRAHAM ROAD, ROCK CREEK, OH 44084, USA"
+                ]
+              }
+            ],
+            "regex_extra": [
+              {
+                "type": "PHONE_NUMBER",
+                "regex_values": [
+                  "+1",
+                  "+1"
+                ]
+              },
+              {
+                "type": "ACCOUNT_NUMBER",
+                "regex_values": [
+                  "1121799"
+                ]
+              }
+            ],
+            "value_mismatches": [],
+            "agreement_rate": 0,
+            "vision_total": 4,
+            "matched_total": 0
+          },
+          "flag_reason": "BOUNDARY \u2014 structural check"
+        },
+        {
+          "page": 678,
+          "status": "AUDITED",
+          "regex_found": {
+            "PHONE_NUMBER": [
+              "+1",
+              "+1"
+            ],
+            "ACCOUNT_NUMBER": [
+              "1122476"
+            ]
+          },
+          "vision_found": {
+            "PERSON": [
+              "JONATHAN JENSEN"
+            ],
+            "US_SSN": [
+              "033282"
+            ],
+            "LOCATION": [
+              "3400 CHESLEY AVE., BALTIMORE, MD 21234, UNITED STATES"
+            ]
+          },
+          "comparison": {
+            "matches": [],
+            "missed_by_regex": [
+              {
+                "type": "PERSON",
+                "vision_values": [
+                  "JONATHAN JENSEN"
+                ]
+              },
+              {
+                "type": "US_SSN",
+                "vision_values": [
+                  "033282"
+                ]
+              },
+              {
+                "type": "LOCATION",
+                "vision_values": [
+                  "3400 CHESLEY AVE., BALTIMORE, MD 21234, UNITED STATES"
+                ]
+              }
+            ],
+            "regex_extra": [
+              {
+                "type": "PHONE_NUMBER",
+                "regex_values": [
+                  "+1",
+                  "+1"
+                ]
+              },
+              {
+                "type": "ACCOUNT_NUMBER",
+                "regex_values": [
+                  "1122476"
+                ]
+              }
+            ],
+            "value_mismatches": [],
+            "agreement_rate": 0,
+            "vision_total": 3,
+            "matched_total": 0
+          },
+          "flag_reason": "BOUNDARY \u2014 structural check"
+        },
+        {
+          "page": 1354,
+          "status": "AUDITED",
+          "regex_found": {
+            "PHONE_NUMBER": [
+              "+1",
+              "+1"
+            ],
+            "ACCOUNT_NUMBER": [
+              "1123152"
+            ]
+          },
+          "vision_found": {
+            "PERSON": [
+              "ROBERT BEASER"
+            ],
+            "US_SSN": [
+              "004664"
+            ],
+            "LOCATION": [
+              "333 WEST END AVE, APT.12B, NEW YORK, NY 10023, USA"
+            ]
+          },
+          "comparison": {
+            "matches": [],
+            "missed_by_regex": [
+              {
+                "type": "PERSON",
+                "vision_values": [
+                  "ROBERT BEASER"
+                ]
+              },
+              {
+                "type": "US_SSN",
+                "vision_values": [
+                  "004664"
+                ]
+              },
+              {
+                "type": "LOCATION",
+                "vision_values": [
+                  "333 WEST END AVE, APT.12B, NEW YORK, NY 10023, USA"
+                ]
+              }
+            ],
+            "regex_extra": [
+              {
+                "type": "PHONE_NUMBER",
+                "regex_values": [
+                  "+1",
+                  "+1"
+                ]
+              },
+              {
+                "type": "ACCOUNT_NUMBER",
+                "regex_values": [
+                  "1123152"
+                ]
+              }
+            ],
+            "value_mismatches": [],
+            "agreement_rate": 0,
+            "vision_total": 3,
+            "matched_total": 0
+          },
+          "flag_reason": "BOUNDARY \u2014 structural check"
+        },
+        {
+          "page": 339,
+          "status": "AUDITED",
+          "regex_found": {
+            "PHONE_NUMBER": [
+              "+1",
+              "+1"
+            ],
+            "ACCOUNT_NUMBER": [
+              "1122137"
+            ]
+          },
+          "vision_found": {
+            "PERSON": [
+              "ELIZABETH ZIMAN"
+            ],
+            "US_SSN": [
+              "005225"
+            ],
+            "LOCATION": [
+              "5 MINETTA LANE, NEW YORK, NY 10012"
+            ]
+          },
+          "comparison": {
+            "matches": [],
+            "missed_by_regex": [
+              {
+                "type": "PERSON",
+                "vision_values": [
+                  "ELIZABETH ZIMAN"
+                ]
+              },
+              {
+                "type": "US_SSN",
+                "vision_values": [
+                  "005225"
+                ]
+              },
+              {
+                "type": "LOCATION",
+                "vision_values": [
+                  "5 MINETTA LANE, NEW YORK, NY 10012"
+                ]
+              }
+            ],
+            "regex_extra": [
+              {
+                "type": "PHONE_NUMBER",
+                "regex_values": [
+                  "+1",
+                  "+1"
+                ]
+              },
+              {
+                "type": "ACCOUNT_NUMBER",
+                "regex_values": [
+                  "1122137"
+                ]
+              }
+            ],
+            "value_mismatches": [],
+            "agreement_rate": 0,
+            "vision_total": 3,
+            "matched_total": 0
+          },
+          "flag_reason": "BOUNDARY \u2014 structural check"
+        },
+        {
+          "page": 1016,
+          "status": "AUDITED",
+          "regex_found": {
+            "PHONE_NUMBER": [
+              "+1",
+              "+1"
+            ],
+            "ACCOUNT_NUMBER": [
+              "1122814"
+            ]
+          },
+          "vision_found": {
+            "PERSON": [
+              "RICHARD PLANT"
+            ],
+            "US_SSN": [
+              "082-14-5121"
+            ]
+          },
+          "comparison": {
+            "matches": [],
+            "missed_by_regex": [
+              {
+                "type": "PERSON",
+                "vision_values": [
+                  "RICHARD PLANT"
+                ]
+              },
+              {
+                "type": "US_SSN",
+                "vision_values": [
+                  "082-14-5121"
+                ]
+              }
+            ],
+            "regex_extra": [
+              {
+                "type": "ACCOUNT_NUMBER",
+                "regex_values": [
+                  "1122814"
+                ]
+              },
+              {
+                "type": "PHONE_NUMBER",
+                "regex_values": [
+                  "+1",
+                  "+1"
+                ]
+              }
+            ],
+            "value_mismatches": [],
+            "agreement_rate": 0,
+            "vision_total": 2,
+            "matched_total": 0
+          },
+          "flag_reason": "BOUNDARY \u2014 structural check"
+        }
+      ],
+      "missed_field_summary": {
+        "PERSON": 5,
+        "US_SSN": 5,
+        "LOCATION": 4
+      },
+      "recommendation": "Review needed \u2014 avg agreement 0%, missed: {'PERSON': 5, 'US_SSN': 5, 'LOCATION': 4}"
+    }
+  },
+  "CMG_Inc_0001352703": {
+    "filename": "CMG_Inc_0001352703.pdf",
+    "total_pages": 453,
+    "pdf_type": {
+      "type": "text",
+      "text_pages": 7,
+      "image_pages": 0,
+      "total_checked": 7,
+      "avg_text_len": 2230.0
+    },
+    "onset_page": 2,
+    "vision": {
+      "parsed": {
+        "pii_fields": [
+          {
+            "type": "GOVERNMENT_ID",
+            "value": "NE724362D",
+            "label": "Statement of Entitlement DB",
+            "position": "bottom_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "Mr K P Acheampong",
+            "label": "Statement of Entitlement DB",
+            "position": "bottom_left"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "April 2005",
+            "label": "Statement of Entitlement DB",
+            "position": "bottom_left"
+          }
+        ],
+        "structure_type": "fixed_single_page",
+        "records_per_page": 1,
+        "cross_page_data": false,
+        "pages_per_instance": 1
+      }
+    },
+    "patterns": [
+      {
+        "type": "GOVERNMENT_ID",
+        "label": "Statement of Entitlement DB",
+        "test_matches": 1,
+        "regex": "Statement\\ of\\ Entitlement\\ DB[\\s:]*\\n?\\s*(\\S+)"
+      },
+      {
+        "type": "PERSON",
+        "label": "Statement of Entitlement DB",
+        "test_matches": 1,
+        "regex": "Statement\\ of\\ Entitlement\\ DB[\\s:]*\\n?\\s*([A-Z][a-z'-]+(?:\\s+[A-Z][a-z'-]*)+)"
+      },
+      {
+        "type": "DATE_OF_BIRTH",
+        "label": "Statement of Entitlement DB",
+        "test_matches": 1,
+        "regex": "Statement\\ of\\ Entitlement\\ DB[\\s:]*\\n?\\s*(\\S+)"
+      }
+    ],
+    "extraction": {
+      "total_pages": 453,
+      "pages_scanned": 453,
+      "fields": {
+        "GOVERNMENT_ID": {
+          "count": 450,
+          "label": "Statement of Entitlement DB",
+          "sample_value": "NE724362D",
+          "samples": [
+            {
+              "page": 1,
+              "value": "Mr"
+            },
+            {
+              "page": 2,
+              "value": "Mr"
+            },
+            {
+              "page": 3,
+              "value": "Mr"
+            },
+            {
+              "page": 4,
+              "value": "Mr"
+            },
+            {
+              "page": 5,
+              "value": "Mr"
+            },
+            {
+              "page": 6,
+              "value": "Mr"
+            },
+            {
+              "page": 7,
+              "value": "Mr"
+            },
+            {
+              "page": 8,
+              "value": "Mr"
+            },
+            {
+              "page": 9,
+              "value": "Mr"
+            },
+            {
+              "page": 10,
+              "value": "Mr"
+            }
+          ]
+        },
+        "PERSON": {
+          "count": 450,
+          "label": "Statement of Entitlement DB",
+          "sample_value": "Mr K P Acheampong",
+          "samples": [
+            {
+              "page": 1,
+              "value": "Mr   K P   Acheampong                NE"
+            },
+            {
+              "page": 2,
+              "value": "Mr   K P   Acheampong                NE"
+            },
+            {
+              "page": 3,
+              "value": "Mr   K P   Acheampong                NE"
+            },
+            {
+              "page": 4,
+              "value": "Mr   M S   Alcock                    WK"
+            },
+            {
+              "page": 5,
+              "value": "Mr   M S   Alcock                    WK"
+            },
+            {
+              "page": 6,
+              "value": "Mr   M S   Alcock                    WK"
+            },
+            {
+              "page": 7,
+              "value": "Mr   D W   Alcock                    YK"
+            },
+            {
+              "page": 8,
+              "value": "Mr   D W   Alcock                    YK"
+            },
+            {
+              "page": 9,
+              "value": "Mr   D W   Alcock                    YK"
+            },
+            {
+              "page": 10,
+              "value": "Mr   J K A Alderson                  YB"
+            }
+          ]
+        },
+        "DATE_OF_BIRTH": {
+          "count": 450,
+          "label": "Statement of Entitlement DB",
+          "sample_value": "April 2005",
+          "samples": [
+            {
+              "page": 1,
+              "value": "Mr"
+            },
+            {
+              "page": 2,
+              "value": "Mr"
+            },
+            {
+              "page": 3,
+              "value": "Mr"
+            },
+            {
+              "page": 4,
+              "value": "Mr"
+            },
+            {
+              "page": 5,
+              "value": "Mr"
+            },
+            {
+              "page": 6,
+              "value": "Mr"
+            },
+            {
+              "page": 7,
+              "value": "Mr"
+            },
+            {
+              "page": 8,
+              "value": "Mr"
+            },
+            {
+              "page": 9,
+              "value": "Mr"
+            },
+            {
+              "page": 10,
+              "value": "Mr"
+            }
+          ]
+        }
+      },
+      "time_s": 0.51,
+      "ms_per_page": 1.1
+    },
+    "audit": {
+      "status": "NEEDS_REVIEW",
+      "summary": "Flagged 8 pages, auditing 8: {'EMPTY': 3, 'BOUNDARY': 5}",
+      "pages_audited": 8,
+      "pages_checked": 8,
+      "avg_agreement": 28,
+      "per_page": [
+        {
+          "page": 448,
+          "status": "AUDITED",
+          "regex_found": {},
+          "vision_found": {
+            "PERSON": [
+              "Mrs S G Davidson"
+            ],
+            "LOCATION": [
+              "27 Connaught Road, London, N10 3LD"
+            ]
+          },
+          "comparison": {
+            "matches": [],
+            "missed_by_regex": [
+              {
+                "type": "LOCATION",
+                "vision_values": [
+                  "27 Connaught Road, London, N10 3LD"
+                ]
+              },
+              {
+                "type": "PERSON",
+                "vision_values": [
+                  "Mrs S G Davidson"
+                ]
+              }
+            ],
+            "regex_extra": [],
+            "value_mismatches": [],
+            "agreement_rate": 0,
+            "vision_total": 2,
+            "matched_total": 0
+          },
+          "flag_reason": "EMPTY \u2014 content page with zero extractions"
+        },
+        {
+          "page": 449,
+          "status": "AUDITED",
+          "regex_found": {},
+          "vision_found": {
+            "PERSON": [
+              "Phil Cox"
+            ]
+          },
+          "comparison": {
+            "matches": [],
+            "missed_by_regex": [
+              {
+                "type": "PERSON",
+                "vision_values": [
+                  "Phil Cox"
+                ]
+              }
+            ],
+            "regex_extra": [],
+            "value_mismatches": [],
+            "agreement_rate": 0,
+            "vision_total": 1,
+            "matched_total": 0
+          },
+          "flag_reason": "EMPTY \u2014 content page with zero extractions"
+        },
+        {
+          "page": 450,
+          "status": "AUDITED",
+          "regex_found": {},
+          "vision_found": {},
+          "comparison": {
+            "matches": [],
+            "missed_by_regex": [],
+            "regex_extra": [],
+            "value_mismatches": [],
+            "agreement_rate": 0,
+            "vision_total": 0,
+            "matched_total": 0
+          },
+          "flag_reason": "EMPTY \u2014 content page with zero extractions"
+        },
+        {
+          "page": 1,
+          "status": "AUDITED",
+          "regex_found": {
+            "GOVERNMENT_ID": [
+              "Mr"
+            ],
+            "PERSON": [
+              "Mr   K P   Acheampong                NE"
+            ],
+            "DATE_OF_BIRTH": [
+              "Mr"
+            ]
+          },
+          "vision_found": {
+            "PERSON": [
+              "Mr K P Acheampong"
+            ],
+            "US_SSN": [
+              "NE724362D"
+            ]
+          },
+          "comparison": {
+            "matches": [
+              {
+                "type": "PERSON",
+                "count": 1,
+                "fuzzy": true
+              }
+            ],
+            "missed_by_regex": [
+              {
+                "type": "US_SSN",
+                "vision_values": [
+                  "NE724362D"
+                ]
+              }
+            ],
+            "regex_extra": [
+              {
+                "type": "GOVERNMENT_ID",
+                "regex_values": [
+                  "Mr"
+                ]
+              },
+              {
+                "type": "DATE_OF_BIRTH",
+                "regex_values": [
+                  "Mr"
+                ]
+              }
+            ],
+            "value_mismatches": [],
+            "agreement_rate": 50,
+            "vision_total": 2,
+            "matched_total": 1
+          },
+          "flag_reason": "BOUNDARY \u2014 structural check"
+        },
+        {
+          "page": 227,
+          "status": "AUDITED",
+          "regex_found": {
+            "GOVERNMENT_ID": [
+              "Mrs"
+            ],
+            "PERSON": [
+              "Mrs  J A   Downes                    WM"
+            ],
+            "DATE_OF_BIRTH": [
+              "Mrs"
+            ]
+          },
+          "vision_found": {
+            "PERSON": [
+              "Mrs J A Downes"
+            ],
+            "US_SSN": [
+              "WM504449D"
+            ],
+            "DATE_OF_BIRTH": [
+              "28-Jan-1962"
+            ],
+            "LOCATION": [
+              "18 Orange Hill Road, Burnt Oak, Edgware, HA8 0SZ"
+            ]
+          },
+          "comparison": {
+            "matches": [
+              {
+                "type": "PERSON",
+                "count": 1,
+                "fuzzy": true
+              }
+            ],
+            "missed_by_regex": [
+              {
+                "type": "US_SSN",
+                "vision_values": [
+                  "WM504449D"
+                ]
+              },
+              {
+                "type": "LOCATION",
+                "vision_values": [
+                  "18 Orange Hill Road, Burnt Oak, Edgware, HA8 0SZ"
+                ]
+              },
+              {
+                "type": "DATE_OF_BIRTH",
+                "vision_values": [
+                  "28-JAN-1962"
+                ]
+              }
+            ],
+            "regex_extra": [
+              {
+                "type": "GOVERNMENT_ID",
+                "regex_values": [
+                  "Mrs"
+                ]
+              }
+            ],
+            "value_mismatches": [],
+            "agreement_rate": 25,
+            "vision_total": 4,
+            "matched_total": 1
+          },
+          "flag_reason": "BOUNDARY \u2014 structural check"
+        },
+        {
+          "page": 453,
+          "status": "AUDITED",
+          "regex_found": {
+            "GOVERNMENT_ID": [
+              "Mrs"
+            ],
+            "PERSON": [
+              "Mrs S G Kernp \nYY"
+            ],
+            "DATE_OF_BIRTH": [
+              "Mrs"
+            ]
+          },
+          "vision_found": {
+            "PERSON": [
+              "Mrs S.G. Kemp"
+            ],
+            "US_SSN": [
+              "YY970752B"
+            ]
+          },
+          "comparison": {
+            "matches": [],
+            "missed_by_regex": [
+              {
+                "type": "US_SSN",
+                "vision_values": [
+                  "YY970752B"
+                ]
+              },
+              {
+                "type": "PERSON",
+                "vision_values": [
+                  "MRS S G KEMP"
+                ]
+              }
+            ],
+            "regex_extra": [
+              {
+                "type": "GOVERNMENT_ID",
+                "regex_values": [
+                  "Mrs"
+                ]
+              },
+              {
+                "type": "DATE_OF_BIRTH",
+                "regex_values": [
+                  "Mrs"
+                ]
+              }
+            ],
+            "value_mismatches": [],
+            "agreement_rate": 0,
+            "vision_total": 2,
+            "matched_total": 0
+          },
+          "flag_reason": "BOUNDARY \u2014 structural check"
+        },
+        {
+          "page": 114,
+          "status": "AUDITED",
+          "regex_found": {
+            "GOVERNMENT_ID": [
+              "Miss"
+            ],
+            "PERSON": [
+              "Miss J V   Broadhead                 JA"
+            ],
+            "DATE_OF_BIRTH": [
+              "Miss"
+            ]
+          },
+          "vision_found": {
+            "PERSON": [
+              "Miss J V Broadhead"
+            ],
+            "US_SSN": [
+              "JA772235D"
+            ]
+          },
+          "comparison": {
+            "matches": [
+              {
+                "type": "PERSON",
+                "count": 1,
+                "fuzzy": true
+              }
+            ],
+            "missed_by_regex": [
+              {
+                "type": "US_SSN",
+                "vision_values": [
+                  "JA772235D"
+                ]
+              }
+            ],
+            "regex_extra": [
+              {
+                "type": "GOVERNMENT_ID",
+                "regex_values": [
+                  "Miss"
+                ]
+              },
+              {
+                "type": "DATE_OF_BIRTH",
+                "regex_values": [
+                  "Miss"
+                ]
+              }
+            ],
+            "value_mismatches": [],
+            "agreement_rate": 50,
+            "vision_total": 2,
+            "matched_total": 1
+          },
+          "flag_reason": "BOUNDARY \u2014 structural check"
+        },
+        {
+          "page": 340,
+          "status": "AUDITED",
+          "regex_found": {
+            "GOVERNMENT_ID": [
+              "Mr"
+            ],
+            "PERSON": [
+              "Mr   C A   Guthrie                   WK"
+            ],
+            "DATE_OF_BIRTH": [
+              "Mr"
+            ]
+          },
+          "vision_found": {
+            "PERSON": [
+              "Mr C A Guthrie"
+            ]
+          },
+          "comparison": {
+            "matches": [
+              {
+                "type": "PERSON",
+                "count": 1,
+                "fuzzy": true
+              }
+            ],
+            "missed_by_regex": [],
+            "regex_extra": [
+              {
+                "type": "GOVERNMENT_ID",
+                "regex_values": [
+                  "Mr"
+                ]
+              },
+              {
+                "type": "DATE_OF_BIRTH",
+                "regex_values": [
+                  "Mr"
+                ]
+              }
+            ],
+            "value_mismatches": [],
+            "agreement_rate": 100,
+            "vision_total": 1,
+            "matched_total": 1
+          },
+          "flag_reason": "BOUNDARY \u2014 structural check"
+        }
+      ],
+      "missed_field_summary": {
+        "LOCATION": 2,
+        "PERSON": 3,
+        "US_SSN": 4,
+        "DATE_OF_BIRTH": 1
+      },
+      "recommendation": "Review needed \u2014 avg agreement 28%, missed: {'LOCATION': 2, 'PERSON': 3, 'US_SSN': 4, 'DATE_OF_BIRTH': 1}"
+    }
+  },
+  "Complex1": {
+    "filename": "Complex1.pdf",
+    "total_pages": 4200,
+    "pdf_type": {
+      "type": "text",
+      "text_pages": 6,
+      "image_pages": 0,
+      "total_checked": 6,
+      "avg_text_len": 5855.0
+    },
+    "onset_page": 4,
+    "vision": {
+      "parsed": {
+        "pii_fields": [
+          {
+            "type": "PERSON",
+            "value": "RICHARD C KRISTOFF",
+            "label": "NAME",
+            "position": "top_left"
+          },
+          {
+            "type": "LOCATION",
+            "value": "7245 CASCADE RD",
+            "label": "ADDRESS",
+            "position": "top_left"
+          },
+          {
+            "type": "LOCATION",
+            "value": "CONCORD OH 44077-9403",
+            "label": "CITY, STATE, ZIP",
+            "position": "top_left"
+          },
+          {
+            "type": "GOVERNMENT_ID",
+            "value": "S 297-46-2014",
+            "label": "TAX ID NUMBER",
+            "position": "middle_left"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "6/24/2008",
+            "label": "DATE OPENED",
+            "position": "middle_left"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "11/01/2018",
+            "label": "PASSWORD EXPIRED",
+            "position": "middle_left"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "12/31/2018",
+            "label": "DATE LAST ACCESS",
+            "position": "middle_left"
+          },
+          {
+            "type": "PHONE_NUMBER",
+            "value": "440-339-7510",
+            "label": "HOME PHONE",
+            "position": "middle_left"
+          },
+          {
+            "type": "PHONE_NUMBER",
+            "value": "440-352-4444",
+            "label": "BUSINESS PHONE",
+            "position": "middle_left"
+          },
+          {
+            "type": "PHONE_NUMBER",
+            "value": "30",
+            "label": "BUSINESS PHONE EXT",
+            "position": "middle_left"
+          },
+          {
+            "type": "EMAIL_ADDRESS",
+            "value": "richard.kristoff@yahoo.com",
+            "label": "EMAIL ADDRESS",
+            "position": "middle_left"
+          },
+          {
+            "type": "ACCOUNT_NUMBER",
+            "value": "54513909",
+            "label": "PRIMARY ACCOUNT",
+            "position": "middle_left"
+          },
+          {
+            "type": "ACCOUNT_NUMBER",
+            "value": "54506806",
+            "label": "ACCOUNT",
+            "position": "middle_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "ANITA M ELTZROTH",
+            "label": "NAME",
+            "position": "bottom_left"
+          },
+          {
+            "type": "LOCATION",
+            "value": "515 NORTH ST",
+            "label": "ADDRESS",
+            "position": "bottom_left"
+          },
+          {
+            "type": "LOCATION",
+            "value": "CHARDON OH 44024",
+            "label": "CITY, STATE, ZIP",
+            "position": "bottom_left"
+          },
+          {
+            "type": "GOVERNMENT_ID",
+            "value": "S 287-48-5813",
+            "label": "TAX ID NUMBER",
+            "position": "bottom_left"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "12/21/2015",
+            "label": "DATE OPENED",
+            "position": "bottom_left"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "10/03/2018",
+            "label": "PASSWORD EXPIRED",
+            "position": "bottom_left"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "12/03/2018",
+            "label": "DATE LAST ACCESS",
+            "position": "bottom_left"
+          }
+        ],
+        "structure_type": "fixed_single_page",
+        "records_per_page": 2,
+        "cross_page_data": false,
+        "pages_per_instance": 1
+      }
+    },
+    "patterns": [
+      {
+        "type": "PERSON",
+        "label": "NAME",
+        "test_matches": 0,
+        "regex": "NAME[\\s:]*\\n?\\s*([A-Z][A-Z'-]+(?:\\s+[A-Z][A-Z.'-]*)+)"
+      },
+      {
+        "type": "LOCATION",
+        "label": "ADDRESS",
+        "test_matches": 1,
+        "regex": "ADDRESS[\\s:]*\\n?\\s*(.+?)"
+      },
+      {
+        "type": "LOCATION",
+        "label": "CITY, STATE, ZIP",
+        "test_matches": 0,
+        "regex": "CITY,\\ STATE,\\ ZIP[\\s:]*\\n?\\s*(.+?)"
+      },
+      {
+        "type": "GOVERNMENT_ID",
+        "label": "TAX ID NUMBER",
+        "test_matches": 2,
+        "regex": "TAX\\ ID\\ NUMBER[\\s:]*\\n?\\s*(\\S+)"
+      },
+      {
+        "type": "DATE_OF_BIRTH",
+        "label": "DATE OPENED",
+        "test_matches": 2,
+        "regex": "DATE\\ OPENED[\\s:]*\\n?\\s*(\\S+)"
+      },
+      {
+        "type": "DATE_OF_BIRTH",
+        "label": "PASSWORD EXPIRED",
+        "test_matches": 2,
+        "regex": "PASSWORD\\ EXPIRED[\\s:]*\\n?\\s*(\\d{2}/\\d{2}/\\d{4})"
+      },
+      {
+        "type": "DATE_OF_BIRTH",
+        "label": "DATE LAST ACCESS",
+        "test_matches": 2,
+        "regex": "DATE\\ LAST\\ ACCESS[\\s:]*\\n?\\s*(\\d{2}/\\d{2}/\\d{4})"
+      },
+      {
+        "type": "PHONE_NUMBER",
+        "label": "HOME PHONE",
+        "test_matches": 1,
+        "regex": "HOME\\ PHONE[\\s:]*\\n?\\s*(\\d{3}-\\d{3}-\\d{4})"
+      },
+      {
+        "type": "PHONE_NUMBER",
+        "label": "BUSINESS PHONE",
+        "test_matches": 1,
+        "regex": "BUSINESS\\ PHONE[\\s:]*\\n?\\s*(\\d{3}-\\d{3}-\\d{4})"
+      },
+      {
+        "type": "PHONE_NUMBER",
+        "label": "BUSINESS PHONE EXT",
+        "test_matches": 1,
+        "regex": "BUSINESS\\ PHONE\\ EXT[\\s:]*\\n?\\s*(\\S+)"
+      },
+      {
+        "type": "EMAIL_ADDRESS",
+        "label": "EMAIL ADDRESS",
+        "test_matches": 0,
+        "regex": "EMAIL\\ ADDRESS[\\s:]*\\n?\\s*([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,})"
+      },
+      {
+        "type": "ACCOUNT_NUMBER",
+        "label": "PRIMARY ACCOUNT",
+        "test_matches": 1,
+        "regex": "PRIMARY\\ ACCOUNT[\\s:]*\\n?\\s*([X\\d]{5,})"
+      },
+      {
+        "type": "ACCOUNT_NUMBER",
+        "label": "ACCOUNT",
+        "test_matches": 2,
+        "regex": "ACCOUNT[\\s:]*\\n?\\s*([X\\d]{5,})"
+      }
+    ],
+    "extraction": {
+      "total_pages": 4200,
+      "pages_scanned": 4200,
+      "fields": {
+        "LOCATION": {
+          "count": 0,
+          "label": "ADDRESS",
+          "sample_value": "7245 CASCADE RD",
+          "samples": []
+        },
+        "GOVERNMENT_ID": {
+          "count": 0,
+          "label": "TAX ID NUMBER",
+          "sample_value": "S 297-46-2014",
+          "samples": []
+        },
+        "DATE_OF_BIRTH": {
+          "count": 12805,
+          "label": "DATE OPENED",
+          "sample_value": "6/24/2008",
+          "samples": [
+            {
+              "page": 1,
+              "value": "3/16/2016"
+            },
+            {
+              "page": 1,
+              "value": "6/14/2013"
+            },
+            {
+              "page": 1,
+              "value": "10/29/2018"
+            },
+            {
+              "page": 1,
+              "value": "12/18/2018"
+            },
+            {
+              "page": 1,
+              "value": "12/03/2018"
+            },
+            {
+              "page": 2,
+              "value": "8/26/2001"
+            },
+            {
+              "page": 2,
+              "value": "12/31/2018"
+            },
+            {
+              "page": 3,
+              "value": "9/09/2012"
+            },
+            {
+              "page": 3,
+              "value": "8/26/2011"
+            },
+            {
+              "page": 3,
+              "value": "12/01/2018"
+            }
+          ]
+        },
+        "PHONE_NUMBER": {
+          "count": 11249,
+          "label": "HOME PHONE",
+          "sample_value": "440-339-7510",
+          "samples": [
+            {
+              "page": 1,
+              "value": "440-708-2901"
+            },
+            {
+              "page": 1,
+              "value": "6648"
+            },
+            {
+              "page": 2,
+              "value": "440-635-8372"
+            },
+            {
+              "page": 2,
+              "value": "440-632-5510"
+            },
+            {
+              "page": 2,
+              "value": "244"
+            },
+            {
+              "page": 2,
+              "value": "50"
+            },
+            {
+              "page": 3,
+              "value": "440-272-5489"
+            },
+            {
+              "page": 3,
+              "value": "440-685-4487"
+            },
+            {
+              "page": 3,
+              "value": "METHOD:"
+            },
+            {
+              "page": 4,
+              "value": "440-834-0424"
+            }
+          ]
+        },
+        "ACCOUNT_NUMBER": {
+          "count": 5777,
+          "label": "PRIMARY ACCOUNT",
+          "sample_value": "54513909",
+          "samples": [
+            {
+              "page": 1,
+              "value": "24962056"
+            },
+            {
+              "page": 2,
+              "value": "24939429"
+            },
+            {
+              "page": 2,
+              "value": "24877895"
+            },
+            {
+              "page": 3,
+              "value": "64523112"
+            },
+            {
+              "page": 4,
+              "value": "80023592"
+            },
+            {
+              "page": 4,
+              "value": "100024426"
+            },
+            {
+              "page": 5,
+              "value": "54513909"
+            },
+            {
+              "page": 5,
+              "value": "54513909"
+            },
+            {
+              "page": 5,
+              "value": "54506806"
+            },
+            {
+              "page": 6,
+              "value": "54507290"
+            }
+          ]
+        }
+      },
+      "time_s": 18.05,
+      "ms_per_page": 4.3
+    },
+    "audit": {
+      "status": "NEEDS_REVIEW",
+      "summary": "Flagged 9 pages, auditing 8: {'ANOMALOUS': 4, 'BOUNDARY': 4}",
+      "pages_audited": 8,
+      "pages_checked": 8,
+      "avg_agreement": 6,
+      "per_page": [
+        {
+          "page": 1405,
+          "status": "AUDITED",
+          "regex_found": {
+            "DATE_OF_BIRTH": [
+              "7/23/2018"
+            ],
+            "PHONE_NUMBER": [
+              "METHOD:"
+            ]
+          },
+          "vision_found": {
+            "PERSON": [
+              "ANTHONY ALBINO"
+            ],
+            "US_SSN": [
+              "279-02-4499"
+            ],
+            "LOCATION": [
+              "10010 SHERMAN RD\nCHESTERLAND OH 44026"
+            ],
+            "EMAIL_ADDRESS": [
+              "aalbino20@jcu.edu"
+            ]
+          },
+          "comparison": {
+            "matches": [],
+            "missed_by_regex": [
+              {
+                "type": "EMAIL_ADDRESS",
+                "vision_values": [
+                  "aalbino20@jcu.edu"
+                ]
+              },
+              {
+                "type": "PERSON",
+                "vision_values": [
+                  "ANTHONY ALBINO"
+                ]
+              },
+              {
+                "type": "US_SSN",
+                "vision_values": [
+                  "279-02-4499"
+                ]
+              },
+              {
+                "type": "LOCATION",
+                "vision_values": [
+                  "10010 SHERMAN RD\nCHESTERLAND OH 44026"
+                ]
+              }
+            ],
+            "regex_extra": [
+              {
+                "type": "PHONE_NUMBER",
+                "regex_values": [
+                  "METHOD:"
+                ]
+              },
+              {
+                "type": "DATE_OF_BIRTH",
+                "regex_values": [
+                  "7/23/2018"
+                ]
+              }
+            ],
+            "value_mismatches": [],
+            "agreement_rate": 0,
+            "vision_total": 4,
+            "matched_total": 0
+          },
+          "flag_reason": "ANOMALOUS \u2014 2 values vs median 7"
+        },
+        {
+          "page": 2656,
+          "status": "AUDITED",
+          "regex_found": {
+            "DATE_OF_BIRTH": [
+              "9/19/2016"
+            ],
+            "PHONE_NUMBER": [
+              "104"
+            ]
+          },
+          "vision_found": {
+            "PERSON": [
+              "ABDUL KADER-AKBAR"
+            ],
+            "US_SSN": [
+              "301-15-3354"
+            ],
+            "LOCATION": [
+              "6767 MEADOW CREEK DR UNIT 206, COLUMBUS OH 43235"
+            ],
+            "PHONE_NUMBER": [
+              "16271301"
+            ],
+            "EMAIL_ADDRESS": [
+              "akader1501@gmail.com"
+            ]
+          },
+          "comparison": {
+            "matches": [],
+            "missed_by_regex": [
+              {
+                "type": "EMAIL_ADDRESS",
+                "vision_values": [
+                  "akader1501@gmail.com"
+                ]
+              },
+              {
+                "type": "PERSON",
+                "vision_values": [
+                  "ABDUL KADER-AKBAR"
+                ]
+              },
+              {
+                "type": "PHONE_NUMBER",
+                "vision_values": [
+                  "16271301"
+                ]
+              },
+              {
+                "type": "US_SSN",
+                "vision_values": [
+                  "301-15-3354"
+                ]
+              },
+              {
+                "type": "LOCATION",
+                "vision_values": [
+                  "6767 MEADOW CREEK DR UNIT 206, COLUMBUS OH 43235"
+                ]
+              }
+            ],
+            "regex_extra": [
+              {
+                "type": "DATE_OF_BIRTH",
+                "regex_values": [
+                  "9/19/2016"
+                ]
+              }
+            ],
+            "value_mismatches": [],
+            "agreement_rate": 0,
+            "vision_total": 5,
+            "matched_total": 0
+          },
+          "flag_reason": "ANOMALOUS \u2014 2 values vs median 7"
+        },
+        {
+          "page": 2677,
+          "status": "AUDITED",
+          "regex_found": {
+            "DATE_OF_BIRTH": [
+              "9/29/2018"
+            ],
+            "PHONE_NUMBER": [
+              "METHOD:"
+            ]
+          },
+          "vision_found": {
+            "PERSON": [
+              "STASE OBELENIS"
+            ],
+            "US_SSN": [
+              "284-30-9283"
+            ],
+            "DATE_OF_BIRTH": [
+              "07/07/0000"
+            ],
+            "LOCATION": [
+              "8230 BELLE VERNON DR, NOVELTY OH 44072"
+            ],
+            "PHONE_NUMBER": [
+              "16286902"
+            ],
+            "EMAIL_ADDRESS": [
+              "musttravel@hotmail.com"
+            ]
+          },
+          "comparison": {
+            "matches": [],
+            "missed_by_regex": [
+              {
+                "type": "EMAIL_ADDRESS",
+                "vision_values": [
+                  "musttravel@hotmail.com"
+                ]
+              },
+              {
+                "type": "PERSON",
+                "vision_values": [
+                  "STASE OBELENIS"
+                ]
+              },
+              {
+                "type": "PHONE_NUMBER",
+                "vision_values": [
+                  "16286902"
+                ]
+              },
+              {
+                "type": "US_SSN",
+                "vision_values": [
+                  "284-30-9283"
+                ]
+              },
+              {
+                "type": "LOCATION",
+                "vision_values": [
+                  "8230 BELLE VERNON DR, NOVELTY OH 44072"
+                ]
+              },
+              {
+                "type": "DATE_OF_BIRTH",
+                "vision_values": [
+                  "07/07/0000"
+                ]
+              }
+            ],
+            "regex_extra": [],
+            "value_mismatches": [],
+            "agreement_rate": 0,
+            "vision_total": 6,
+            "matched_total": 0
+          },
+          "flag_reason": "ANOMALOUS \u2014 2 values vs median 7"
+        },
+        {
+          "page": 3243,
+          "status": "AUDITED",
+          "regex_found": {
+            "DATE_OF_BIRTH": [
+              "9/29/2018"
+            ],
+            "PHONE_NUMBER": [
+              "METHOD:"
+            ]
+          },
+          "vision_found": {
+            "PERSON": [
+              "STASE OBELENIS IRREVOCABLE TRUST"
+            ],
+            "US_SSN": [
+              "82-6850962"
+            ],
+            "LOCATION": [
+              "8230 BELLE VERNON DR, NOVELTY OH 44072"
+            ],
+            "EMAIL_ADDRESS": [
+              "musttravel@hotmail.com"
+            ]
+          },
+          "comparison": {
+            "matches": [],
+            "missed_by_regex": [
+              {
+                "type": "EMAIL_ADDRESS",
+                "vision_values": [
+                  "musttravel@hotmail.com"
+                ]
+              },
+              {
+                "type": "PERSON",
+                "vision_values": [
+                  "STASE OBELENIS IRREVOCABLE TRUST"
+                ]
+              },
+              {
+                "type": "US_SSN",
+                "vision_values": [
+                  "82-6850962"
+                ]
+              },
+              {
+                "type": "LOCATION",
+                "vision_values": [
+                  "8230 BELLE VERNON DR, NOVELTY OH 44072"
+                ]
+              }
+            ],
+            "regex_extra": [
+              {
+                "type": "PHONE_NUMBER",
+                "regex_values": [
+                  "METHOD:"
+                ]
+              },
+              {
+                "type": "DATE_OF_BIRTH",
+                "regex_values": [
+                  "9/29/2018"
+                ]
+              }
+            ],
+            "value_mismatches": [],
+            "agreement_rate": 0,
+            "vision_total": 4,
+            "matched_total": 0
+          },
+          "flag_reason": "ANOMALOUS \u2014 2 values vs median 7"
+        },
+        {
+          "page": 1,
+          "status": "AUDITED",
+          "regex_found": {
+            "DATE_OF_BIRTH": [
+              "3/16/2016",
+              "6/14/2013",
+              "10/29/2018",
+              "12/18/2018",
+              "12/03/2018"
+            ],
+            "PHONE_NUMBER": [
+              "440-708-2901",
+              "6648"
+            ],
+            "ACCOUNT_NUMBER": [
+              "24962056"
+            ]
+          },
+          "vision_found": {
+            "PERSON": [
+              "TOM REAM",
+              "MELISSA KRAUS"
+            ],
+            "US_SSN": [
+              "211-42-9287",
+              "300-52-1264"
+            ],
+            "LOCATION": [
+              "10795 FRANKS RD\nCHAGRIN FALLS OH 44023",
+              "12999 OLD STATE RD\nHUNTSBURG OH 44046"
+            ],
+            "PHONE_NUMBER": [
+              "440-708-2901"
+            ],
+            "EMAIL_ADDRESS": [
+              "27trsc@gmail.com"
+            ]
+          },
+          "comparison": {
+            "matches": [
+              {
+                "type": "PHONE_NUMBER",
+                "count": 1
+              }
+            ],
+            "missed_by_regex": [
+              {
+                "type": "EMAIL_ADDRESS",
+                "vision_values": [
+                  "27trsc@gmail.com"
+                ]
+              },
+              {
+                "type": "PERSON",
+                "vision_values": [
+                  "TOM REAM",
+                  "MELISSA KRAUS"
+                ]
+              },
+              {
+                "type": "US_SSN",
+                "vision_values": [
+                  "211-42-9287",
+                  "300-52-1264"
+                ]
+              },
+              {
+                "type": "LOCATION",
+                "vision_values": [
+                  "10795 FRANKS RD\nCHAGRIN FALLS OH 44023",
+                  "12999 OLD STATE RD\nHUNTSBURG OH 44046"
+                ]
+              }
+            ],
+            "regex_extra": [
+              {
+                "type": "ACCOUNT_NUMBER",
+                "regex_values": [
+                  "24962056"
+                ]
+              },
+              {
+                "type": "DATE_OF_BIRTH",
+                "regex_values": [
+                  "3/16/2016",
+                  "6/14/2013",
+                  "10/29/2018"
+                ]
+              }
+            ],
+            "value_mismatches": [],
+            "agreement_rate": 12,
+            "vision_total": 8,
+            "matched_total": 1
+          },
+          "flag_reason": "BOUNDARY \u2014 structural check"
+        },
+        {
+          "page": 4200,
+          "status": "AUDITED",
+          "regex_found": {
+            "DATE_OF_BIRTH": [
+              "7/22/2018",
+              "12/21/2018"
+            ],
+            "PHONE_NUMBER": [
+              "330-963-1007",
+              "24"
+            ]
+          },
+          "vision_found": {
+            "PERSON": [
+              "SHERYL J FELBER"
+            ],
+            "US_SSN": [
+              "80116402"
+            ],
+            "LOCATION": [
+              "1749 MORTUS DR, TWINSBURG OH 44087"
+            ],
+            "PHONE_NUMBER": [
+              "330-963-1007"
+            ],
+            "EMAIL_ADDRESS": [
+              "robfelber@felberpr.com"
+            ]
+          },
+          "comparison": {
+            "matches": [
+              {
+                "type": "PHONE_NUMBER",
+                "count": 1
+              }
+            ],
+            "missed_by_regex": [
+              {
+                "type": "EMAIL_ADDRESS",
+                "vision_values": [
+                  "robfelber@felberpr.com"
+                ]
+              },
+              {
+                "type": "PERSON",
+                "vision_values": [
+                  "SHERYL J FELBER"
+                ]
+              },
+              {
+                "type": "US_SSN",
+                "vision_values": [
+                  "80116402"
+                ]
+              },
+              {
+                "type": "LOCATION",
+                "vision_values": [
+                  "1749 MORTUS DR, TWINSBURG OH 44087"
+                ]
+              }
+            ],
+            "regex_extra": [
+              {
+                "type": "DATE_OF_BIRTH",
+                "regex_values": [
+                  "7/22/2018",
+                  "12/21/2018"
+                ]
+              }
+            ],
+            "value_mismatches": [],
+            "agreement_rate": 20,
+            "vision_total": 5,
+            "matched_total": 1
+          },
+          "flag_reason": "BOUNDARY \u2014 structural check"
+        },
+        {
+          "page": 3151,
+          "status": "AUDITED",
+          "regex_found": {
+            "DATE_OF_BIRTH": [
+              "12/29/2018",
+              "12/29/2018",
+              "12/29/2018"
+            ],
+            "PHONE_NUMBER": [
+              "METHOD:"
+            ],
+            "ACCOUNT_NUMBER": [
+              "100084152"
+            ]
+          },
+          "vision_found": {
+            "PERSON": [
+              "PARADISE RENOVATION AND"
+            ],
+            "US_SSN": [
+              "289-58-6836"
+            ],
+            "PHONE_NUMBER": [
+              "16624401"
+            ],
+            "EMAIL_ADDRESS": [
+              "richardkasunik@gmail.com"
+            ]
+          },
+          "comparison": {
+            "matches": [],
+            "missed_by_regex": [
+              {
+                "type": "EMAIL_ADDRESS",
+                "vision_values": [
+                  "richardkasunik@gmail.com"
+                ]
+              },
+              {
+                "type": "PERSON",
+                "vision_values": [
+                  "PARADISE RENOVATION AND"
+                ]
+              },
+              {
+                "type": "PHONE_NUMBER",
+                "vision_values": [
+                  "16624401"
+                ]
+              },
+              {
+                "type": "US_SSN",
+                "vision_values": [
+                  "289-58-6836"
+                ]
+              }
+            ],
+            "regex_extra": [
+              {
+                "type": "ACCOUNT_NUMBER",
+                "regex_values": [
+                  "100084152"
+                ]
+              },
+              {
+                "type": "DATE_OF_BIRTH",
+                "regex_values": [
+                  "12/29/2018",
+                  "12/29/2018",
+                  "12/29/2018"
+                ]
+              }
+            ],
+            "value_mismatches": [],
+            "agreement_rate": 0,
+            "vision_total": 4,
+            "matched_total": 0
+          },
+          "flag_reason": "BOUNDARY \u2014 structural check"
+        },
+        {
+          "page": 2101,
+          "status": "AUDITED",
+          "regex_found": {
+            "DATE_OF_BIRTH": [
+              "7/30/2014",
+              "3/05/2018",
+              "12/05/2018",
+              "10/16/2018",
+              "12/05/2018"
+            ],
+            "PHONE_NUMBER": [
+              "330-814-6172",
+              "247"
+            ],
+            "ACCOUNT_NUMBER": [
+              "24980494"
+            ]
+          },
+          "vision_found": {
+            "PERSON": [
+              "MARK S VOJTKO",
+              "MELISA VOJTKO"
+            ],
+            "US_SSN": [
+              "S 301-66-0439",
+              "S 590-34-4980"
+            ],
+            "LOCATION": [
+              "11835 MANTUA CENTER ROAD, MANTUA OH 44255",
+              "11835 MANTUA CENTER ROAD, MANTUA OH 44255"
+            ],
+            "PHONE_NUMBER": [
+              "330-814-6172"
+            ],
+            "EMAIL_ADDRESS": [
+              "mvojtko1@yahoo.com"
+            ]
+          },
+          "comparison": {
+            "matches": [
+              {
+                "type": "PHONE_NUMBER",
+                "count": 1
+              }
+            ],
+            "missed_by_regex": [
+              {
+                "type": "EMAIL_ADDRESS",
+                "vision_values": [
+                  "mvojtko1@yahoo.com"
+                ]
+              },
+              {
+                "type": "PERSON",
+                "vision_values": [
+                  "MARK S VOJTKO",
+                  "MELISA VOJTKO"
+                ]
+              },
+              {
+                "type": "US_SSN",
+                "vision_values": [
+                  "S 301-66-0439",
+                  "S 590-34-4980"
+                ]
+              },
+              {
+                "type": "LOCATION",
+                "vision_values": [
+                  "11835 MANTUA CENTER ROAD, MANTUA OH 44255",
+                  "11835 MANTUA CENTER ROAD, MANTUA OH 44255"
+                ]
+              }
+            ],
+            "regex_extra": [
+              {
+                "type": "ACCOUNT_NUMBER",
+                "regex_values": [
+                  "24980494"
+                ]
+              },
+              {
+                "type": "DATE_OF_BIRTH",
+                "regex_values": [
+                  "7/30/2014",
+                  "3/05/2018",
+                  "12/05/2018"
+                ]
+              }
+            ],
+            "value_mismatches": [],
+            "agreement_rate": 12,
+            "vision_total": 8,
+            "matched_total": 1
+          },
+          "flag_reason": "BOUNDARY \u2014 structural check"
+        }
+      ],
+      "missed_field_summary": {
+        "EMAIL_ADDRESS": 8,
+        "PERSON": 8,
+        "US_SSN": 8,
+        "LOCATION": 7,
+        "PHONE_NUMBER": 3,
+        "DATE_OF_BIRTH": 1
+      },
+      "recommendation": "Review needed \u2014 avg agreement 6%, missed: {'EMAIL_ADDRESS': 8, 'PERSON': 8, 'US_SSN': 8, 'LOCATION': 7, 'PHONE_NUMBER': 3, 'DATE_OF_BIRTH': 1}"
+    }
+  },
+  "EdmondsSD_0003650859": {
+    "filename": "EdmondsSD_0003650859.pdf",
+    "total_pages": 484,
+    "pdf_type": {
+      "type": "text",
+      "text_pages": 7,
+      "image_pages": 0,
+      "total_checked": 7,
+      "avg_text_len": 6680.0
+    },
+    "onset_page": 27,
+    "vision": {
+      "error": "Server error '500 Internal Server Error' for url 'http://localhost:11434/api/generate'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500",
+      "parsed": null
+    },
+    "extraction": {
+      "error": "Vision failed"
+    }
+  },
+  "TPHS2_656_0000067171": {
+    "filename": "TPHS2_656_0000067171.pdf",
+    "total_pages": 902,
+    "pdf_type": {
+      "type": "text",
+      "text_pages": 7,
+      "image_pages": 0,
+      "total_checked": 7,
+      "avg_text_len": 5189.0
+    },
+    "onset_page": 16,
+    "vision": {
+      "parsed": {
+        "pii_fields": [
+          {
+            "type": "PERSON",
+            "value": "ANDERSON, MATTHEW TRAYNHAM",
+            "label": "EMPLOYEE NAME",
+            "position": "top_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "ANDRE, ROSS",
+            "label": "EMPLOYEE NAME",
+            "position": "middle_left"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "05/27/86",
+            "label": "BIRTHDATE",
+            "position": "top_left"
+          },
+          {
+            "type": "US_SSN",
+            "value": "XXX-XX-6706",
+            "label": "SS-NO",
+            "position": "middle_left"
+          },
+          {
+            "type": "ACCOUNT_NUMBER",
+            "value": "1010161982690",
+            "label": "EFT-ACCOUNT#",
+            "position": "top_left"
+          },
+          {
+            "type": "ACCOUNT_NUMBER",
+            "value": "01-409-52936",
+            "label": "FILE#",
+            "position": "middle_left"
+          },
+          {
+            "type": "LOCATION",
+            "value": "1080 PEACHTREE STREET NE",
+            "label": "UNIT 907",
+            "position": "middle_left"
+          },
+          {
+            "type": "LOCATION",
+            "value": "ATLANTA GA 30309",
+            "label": "UNIT 907",
+            "position": "middle_left"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "09/16/16",
+            "label": "HIRE",
+            "position": "middle_left"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "09/30/16",
+            "label": "CK DATE",
+            "position": "middle_right"
+          }
+        ],
+        "structure_type": "fixed_single_page",
+        "records_per_page": 2,
+        "cross_page_data": false,
+        "pages_per_instance": 1
+      }
+    },
+    "patterns": [
+      {
+        "type": "PERSON",
+        "label": "EMPLOYEE NAME",
+        "test_matches": 0,
+        "regex": "EMPLOYEE\\ NAME[\\s:]*\\n?\\s*([A-Z][A-Z'-]+,\\s*[A-Z][A-Za-z .'-]+)"
+      },
+      {
+        "type": "DATE_OF_BIRTH",
+        "label": "BIRTHDATE",
+        "test_matches": 1,
+        "regex": "BIRTHDATE[\\s:]*\\n?\\s*(\\d{2}/\\d{2}/\\d{2,4})"
+      },
+      {
+        "type": "US_SSN",
+        "label": "SS-NO",
+        "test_matches": 1,
+        "regex": "SS\\-NO[\\s:]*\\n?\\s*(XXX-XX-\\d{4})"
+      },
+      {
+        "type": "ACCOUNT_NUMBER",
+        "label": "EFT-ACCOUNT#",
+        "test_matches": 0,
+        "regex": "EFT\\-ACCOUNT\\#[\\s:]*\\n?\\s*([X\\d]{5,})"
+      },
+      {
+        "type": "ACCOUNT_NUMBER",
+        "label": "FILE#",
+        "test_matches": 1,
+        "regex": "FILE\\#[\\s:]*\\n?\\s*(\\S+)"
+      },
+      {
+        "type": "LOCATION",
+        "label": "UNIT 907",
+        "test_matches": 1,
+        "regex": "UNIT\\ 907[\\s:]*\\n?\\s*(.+?)"
+      },
+      {
+        "type": "DATE_OF_BIRTH",
+        "label": "HIRE",
+        "test_matches": 1,
+        "regex": "HIRE[\\s:]*\\n?\\s*(\\d{2}/\\d{2}/\\d{2,4})"
+      },
+      {
+        "type": "DATE_OF_BIRTH",
+        "label": "CK DATE",
+        "test_matches": 0,
+        "regex": "CK\\ DATE[\\s:]*\\n?\\s*(\\d{2}/\\d{2}/\\d{2,4})"
+      }
+    ],
+    "extraction": {
+      "total_pages": 902,
+      "pages_scanned": 902,
+      "fields": {
+        "DATE_OF_BIRTH": {
+          "count": 2473,
+          "label": "BIRTHDATE",
+          "sample_value": "05/27/86",
+          "samples": [
+            {
+              "page": 1,
+              "value": "06/26/57"
+            },
+            {
+              "page": 1,
+              "value": "07/25/83"
+            },
+            {
+              "page": 1,
+              "value": "05/18/15"
+            },
+            {
+              "page": 2,
+              "value": "10/03/76"
+            },
+            {
+              "page": 2,
+              "value": "06/19/76"
+            },
+            {
+              "page": 2,
+              "value": "09/15/15"
+            },
+            {
+              "page": 3,
+              "value": "03/21/67"
+            },
+            {
+              "page": 3,
+              "value": "05/12/48"
+            },
+            {
+              "page": 3,
+              "value": "07/23/07"
+            },
+            {
+              "page": 3,
+              "value": "10/18/00"
+            }
+          ]
+        },
+        "US_SSN": {
+          "count": 1237,
+          "label": "SS-NO",
+          "sample_value": "XXX-XX-6706",
+          "samples": [
+            {
+              "page": 1,
+              "value": "XXX-XX-5589"
+            },
+            {
+              "page": 1,
+              "value": "XXX-XX-1676"
+            },
+            {
+              "page": 2,
+              "value": "XXX-XX-2226"
+            },
+            {
+              "page": 2,
+              "value": "XXX-XX-6484"
+            },
+            {
+              "page": 3,
+              "value": "XXX-XX-8601"
+            },
+            {
+              "page": 4,
+              "value": "XXX-XX-3616"
+            },
+            {
+              "page": 4,
+              "value": "XXX-XX-0712"
+            },
+            {
+              "page": 5,
+              "value": "XXX-XX-7077"
+            },
+            {
+              "page": 6,
+              "value": "XXX-XX-8880"
+            },
+            {
+              "page": 7,
+              "value": "XXX-XX-5247"
+            }
+          ]
+        },
+        "ACCOUNT_NUMBER": {
+          "count": 1237,
+          "label": "FILE#",
+          "sample_value": "01-409-52936",
+          "samples": [
+            {
+              "page": 1,
+              "value": "1034"
+            },
+            {
+              "page": 1,
+              "value": "52577"
+            },
+            {
+              "page": 2,
+              "value": "52692"
+            },
+            {
+              "page": 3,
+              "value": "51165"
+            },
+            {
+              "page": 3,
+              "value": "11880"
+            },
+            {
+              "page": 4,
+              "value": "52833"
+            },
+            {
+              "page": 4,
+              "value": "52360"
+            },
+            {
+              "page": 5,
+              "value": "52406"
+            },
+            {
+              "page": 6,
+              "value": "52294"
+            },
+            {
+              "page": 7,
+              "value": "52580"
+            }
+          ]
+        },
+        "LOCATION": {
+          "count": 0,
+          "label": "UNIT 907",
+          "sample_value": "1080 PEACHTREE STREET NE",
+          "samples": []
+        }
+      },
+      "time_s": 2.68,
+      "ms_per_page": 3.0
+    },
+    "audit": {
+      "status": "NEEDS_REVIEW",
+      "summary": "Flagged 21 pages, auditing 8: {'EMPTY': 6, 'ANOMALOUS': 2}",
+      "pages_audited": 8,
+      "pages_checked": 8,
+      "avg_agreement": 4,
+      "per_page": [
+        {
+          "page": 348,
+          "status": "AUDITED",
+          "regex_found": {},
+          "vision_found": {
+            "PERSON": [
+              "HARROD, ANGELA L."
+            ],
+            "US_SSN": [
+              "10-024-50124"
+            ]
+          },
+          "comparison": {
+            "matches": [],
+            "missed_by_regex": [
+              {
+                "type": "US_SSN",
+                "vision_values": [
+                  "10-024-50124"
+                ]
+              },
+              {
+                "type": "PERSON",
+                "vision_values": [
+                  "HARROD, ANGELA L."
+                ]
+              }
+            ],
+            "regex_extra": [],
+            "value_mismatches": [],
+            "agreement_rate": 0,
+            "vision_total": 2,
+            "matched_total": 0
+          },
+          "flag_reason": "EMPTY \u2014 content page with zero extractions"
+        },
+        {
+          "page": 898,
+          "status": "AUDITED",
+          "regex_found": {},
+          "vision_found": {},
+          "comparison": {
+            "matches": [],
+            "missed_by_regex": [],
+            "regex_extra": [],
+            "value_mismatches": [],
+            "agreement_rate": 0,
+            "vision_total": 0,
+            "matched_total": 0
+          },
+          "flag_reason": "EMPTY \u2014 content page with zero extractions"
+        },
+        {
+          "page": 899,
+          "status": "AUDITED",
+          "regex_found": {},
+          "vision_found": {},
+          "comparison": {
+            "matches": [],
+            "missed_by_regex": [],
+            "regex_extra": [],
+            "value_mismatches": [],
+            "agreement_rate": 0,
+            "vision_total": 0,
+            "matched_total": 0
+          },
+          "flag_reason": "EMPTY \u2014 content page with zero extractions"
+        },
+        {
+          "page": 900,
+          "status": "AUDITED",
+          "regex_found": {},
+          "vision_found": {},
+          "comparison": {
+            "matches": [],
+            "missed_by_regex": [],
+            "regex_extra": [],
+            "value_mismatches": [],
+            "agreement_rate": 0,
+            "vision_total": 0,
+            "matched_total": 0
+          },
+          "flag_reason": "EMPTY \u2014 content page with zero extractions"
+        },
+        {
+          "page": 901,
+          "status": "AUDITED",
+          "regex_found": {},
+          "vision_found": {},
+          "comparison": {
+            "matches": [],
+            "missed_by_regex": [],
+            "regex_extra": [],
+            "value_mismatches": [],
+            "agreement_rate": 0,
+            "vision_total": 0,
+            "matched_total": 0
+          },
+          "flag_reason": "EMPTY \u2014 content page with zero extractions"
+        },
+        {
+          "page": 902,
+          "status": "AUDITED",
+          "regex_found": {},
+          "vision_found": {},
+          "comparison": {
+            "matches": [],
+            "missed_by_regex": [],
+            "regex_extra": [],
+            "value_mismatches": [],
+            "agreement_rate": 0,
+            "vision_total": 0,
+            "matched_total": 0
+          },
+          "flag_reason": "EMPTY \u2014 content page with zero extractions"
+        },
+        {
+          "page": 39,
+          "status": "AUDITED",
+          "regex_found": {
+            "DATE_OF_BIRTH": [
+              "04/07/84"
+            ]
+          },
+          "vision_found": {
+            "PERSON": [
+              "BALTHROP, KATIE LAMB",
+              "BARATIAN, MELISSA A."
+            ],
+            "US_SSN": [
+              "01-410-51329",
+              "01-509-52365"
+            ],
+            "DATE_OF_BIRTH": [
+              "04/07/84"
+            ],
+            "LOCATION": [
+              "10300 CARLEIGH LANE, ROSWELL GA 30076"
+            ]
+          },
+          "comparison": {
+            "matches": [
+              {
+                "type": "DATE_OF_BIRTH",
+                "count": 1
+              }
+            ],
+            "missed_by_regex": [
+              {
+                "type": "US_SSN",
+                "vision_values": [
+                  "01-410-51329",
+                  "01-509-52365"
+                ]
+              },
+              {
+                "type": "LOCATION",
+                "vision_values": [
+                  "10300 CARLEIGH LANE, ROSWELL GA 30076"
+                ]
+              },
+              {
+                "type": "PERSON",
+                "vision_values": [
+                  "BALTHROP, KATIE LAMB",
+                  "BARATIAN, MELISSA A."
+                ]
+              }
+            ],
+            "regex_extra": [],
+            "value_mismatches": [],
+            "agreement_rate": 17,
+            "vision_total": 6,
+            "matched_total": 1
+          },
+          "flag_reason": "ANOMALOUS \u2014 1 values vs median 5"
+        },
+        {
+          "page": 62,
+          "status": "AUDITED",
+          "regex_found": {
+            "DATE_OF_BIRTH": [
+              "05/14/81"
+            ]
+          },
+          "vision_found": {
+            "PERSON": [
+              "BEST, RACHAEL ALEXANDRA",
+              "BIESER, LAURA A."
+            ],
+            "US_SSN": [
+              "01-024-50890",
+              "18-428-51534"
+            ],
+            "DATE_OF_BIRTH": [
+              "05/14/81"
+            ],
+            "LOCATION": [
+              "28321 OCEANA DEL MAR, SAN JUAN CAPISTRANO CA 92675"
+            ]
+          },
+          "comparison": {
+            "matches": [
+              {
+                "type": "DATE_OF_BIRTH",
+                "count": 1
+              }
+            ],
+            "missed_by_regex": [
+              {
+                "type": "US_SSN",
+                "vision_values": [
+                  "01-024-50890",
+                  "18-428-51534"
+                ]
+              },
+              {
+                "type": "LOCATION",
+                "vision_values": [
+                  "28321 OCEANA DEL MAR, SAN JUAN CAPISTRANO CA 92675"
+                ]
+              },
+              {
+                "type": "PERSON",
+                "vision_values": [
+                  "BEST, RACHAEL ALEXANDRA",
+                  "BIESER, LAURA A."
+                ]
+              }
+            ],
+            "regex_extra": [],
+            "value_mismatches": [],
+            "agreement_rate": 17,
+            "vision_total": 6,
+            "matched_total": 1
+          },
+          "flag_reason": "ANOMALOUS \u2014 1 values vs median 5"
+        }
+      ],
+      "missed_field_summary": {
+        "US_SSN": 3,
+        "PERSON": 3,
+        "LOCATION": 2
+      },
+      "recommendation": "Review needed \u2014 avg agreement 4%, missed: {'US_SSN': 3, 'PERSON': 3, 'LOCATION': 2}"
+    }
+  },
+  "TPHS2_656_0000070715": {
+    "filename": "TPHS2_656_0000070715.pdf",
+    "total_pages": 132,
+    "pdf_type": {
+      "type": "text",
+      "text_pages": 7,
+      "image_pages": 0,
+      "total_checked": 7,
+      "avg_text_len": 4488.0
+    },
+    "onset_page": 18,
+    "vision": {
+      "error": "Server error '500 Internal Server Error' for url 'http://localhost:11434/api/generate'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500",
+      "parsed": null
+    },
+    "extraction": {
+      "error": "Vision failed"
+    }
+  },
+  "TPHS2_656_0000071913": {
+    "filename": "TPHS2_656_0000071913.pdf",
+    "total_pages": 211,
+    "pdf_type": {
+      "type": "text",
+      "text_pages": 6,
+      "image_pages": 0,
+      "total_checked": 6,
+      "avg_text_len": 3724.0
+    },
+    "onset_page": 8,
+    "vision": {
+      "parsed": {
+        "pii_fields": [
+          {
+            "type": "US_SSN",
+            "value": "XXX-XX-1173",
+            "label": "INSIDE/LEGAL ADDRESS",
+            "position": "middle_left"
+          },
+          {
+            "type": "US_SSN",
+            "value": "XXX-XX-2123",
+            "label": "SSN",
+            "position": "middle_left"
+          },
+          {
+            "type": "US_SSN",
+            "value": "XXX-XX-0549",
+            "label": "SSN",
+            "position": "middle_left"
+          },
+          {
+            "type": "US_SSN",
+            "value": "XXX-XX-1446",
+            "label": "SSN",
+            "position": "middle_left"
+          },
+          {
+            "type": "US_SSN",
+            "value": "XXX-XX-4529",
+            "label": "SSN",
+            "position": "middle_left"
+          },
+          {
+            "type": "US_SSN",
+            "value": "XXX-XX-4143",
+            "label": "SSN",
+            "position": "middle_left"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "08/02/1968",
+            "label": "DOB",
+            "position": "middle_left"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "08/02/1968",
+            "label": "DOB",
+            "position": "middle_left"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "08/02/1968",
+            "label": "DOB",
+            "position": "middle_left"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "08/02/1968",
+            "label": "DOB",
+            "position": "middle_left"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "08/02/1968",
+            "label": "DOB",
+            "position": "middle_left"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "08/02/1968",
+            "label": "DOB",
+            "position": "middle_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "ROBERT MASON BAYLER JR",
+            "label": "EMPLOYEE NAME",
+            "position": "middle_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "KRISTEN B BAYLER",
+            "label": "FIRST NAME MIDDLE NAME LAST NAME",
+            "position": "middle_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "GEORGIA K BAYLER",
+            "label": "FIRST NAME MIDDLE NAME LAST NAME",
+            "position": "middle_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "CHARLES M BAYLER",
+            "label": "FIRST NAME MIDDLE NAME LAST NAME",
+            "position": "middle_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "ELIZABETH C BAYLER",
+            "label": "FIRST NAME MIDDLE NAME LAST NAME",
+            "position": "middle_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "ANNABEL ELYSE BAYLER",
+            "label": "FIRST NAME MIDDLE NAME LAST NAME",
+            "position": "middle_left"
+          },
+          {
+            "type": "LOCATION",
+            "value": "205 BANBURY ROAD",
+            "label": "ADDR1",
+            "position": "middle_left"
+          },
+          {
+            "type": "LOCATION",
+            "value": "RICHMOND",
+            "label": "CITY",
+            "position": "middle_left"
+          },
+          {
+            "type": "LOCATION",
+            "value": "ST VA",
+            "label": "ST",
+            "position": "middle_left"
+          },
+          {
+            "type": "LOCATION",
+            "value": "23221",
+            "label": "ZIP CODE",
+            "position": "middle_left"
+          }
+        ],
+        "structure_type": "fixed_single_page",
+        "records_per_page": 1,
+        "cross_page_data": false,
+        "pages_per_instance": 1
+      }
+    },
+    "patterns": [
+      {
+        "type": "US_SSN",
+        "label": "INSIDE/LEGAL ADDRESS",
+        "test_matches": 0,
+        "regex": "INSIDE/LEGAL\\ ADDRESS[\\s:]*\\n?\\s*(XXX-XX-\\d{4})"
+      },
+      {
+        "type": "US_SSN",
+        "label": "SSN",
+        "test_matches": 0,
+        "regex": "SSN[\\s:]*\\n?\\s*(XXX-XX-\\d{4})"
+      },
+      {
+        "type": "DATE_OF_BIRTH",
+        "label": "DOB",
+        "test_matches": 0,
+        "regex": "DOB[\\s:]*\\n?\\s*(\\d{2}/\\d{2}/\\d{4})"
+      },
+      {
+        "type": "PERSON",
+        "label": "EMPLOYEE NAME",
+        "test_matches": 1,
+        "regex": "EMPLOYEE\\ NAME[\\s:]*\\n?\\s*([A-Z][A-Z'-]+(?:\\s+[A-Z][A-Z.'-]*)+)"
+      },
+      {
+        "type": "PERSON",
+        "label": "FIRST NAME MIDDLE NAME LAST NAME",
+        "test_matches": 0,
+        "regex": "FIRST\\ NAME\\ MIDDLE\\ NAME\\ LAST\\ NAME[\\s:]*\\n?\\s*([A-Z][A-Z'-]+(?:\\s+[A-Z][A-Z.'-]*)+)"
+      },
+      {
+        "type": "LOCATION",
+        "label": "ADDR1",
+        "test_matches": 2,
+        "regex": "ADDR1[\\s:]*\\n?\\s*(.+?)"
+      },
+      {
+        "type": "LOCATION",
+        "label": "CITY",
+        "test_matches": 2,
+        "regex": "CITY[\\s:]*\\n?\\s*(.+?)"
+      },
+      {
+        "type": "LOCATION",
+        "label": "ST",
+        "test_matches": 8,
+        "regex": "ST[\\s:]*\\n?\\s*(.+?)"
+      },
+      {
+        "type": "LOCATION",
+        "label": "ZIP CODE",
+        "test_matches": 2,
+        "regex": "ZIP\\ CODE[\\s:]*\\n?\\s*([X\\d]{5,})"
+      }
+    ],
+    "extraction": {
+      "total_pages": 211,
+      "pages_scanned": 211,
+      "fields": {
+        "PERSON": {
+          "count": 204,
+          "label": "EMPLOYEE NAME",
+          "sample_value": "ROBERT MASON BAYLER JR",
+          "samples": [
+            {
+              "page": 2,
+              "value": "MATTHEW         J               AARONSON"
+            },
+            {
+              "page": 3,
+              "value": "AARON           N               ABRAHAM"
+            },
+            {
+              "page": 4,
+              "value": "LESLIE          S               AHARI"
+            },
+            {
+              "page": 5,
+              "value": "SUSAN           STOOPS          ANCARROW"
+            },
+            {
+              "page": 6,
+              "value": "ROBERT          A               ANGLE"
+            },
+            {
+              "page": 7,
+              "value": "DAVID           N               ANTHONY"
+            },
+            {
+              "page": 8,
+              "value": "JEFFERY         R               BANISH"
+            },
+            {
+              "page": 9,
+              "value": "ROBERT          MASON           BAYLER                  JR"
+            },
+            {
+              "page": 10,
+              "value": "RICHARD         C               BEALE"
+            },
+            {
+              "page": 11,
+              "value": "ROBERT          PRENTIS         BEAMAN"
+            }
+          ]
+        },
+        "LOCATION": {
+          "count": 416,
+          "label": "ADDR1",
+          "sample_value": "205 BANBURY ROAD",
+          "samples": [
+            {
+              "page": 2,
+              "value": "11753"
+            },
+            {
+              "page": 2,
+              "value": "11753"
+            },
+            {
+              "page": 3,
+              "value": "10025"
+            },
+            {
+              "page": 3,
+              "value": "10025"
+            },
+            {
+              "page": 4,
+              "value": "22066"
+            },
+            {
+              "page": 4,
+              "value": "22066"
+            },
+            {
+              "page": 5,
+              "value": "23238"
+            },
+            {
+              "page": 5,
+              "value": "23238"
+            },
+            {
+              "page": 6,
+              "value": "23229"
+            },
+            {
+              "page": 6,
+              "value": "23229"
+            }
+          ]
+        }
+      },
+      "time_s": 0.42,
+      "ms_per_page": 2.0
+    },
+    "audit": {
+      "status": "NEEDS_REVIEW",
+      "summary": "Flagged 6 pages, auditing 6: {'EMPTY': 3, 'BOUNDARY': 3}",
+      "pages_audited": 6,
+      "pages_checked": 6,
+      "avg_agreement": 10,
+      "per_page": [
+        {
+          "page": 1,
+          "status": "AUDITED",
+          "regex_found": {},
+          "vision_found": {},
+          "comparison": {
+            "matches": [],
+            "missed_by_regex": [],
+            "regex_extra": [],
+            "value_mismatches": [],
+            "agreement_rate": 0,
+            "vision_total": 0,
+            "matched_total": 0
+          },
+          "flag_reason": "EMPTY \u2014 content page with zero extractions"
+        },
+        {
+          "page": 210,
+          "status": "AUDITED",
+          "regex_found": {},
+          "vision_found": {},
+          "comparison": {
+            "matches": [],
+            "missed_by_regex": [],
+            "regex_extra": [],
+            "value_mismatches": [],
+            "agreement_rate": 0,
+            "vision_total": 0,
+            "matched_total": 0
+          },
+          "flag_reason": "EMPTY \u2014 content page with zero extractions"
+        },
+        {
+          "page": 211,
+          "status": "AUDITED",
+          "regex_found": {},
+          "vision_found": {},
+          "comparison": {
+            "matches": [],
+            "missed_by_regex": [],
+            "regex_extra": [],
+            "value_mismatches": [],
+            "agreement_rate": 0,
+            "vision_total": 0,
+            "matched_total": 0
+          },
+          "flag_reason": "EMPTY \u2014 content page with zero extractions"
+        },
+        {
+          "page": 106,
+          "status": "AUDITED",
+          "regex_found": {
+            "PERSON": [
+              "JARRELL         KEITH           JONES"
+            ],
+            "LOCATION": [
+              "28104",
+              "28104"
+            ]
+          },
+          "vision_found": {
+            "PERSON": [
+              "JARRELL KEITH JONES",
+              "JANE JONES",
+              "DUNCAN JONES",
+              "DASHIELL JONES"
+            ],
+            "US_SSN": [
+              "XXX-XX-9918",
+              "XXX-XX-6638",
+              "XXX-XX-8875",
+              "XXX-XX-5891"
+            ],
+            "DATE_OF_BIRTH": [
+              "03/17/1971"
+            ],
+            "LOCATION": [
+              "ADDR1 2102 CLIMBING ROSE LAN\nADDR2\nCITY WEDDINGTON\nST NC\nZIP CODE 28104"
+            ]
+          },
+          "comparison": {
+            "matches": [
+              {
+                "type": "LOCATION",
+                "count": 1,
+                "fuzzy": true
+              },
+              {
+                "type": "PERSON",
+                "count": 1
+              }
+            ],
+            "missed_by_regex": [
+              {
+                "type": "US_SSN",
+                "vision_values": [
+                  "XXX-XX-9918",
+                  "XXX-XX-6638",
+                  "XXX-XX-8875"
+                ]
+              },
+              {
+                "type": "PERSON",
+                "vision_values": [
+                  "DUNCAN JONES",
+                  "JANE JONES",
+                  "DASHIELL JONES"
+                ]
+              },
+              {
+                "type": "DATE_OF_BIRTH",
+                "vision_values": [
+                  "03/17/1971"
+                ]
+              }
+            ],
+            "regex_extra": [],
+            "value_mismatches": [],
+            "agreement_rate": 20,
+            "vision_total": 10,
+            "matched_total": 2
+          },
+          "flag_reason": "BOUNDARY \u2014 structural check"
+        },
+        {
+          "page": 53,
+          "status": "AUDITED",
+          "regex_found": {
+            "PERSON": [
+              "TYLER           B               DEMPSEY"
+            ],
+            "LOCATION": [
+              "30319",
+              "30319"
+            ]
+          },
+          "vision_found": {
+            "PERSON": [
+              "TYLER B DEMPSEY",
+              "JESSICA P DEMPSEY",
+              "COOPER W DEMPSEY",
+              "TREVOR WEBB DEMPSEY"
+            ],
+            "US_SSN": [
+              "XXX-XX-9418",
+              "XXX-XX-0578",
+              "XXX-XX-4656",
+              "XXX-XX-5541"
+            ],
+            "DATE_OF_BIRTH": [
+              "04/04/1974"
+            ],
+            "LOCATION": [
+              "ADDR1 2603 ASHFORD ROAD\nADDR2\nCITY ATLANTA\nST GA\nZIP CODE 30319"
+            ]
+          },
+          "comparison": {
+            "matches": [
+              {
+                "type": "LOCATION",
+                "count": 1,
+                "fuzzy": true
+              },
+              {
+                "type": "PERSON",
+                "count": 1
+              }
+            ],
+            "missed_by_regex": [
+              {
+                "type": "US_SSN",
+                "vision_values": [
+                  "XXX-XX-9418",
+                  "XXX-XX-0578",
+                  "XXX-XX-4656"
+                ]
+              },
+              {
+                "type": "PERSON",
+                "vision_values": [
+                  "TREVOR WEBB DEMPSEY",
+                  "JESSICA P DEMPSEY",
+                  "COOPER W DEMPSEY"
+                ]
+              },
+              {
+                "type": "DATE_OF_BIRTH",
+                "vision_values": [
+                  "04/04/1974"
+                ]
+              }
+            ],
+            "regex_extra": [],
+            "value_mismatches": [],
+            "agreement_rate": 20,
+            "vision_total": 10,
+            "matched_total": 2
+          },
+          "flag_reason": "BOUNDARY \u2014 structural check"
+        },
+        {
+          "page": 159,
+          "status": "AUDITED",
+          "regex_found": {
+            "PERSON": [
+              "RONALD          I               RAETHER                 JR"
+            ],
+            "LOCATION": [
+              "92651",
+              "92651"
+            ]
+          },
+          "vision_found": {
+            "PERSON": [
+              "RONALD I RAETHER JR",
+              "MARLEY J RAETHER",
+              "ASHLEY A RAETHER",
+              "ALLISON N RAETHER",
+              "ABIGAIL M RAETHER"
+            ],
+            "US_SSN": [
+              "XXX-XX-5856",
+              "XXX-XX-1407",
+              "XXX-XX-4276",
+              "XXX-XX-6579",
+              "XXX-XX-1644"
+            ],
+            "DATE_OF_BIRTH": [
+              "06/15/1969"
+            ],
+            "LOCATION": [
+              "ADDR1 1017 SKYLINE DRIVE, ADDR2, LAGUNA BEACH, ST CA, ZIP CODE 92651"
+            ]
+          },
+          "comparison": {
+            "matches": [
+              {
+                "type": "LOCATION",
+                "count": 1,
+                "fuzzy": true
+              },
+              {
+                "type": "PERSON",
+                "count": 1
+              }
+            ],
+            "missed_by_regex": [
+              {
+                "type": "US_SSN",
+                "vision_values": [
+                  "XXX-XX-5856",
+                  "XXX-XX-1407",
+                  "XXX-XX-4276"
+                ]
+              },
+              {
+                "type": "PERSON",
+                "vision_values": [
+                  "ASHLEY A RAETHER",
+                  "MARLEY J RAETHER",
+                  "ALLISON N RAETHER"
+                ]
+              },
+              {
+                "type": "DATE_OF_BIRTH",
+                "vision_values": [
+                  "06/15/1969"
+                ]
+              }
+            ],
+            "regex_extra": [],
+            "value_mismatches": [],
+            "agreement_rate": 17,
+            "vision_total": 12,
+            "matched_total": 2
+          },
+          "flag_reason": "BOUNDARY \u2014 structural check"
+        }
+      ],
+      "missed_field_summary": {
+        "US_SSN": 3,
+        "PERSON": 3,
+        "DATE_OF_BIRTH": 3
+      },
+      "recommendation": "Review needed \u2014 avg agreement 10%, missed: {'US_SSN': 3, 'PERSON': 3, 'DATE_OF_BIRTH': 3}"
+    }
+  },
+  "WashingtonCMD_0000102080": {
+    "filename": "WashingtonCMD_0000102080.pdf",
+    "total_pages": 594,
+    "pdf_type": {
+      "type": "text",
+      "text_pages": 7,
+      "image_pages": 0,
+      "total_checked": 7,
+      "avg_text_len": 2785.0
+    },
+    "onset_page": 4,
+    "vision": {
+      "parsed": {
+        "pii_fields": [
+          {
+            "type": "PERSON",
+            "value": "Joni Bittner",
+            "label": "Employee Name",
+            "position": "top_left"
+          },
+          {
+            "type": "LOCATION",
+            "value": "16257 Riverbend Court, Williamsport, MD 21795",
+            "label": "Employee Address",
+            "position": "top_left"
+          },
+          {
+            "type": "GOVERNMENT_ID",
+            "value": "003228",
+            "label": "Employee ID",
+            "position": "top_left"
+          },
+          {
+            "type": "ACCOUNT_NUMBER",
+            "value": "1116898427",
+            "label": "Checking Account Number",
+            "position": "bottom_right"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "01/16/2009",
+            "label": "Advice Date",
+            "position": "middle_right"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "12/27/2008",
+            "label": "Pay Begin Date",
+            "position": "top_right"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "01/09/2009",
+            "label": "Pay End Date",
+            "position": "top_right"
+          },
+          {
+            "type": "PHONE_NUMBER",
+            "value": "Not visible in the document",
+            "label": "Not applicable",
+            "position": "Not applicable"
+          },
+          {
+            "type": "EMAIL_ADDRESS",
+            "value": "Not visible in the document",
+            "label": "Not applicable",
+            "position": "Not applicable"
+          }
+        ],
+        "structure_type": "fixed_single_page",
+        "records_per_page": 1,
+        "cross_page_data": false,
+        "pages_per_instance": 1
+      }
+    },
+    "patterns": [
+      {
+        "type": "PERSON",
+        "label": "Employee Name",
+        "test_matches": 0,
+        "regex": "Employee\\ Name[\\s:]*\\n?\\s*([A-Z][a-z'-]+(?:\\s+[A-Z][a-z'-]*)+)"
+      },
+      {
+        "type": "LOCATION",
+        "label": "Employee Address",
+        "test_matches": 0,
+        "regex": "Employee\\ Address[\\s:]*\\n?\\s*(.+?)"
+      },
+      {
+        "type": "GOVERNMENT_ID",
+        "label": "Employee ID",
+        "test_matches": 0,
+        "regex": "Employee\\ ID[\\s:]*\\n?\\s*([X\\d]{5,})"
+      },
+      {
+        "type": "ACCOUNT_NUMBER",
+        "label": "Checking Account Number",
+        "test_matches": 0,
+        "regex": "Checking\\ Account\\ Number[\\s:]*\\n?\\s*([X\\d]{5,})"
+      },
+      {
+        "type": "DATE_OF_BIRTH",
+        "label": "Advice Date",
+        "test_matches": 0,
+        "regex": "Advice\\ Date[\\s:]*\\n?\\s*(\\d{2}/\\d{2}/\\d{4})"
+      },
+      {
+        "type": "DATE_OF_BIRTH",
+        "label": "Pay Begin Date",
+        "test_matches": 0,
+        "regex": "Pay\\ Begin\\ Date[\\s:]*\\n?\\s*(\\d{2}/\\d{2}/\\d{4})"
+      },
+      {
+        "type": "DATE_OF_BIRTH",
+        "label": "Pay End Date",
+        "test_matches": 0,
+        "regex": "Pay\\ End\\ Date[\\s:]*\\n?\\s*(\\d{2}/\\d{2}/\\d{4})"
+      },
+      {
+        "type": "PHONE_NUMBER",
+        "label": "Not applicable",
+        "test_matches": 1,
+        "regex": "Not\\ applicable[\\s:]*\\n?\\s*(\\S+)"
+      },
+      {
+        "type": "EMAIL_ADDRESS",
+        "label": "Not applicable",
+        "test_matches": 1,
+        "regex": "Not\\ applicable[\\s:]*\\n?\\s*(\\S+)"
+      }
+    ],
+    "extraction": {
+      "total_pages": 594,
+      "pages_scanned": 594,
+      "fields": {
+        "PHONE_NUMBER": {
+          "count": 2,
+          "label": "Not applicable",
+          "sample_value": "Not visible in the document",
+          "samples": [
+            {
+              "page": 541,
+              "value": "10"
+            },
+            {
+              "page": 590,
+              "value": "10"
+            }
+          ]
+        },
+        "EMAIL_ADDRESS": {
+          "count": 2,
+          "label": "Not applicable",
+          "sample_value": "Not visible in the document",
+          "samples": [
+            {
+              "page": 541,
+              "value": "10"
+            },
+            {
+              "page": 590,
+              "value": "10"
+            }
+          ]
+        }
+      },
+      "time_s": 0.84,
+      "ms_per_page": 1.4
+    },
+    "audit": {
+      "status": "NEEDS_REVIEW",
+      "summary": "Flagged 591 pages, auditing 8: {'EMPTY': 8}",
+      "pages_audited": 8,
+      "pages_checked": 8,
+      "avg_agreement": 0,
+      "per_page": [
+        {
+          "page": 1,
+          "status": "AUDITED",
+          "regex_found": {},
+          "vision_found": {
+            "PERSON": [
+              "Kristin B Aleshire"
+            ],
+            "US_SSN": [
+              "006808"
+            ],
+            "LOCATION": [
+              "1217 Virginia Avenue, Hagerstown, MD 21740"
+            ]
+          },
+          "comparison": {
+            "matches": [],
+            "missed_by_regex": [
+              {
+                "type": "US_SSN",
+                "vision_values": [
+                  "006808"
+                ]
+              },
+              {
+                "type": "LOCATION",
+                "vision_values": [
+                  "1217 Virginia Avenue, Hagerstown, MD 21740"
+                ]
+              },
+              {
+                "type": "PERSON",
+                "vision_values": [
+                  "Kristin B Aleshire"
+                ]
+              }
+            ],
+            "regex_extra": [],
+            "value_mismatches": [],
+            "agreement_rate": 0,
+            "vision_total": 3,
+            "matched_total": 0
+          },
+          "flag_reason": "EMPTY \u2014 content page with zero extractions"
+        },
+        {
+          "page": 2,
+          "status": "AUDITED",
+          "regex_found": {},
+          "vision_found": {
+            "PERSON": [
+              "John F Barr"
+            ],
+            "US_SSN": [
+              "006328"
+            ],
+            "LOCATION": [
+              "14663 National Pike, Clear Spring, MD 21722"
+            ]
+          },
+          "comparison": {
+            "matches": [],
+            "missed_by_regex": [
+              {
+                "type": "US_SSN",
+                "vision_values": [
+                  "006328"
+                ]
+              },
+              {
+                "type": "LOCATION",
+                "vision_values": [
+                  "14663 National Pike, Clear Spring, MD 21722"
+                ]
+              },
+              {
+                "type": "PERSON",
+                "vision_values": [
+                  "John F Barr"
+                ]
+              }
+            ],
+            "regex_extra": [],
+            "value_mismatches": [],
+            "agreement_rate": 0,
+            "vision_total": 3,
+            "matched_total": 0
+          },
+          "flag_reason": "EMPTY \u2014 content page with zero extractions"
+        },
+        {
+          "page": 3,
+          "status": "AUDITED",
+          "regex_found": {},
+          "vision_found": {
+            "PERSON": [
+              "James F Kercheval"
+            ],
+            "US_SSN": [
+              "006158"
+            ],
+            "LOCATION": [
+              "19200 Chippendale Circle, Hagerstown, MD 21742"
+            ]
+          },
+          "comparison": {
+            "matches": [],
+            "missed_by_regex": [
+              {
+                "type": "US_SSN",
+                "vision_values": [
+                  "006158"
+                ]
+              },
+              {
+                "type": "LOCATION",
+                "vision_values": [
+                  "19200 Chippendale Circle, Hagerstown, MD 21742"
+                ]
+              },
+              {
+                "type": "PERSON",
+                "vision_values": [
+                  "James F Kercheval"
+                ]
+              }
+            ],
+            "regex_extra": [],
+            "value_mismatches": [],
+            "agreement_rate": 0,
+            "vision_total": 3,
+            "matched_total": 0
+          },
+          "flag_reason": "EMPTY \u2014 content page with zero extractions"
+        },
+        {
+          "page": 4,
+          "status": "AUDITED",
+          "regex_found": {},
+          "vision_found": {
+            "PERSON": [
+              "William J Wivell"
+            ],
+            "US_SSN": [
+              "005318"
+            ],
+            "LOCATION": [
+              "49 East Water Street, Smithsburg, MD 21783-0000"
+            ]
+          },
+          "comparison": {
+            "matches": [],
+            "missed_by_regex": [
+              {
+                "type": "US_SSN",
+                "vision_values": [
+                  "005318"
+                ]
+              },
+              {
+                "type": "LOCATION",
+                "vision_values": [
+                  "49 East Water Street, Smithsburg, MD 21783-0000"
+                ]
+              },
+              {
+                "type": "PERSON",
+                "vision_values": [
+                  "William J Wivell"
+                ]
+              }
+            ],
+            "regex_extra": [],
+            "value_mismatches": [],
+            "agreement_rate": 0,
+            "vision_total": 3,
+            "matched_total": 0
+          },
+          "flag_reason": "EMPTY \u2014 content page with zero extractions"
+        },
+        {
+          "page": 6,
+          "status": "AUDITED",
+          "regex_found": {},
+          "vision_found": {
+            "PERSON": [
+              "Pamela S Ambrose"
+            ],
+            "US_SSN": [
+              "004959"
+            ],
+            "LOCATION": [
+              "1070 Marshall Street, Hagerstown, MD 21740-0000"
+            ]
+          },
+          "comparison": {
+            "matches": [],
+            "missed_by_regex": [
+              {
+                "type": "US_SSN",
+                "vision_values": [
+                  "004959"
+                ]
+              },
+              {
+                "type": "LOCATION",
+                "vision_values": [
+                  "1070 Marshall Street, Hagerstown, MD 21740-0000"
+                ]
+              },
+              {
+                "type": "PERSON",
+                "vision_values": [
+                  "Pamela S Ambrose"
+                ]
+              }
+            ],
+            "regex_extra": [],
+            "value_mismatches": [],
+            "agreement_rate": 0,
+            "vision_total": 3,
+            "matched_total": 0
+          },
+          "flag_reason": "EMPTY \u2014 content page with zero extractions"
+        },
+        {
+          "page": 7,
+          "status": "AUDITED",
+          "regex_found": {},
+          "vision_found": {
+            "PERSON": [
+              "Debra K. Brezler"
+            ],
+            "US_SSN": [
+              "006779"
+            ],
+            "LOCATION": [
+              "1302 Hamilton Blvd., Hagerstown, MD 21742"
+            ]
+          },
+          "comparison": {
+            "matches": [],
+            "missed_by_regex": [
+              {
+                "type": "US_SSN",
+                "vision_values": [
+                  "006779"
+                ]
+              },
+              {
+                "type": "LOCATION",
+                "vision_values": [
+                  "1302 Hamilton Blvd., Hagerstown, MD 21742"
+                ]
+              },
+              {
+                "type": "PERSON",
+                "vision_values": [
+                  "Debra K. Brezler"
+                ]
+              }
+            ],
+            "regex_extra": [],
+            "value_mismatches": [],
+            "agreement_rate": 0,
+            "vision_total": 3,
+            "matched_total": 0
+          },
+          "flag_reason": "EMPTY \u2014 content page with zero extractions"
+        },
+        {
+          "page": 8,
+          "status": "AUDITED",
+          "regex_found": {},
+          "vision_found": {
+            "PERSON": [
+              "Jennifer J Bricker"
+            ],
+            "US_SSN": [
+              "005324"
+            ],
+            "LOCATION": [
+              "703 Washington Avenue, Hagerstown, MD 21740"
+            ]
+          },
+          "comparison": {
+            "matches": [],
+            "missed_by_regex": [
+              {
+                "type": "US_SSN",
+                "vision_values": [
+                  "005324"
+                ]
+              },
+              {
+                "type": "LOCATION",
+                "vision_values": [
+                  "703 Washington Avenue, Hagerstown, MD 21740"
+                ]
+              },
+              {
+                "type": "PERSON",
+                "vision_values": [
+                  "Jennifer J Bricker"
+                ]
+              }
+            ],
+            "regex_extra": [],
+            "value_mismatches": [],
+            "agreement_rate": 0,
+            "vision_total": 3,
+            "matched_total": 0
+          },
+          "flag_reason": "EMPTY \u2014 content page with zero extractions"
+        },
+        {
+          "page": 9,
+          "status": "AUDITED",
+          "regex_found": {},
+          "vision_found": {
+            "PERSON": [
+              "Linde M Cessna"
+            ],
+            "US_SSN": [
+              "005256"
+            ],
+            "LOCATION": [
+              "2378 Hoffman Road, Greencastle, PA 17225"
+            ]
+          },
+          "comparison": {
+            "matches": [],
+            "missed_by_regex": [
+              {
+                "type": "US_SSN",
+                "vision_values": [
+                  "005256"
+                ]
+              },
+              {
+                "type": "LOCATION",
+                "vision_values": [
+                  "2378 Hoffman Road, Greencastle, PA 17225"
+                ]
+              },
+              {
+                "type": "PERSON",
+                "vision_values": [
+                  "Linde M Cessna"
+                ]
+              }
+            ],
+            "regex_extra": [],
+            "value_mismatches": [],
+            "agreement_rate": 0,
+            "vision_total": 3,
+            "matched_total": 0
+          },
+          "flag_reason": "EMPTY \u2014 content page with zero extractions"
+        }
+      ],
+      "missed_field_summary": {
+        "US_SSN": 8,
+        "LOCATION": 8,
+        "PERSON": 8
+      },
+      "recommendation": "Review needed \u2014 avg agreement 0%, missed: {'US_SSN': 8, 'LOCATION': 8, 'PERSON': 8}"
+    }
+  }
+}

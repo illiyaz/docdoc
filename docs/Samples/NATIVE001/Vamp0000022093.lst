@@ -1,0 +1,121 @@
+%!Adobe-FontList 1.22
+%Locale:0x409
+
+%BeginFont
+Handler:DirectoryHandler
+FontType:Invalid
+OutlineFileName:/Users/brianpancoast/Documents/***JOHNSTONE SUPPLY***/RECRUIT TRIGGER POINT Folder/Document fonts/AdobeFnt22.lst
+FileLength:2788
+FileModTime:641936640
+%EndFont
+
+%BeginFont
+Handler:DirectoryHandler
+FontType:Type1
+FontName:UniversLTStd-Black
+FamilyName:Univers LT Std
+StyleName:75 Black
+MenuName:Univers LT Std 55
+StyleBits:2
+WeightClass:850
+WidthClass:5
+AngleClass:0
+FullName:Univers LT Std 75 Black
+WritingScript:Roman
+OutlineFileName:/Users/brianpancoast/Documents/***JOHNSTONE SUPPLY***/RECRUIT TRIGGER POINT Folder/Document fonts/UniversLTStd-Black.otf
+DataFormat:sfntData
+UsesStandardEncoding:yes
+isCFF:yes
+hasSVG:no
+VariableFontType:NonVariableFont
+FileLength:36532
+FileModTime:571763397
+DesignSize:120
+NameArray:0,Mac,4,Univers LT Std 75 Black
+NameArray:0,Win,1,Univers LT Std 55
+NameArray:0,Win,16,Univers LT Std
+%EndFont
+
+%BeginFont
+Handler:DirectoryHandler
+FontType:Type1
+FontName:UniversLTStd-Bold
+FamilyName:Univers LT Std
+StyleName:65 Bold
+MenuName:Univers LT Std 45 Light
+StyleBits:2
+WeightClass:700
+WidthClass:5
+AngleClass:0
+FullName:Univers LT Std 65 Bold
+WritingScript:Roman
+OutlineFileName:/Users/brianpancoast/Documents/***JOHNSTONE SUPPLY***/RECRUIT TRIGGER POINT Folder/Document fonts/UniversLTStd-Bold.otf
+DataFormat:sfntData
+UsesStandardEncoding:yes
+isCFF:yes
+hasSVG:no
+VariableFontType:NonVariableFont
+FileLength:36368
+FileModTime:593991832
+DesignSize:120
+NameArray:0,Mac,4,Univers LT Std 65 Bold
+NameArray:0,Win,1,Univers LT Std 45 Light
+NameArray:0,Win,16,Univers LT Std
+%EndFont
+
+%BeginFont
+Handler:DirectoryHandler
+FontType:Type1
+FontName:UniversLTStd-Obl
+FamilyName:Univers LT Std
+StyleName:55 Oblique
+MenuName:Univers LT Std 55
+StyleBits:1
+WeightClass:400
+WidthClass:5
+AngleClass:1
+FullName:Univers LT Std 55 Oblique
+WritingScript:Roman
+OutlineFileName:/Users/brianpancoast/Documents/***JOHNSTONE SUPPLY***/RECRUIT TRIGGER POINT Folder/Document fonts/UniversLTStd-Obl.otf
+DataFormat:sfntData
+UsesStandardEncoding:yes
+isCFF:yes
+hasSVG:no
+VariableFontType:NonVariableFont
+FileLength:36432
+FileModTime:333658862
+DesignSize:120
+NameArray:0,Mac,18,Univers LT Std 55 Obl
+NameArray:0,Mac,4,Univers LT Std 55 Oblique
+NameArray:0,Win,1,Univers LT Std 55
+NameArray:0,Win,16,Univers LT Std
+%EndFont
+
+%BeginFont
+Handler:DirectoryHandler
+FontType:Type1
+FontName:UniversLTStd
+FamilyName:Univers LT Std
+StyleName:55 Roman
+MenuName:Univers LT Std 55
+StyleBits:0
+WeightClass:400
+WidthClass:5
+AngleClass:0
+FullName:Univers LT Std 55 Roman
+WritingScript:Roman
+OutlineFileName:/Users/brianpancoast/Documents/***JOHNSTONE SUPPLY***/RECRUIT TRIGGER POINT Folder/Document fonts/UniversLTStd.otf
+DataFormat:sfntData
+UsesStandardEncoding:yes
+isCFF:yes
+hasSVG:no
+VariableFontType:NonVariableFont
+FileLength:35100
+FileModTime:593991832
+DesignSize:120
+NameArray:0,Mac,18,Univers LT Std 55
+NameArray:0,Mac,4,Univers LT Std 55 Roman
+NameArray:0,Win,1,Univers LT Std 55
+NameArray:0,Win,16,Univers LT Std
+%EndFont
+

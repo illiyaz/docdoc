@@ -1,0 +1,9 @@
+Name:	2022-02-15T13:34:41.378Z - 2022-02-15T13:59:11.707Z: [gshields@jswallacegroup.com, amaynard@jswallacegroup.com]
+MIME Type:	Microsoft Teams Chat Conversation
+
+Communication Participants:	{amaynard@jswallacegroup.com,gshields@jswallacegroup.com}
+Conversation First Present Time:	2022-02-15T13:34:42.420Z
+Conversation Last Updated Time:	2022-02-15T13:59:13.748Z
+First Communication:	2022-02-15T13:34:41.378Z
+Last Communication:	2022-02-15T13:59:11.707Z
+Number of Communications:	2

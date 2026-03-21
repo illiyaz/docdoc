@@ -17,7 +17,7 @@ import {
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { getAppSettings, getProtocols, runDiagnostic } from "@/api/client"
-import type { AppSettings, DiagnosticReport, DiagnosticPage } from "@/api/client"
+import type { DiagnosticReport, DiagnosticPage } from "@/api/client"
 
 // ---------------------------------------------------------------------------
 // Status indicator

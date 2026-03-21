@@ -1,0 +1,35 @@
+Employer ID,Member ID,Last Name,First Name,Transaction Date,Process Date,Void/Return Date,Transaction Type,Account Type,Amount
+452967608,112643743,ADAMS,TOREY L,8/31/2022,9/1/2022,,Debit Card Settlement,Medical FSA,15
+452967608,112643743,ADAMS,TOREY L,8/1/2022,8/2/2022,,Debit Card Settlement,Medical FSA,45
+452967608,112643743,ADAMS,TOREY L,8/15/2022,8/16/2022,,Debit Card Settlement,Medical FSA,15
+452967608,112643743,ADAMS,TOREY L,8/2/2022,8/3/2022,,Debit Card Settlement,Medical FSA,100
+452967608,112643743,ADAMS,TOREY L,8/1/2022,8/2/2022,,Debit Card Settlement,Medical FSA,15
+452967608,112643743,ADAMS,TOREY L,8/3/2022,8/4/2022,,Debit Card Settlement,Medical FSA,30.92
+452967608,110624254,BROOKINS,ROBERT A,8/30/2022,8/31/2022,,Debit Card Settlement,Health Reimbursement Arrangement,50
+452967608,110624254,BROOKINS,ROBERT A,8/20/2022,8/21/2022,,Debit Card Settlement,Health Reimbursement Arrangement,50
+452967608,110624254,BROOKINS,ROBERT A,8/26/2022,8/27/2022,,Debit Card Settlement,Health Reimbursement Arrangement,50
+452967608,110624254,BROOKINS,ROBERT A,8/12/2022,8/13/2022,,Debit Card Settlement,Health Reimbursement Arrangement,50
+452967608,110624254,BROOKINS,ROBERT A,8/17/2022,8/18/2022,,Debit Card Settlement,Health Reimbursement Arrangement,246.35
+452967608,110624254,BROOKINS,ROBERT A,8/23/2022,8/24/2022,,Debit Card Settlement,Health Reimbursement Arrangement,50
+452967608,110624254,BROOKINS,ROBERT A,8/9/2022,8/10/2022,,Debit Card Settlement,Health Reimbursement Arrangement,50
+452967608,110624254,BROOKINS,ROBERT A,8/6/2022,8/7/2022,,Debit Card Settlement,Health Reimbursement Arrangement,50
+452967608,110624254,BROOKINS,ROBERT A,8/27/2022,8/29/2022,,Debit Card Settlement,Health Reimbursement Arrangement,50
+452967608,110624254,BROOKINS,ROBERT A,8/16/2022,8/17/2022,,Debit Card Settlement,Health Reimbursement Arrangement,50
+452967608,88643843,DISQUE,JOHN,8/1/2022,8/2/2022,,Debit Card Settlement,Health Reimbursement Arrangement,44.22
+452967608,88643843,DISQUE,JOHN,8/9/2022,8/10/2022,,Debit Card Settlement,Health Reimbursement Arrangement,92.77
+452967608,88643843,DISQUE,JOHN,8/18/2022,8/19/2022,,Debit Card Settlement,Health Reimbursement Arrangement,30
+452967608,88643843,DISQUE,JOHN,8/16/2022,8/17/2022,,Debit Card Settlement,Health Reimbursement Arrangement,3.02
+452967608,88643843,DISQUE,JOHN,8/18/2022,8/19/2022,,Debit Card Settlement,Health Reimbursement Arrangement,30
+452967608,91801484,GRAHAM,COREY D,8/17/2022,8/18/2022,,Debit Card Settlement,Health Reimbursement Arrangement,39.38
+452967608,91801484,GRAHAM,COREY D,8/15/2022,8/16/2022,,Debit Card Settlement,Health Reimbursement Arrangement,7.37
+452967608,221621247,SHORT,STEPHEN W,8/9/2022,8/10/2022,,Debit Card Settlement,Health Reimbursement Arrangement,25
+452967608,221621247,SHORT,STEPHEN W,8/28/2022,8/29/2022,,Debit Card Settlement,Health Reimbursement Arrangement,47.98
+452967608,221621247,SHORT,STEPHEN W,8/28/2022,8/29/2022,,Debit Card Settlement,Health Reimbursement Arrangement,152.48
+452967608,221621247,SHORT,STEPHEN W,8/6/2022,8/16/2022,,Participant Repayment,Health Reimbursement Arrangement,-49.9
+452967608,221621247,SHORT,STEPHEN W,8/1/2022,8/2/2022,,Debit Card Settlement,Health Reimbursement Arrangement,347.25
+452967608,221621247,SHORT,STEPHEN W,8/28/2022,8/29/2022,,Debit Card Settlement,Health Reimbursement Arrangement,47.98
+452967608,221621247,SHORT,STEPHEN W,8/4/2022,8/5/2022,,Debit Card Settlement,Health Reimbursement Arrangement,12.95
+452967608,221621247,SHORT,STEPHEN W,8/30/2022,8/31/2022,,Debit Card Settlement,Health Reimbursement Arrangement,25
+452967608,221621247,SHORT,STEPHEN W,8/29/2022,8/30/2022,,Debit Card Settlement,Health Reimbursement Arrangement,-12.95
+452967608,221621247,SHORT,STEPHEN W,8/2/2022,8/3/2022,,Debit Card Settlement,Health Reimbursement Arrangement,9.27
+452967608,221621247,SHORT,STEPHEN W,8/2/2022,8/3/2022,,Debit Card Settlement,Health Reimbursement Arrangement,150

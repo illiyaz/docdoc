@@ -25,7 +25,6 @@ import {
   Search,
   Circle,
   AlertCircle,
-  Clock,
   Briefcase,
   Trash2,
   Ban,
@@ -66,8 +65,6 @@ import {
 import type {
   ProjectDetail as ProjectDetailType,
   ProtocolConfigSummary,
-  CatalogSummary,
-  DensityResponse,
   ExportJobSummary,
   UploadResult,
   PipelineProgress,
@@ -76,7 +73,7 @@ import type {
   DetectionDecision,
   AnalysisReviewDetail,
   LayoutFieldMapping,
-  PaginatedJobs,
+  VerificationResult,
 } from "@/api/client"
 
 // ---------------------------------------------------------------------------
@@ -122,13 +119,6 @@ const JOB_STATUS_STYLES: Record<string, string> = {
 }
 
 const JOB_STATUS_FILTERS = ["all", "running", "analyzed", "completed", "failed", "cancelled"] as const
-
-const STAGE_STATUS_ICON_MAP: Record<string, string> = {
-  completed: "green",
-  running: "blue",
-  failed: "red",
-  pending: "gray",
-}
 
 // ---------------------------------------------------------------------------
 // Overview tab
@@ -1096,18 +1086,6 @@ function ProtocolConfigCard({ config }: { config: ProtocolConfigSummary }) {
 // Jobs tab — pipeline progress component
 // ---------------------------------------------------------------------------
 
-/** 8-stage pipeline architecture */
-const PIPELINE_STAGES_8 = [
-  "Discovery",
-  "Cataloging",
-  "PII Detection",
-  "PII Extraction",
-  "Normalization",
-  "Entity Resolution",
-  "Quality Assurance",
-  "Notification",
-] as const
-
 function StageIcon({ status }: { status: string }) {
   switch (status) {
     case "completed":
@@ -1489,6 +1467,7 @@ function AnalysisReviewPanel({ jobId, onExtractionComplete }: { jobId: string; o
   const [isExtracting, setIsExtracting] = useState(false)
   const [extractStages, setExtractStages] = useState<Record<string, { status: string; message: string }>>({})
   const [reviewError, setReviewError] = useState<string | null>(null)
+  const [verificationResult, setVerificationResult] = useState<VerificationResult | null>(null)
 
   // Detection decisions state: docId → { entityType → included }
   const [typeToggles, setTypeToggles] = useState<Record<string, Record<string, boolean>>>({})
@@ -1604,6 +1583,7 @@ function AnalysisReviewPanel({ jobId, onExtractionComplete }: { jobId: string; o
 
   const handleStartExtraction = async () => {
     setIsExtracting(true)
+    setVerificationResult(null)
     try {
       await startExtractStreaming(jobId, (event) => {
         if (event.stage && event.stage !== "complete") {
@@ -1611,6 +1591,10 @@ function AnalysisReviewPanel({ jobId, onExtractionComplete }: { jobId: string; o
             ...prev,
             [event.stage]: { status: event.status || "running", message: event.message },
           }))
+          // Capture verification result when it arrives
+          if (event.stage === "verification" && event.result) {
+            setVerificationResult(event.result as unknown as VerificationResult)
+          }
         }
       })
       onExtractionComplete()
@@ -1638,6 +1622,107 @@ function AnalysisReviewPanel({ jobId, onExtractionComplete }: { jobId: string; o
             <span className={stage === "reconnecting" ? "text-amber-600" : "text-muted-foreground"}>{info.message}</span>
           </div>
         ))}
+
+        {/* Verification Result Card (Step 24c) */}
+        {verificationResult && (
+          <div className="border rounded-md p-3 space-y-2 mt-2 bg-muted/20">
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-medium">Extraction Verification</p>
+              {verificationResult.audit_status && (
+                <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${
+                  verificationResult.audit_status === "PASS"
+                    ? "bg-green-100 text-green-800 border border-green-200"
+                    : verificationResult.audit_status === "REVIEW"
+                    ? "bg-amber-100 text-amber-800 border border-amber-200"
+                    : verificationResult.audit_status === "FAIL"
+                    ? "bg-red-100 text-red-800 border border-red-200"
+                    : "bg-gray-100 text-gray-600 border border-gray-200"
+                }`}>
+                  {verificationResult.audit_status}
+                  {verificationResult.audit_confidence != null && ` ${verificationResult.audit_confidence}%`}
+                </span>
+              )}
+            </div>
+
+            {/* Success rate bar */}
+            <div className="space-y-1">
+              <div className="flex justify-between text-[10px] text-muted-foreground">
+                <span>Page success rate</span>
+                <span>{Math.round(verificationResult.success_rate * 100)}%</span>
+              </div>
+              <div className="h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                <div
+                  className={`h-full rounded-full transition-all ${
+                    verificationResult.success_rate >= 0.9
+                      ? "bg-green-500"
+                      : verificationResult.success_rate >= 0.7
+                      ? "bg-amber-500"
+                      : "bg-red-500"
+                  }`}
+                  style={{ width: `${Math.round(verificationResult.success_rate * 100)}%` }}
+                />
+              </div>
+              <div className="flex gap-3 text-[10px] text-muted-foreground">
+                <span>{verificationResult.successful} successful</span>
+                {verificationResult.reconciled > 0 && (
+                  <span>{verificationResult.reconciled} reconciled</span>
+                )}
+                {verificationResult.failed > 0 && (
+                  <span className="text-red-600">{verificationResult.failed} failed</span>
+                )}
+              </div>
+            </div>
+
+            {/* Per-field extraction rates */}
+            {verificationResult.field_rates && Object.keys(verificationResult.field_rates).length > 0 && (
+              <div className="space-y-1">
+                <p className="text-[10px] font-medium text-muted-foreground">Field extraction rates</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {Object.entries(verificationResult.field_rates).map(([field, rate]) => (
+                    <span
+                      key={field}
+                      className={`text-[10px] px-1.5 py-0.5 rounded border ${
+                        rate >= 0.9
+                          ? "bg-green-50 border-green-200 text-green-700"
+                          : rate >= 0.5
+                          ? "bg-amber-50 border-amber-200 text-amber-700"
+                          : "bg-red-50 border-red-200 text-red-700"
+                      }`}
+                    >
+                      {field.replace(/_/g, " ")}: {Math.round(rate * 100)}%
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Coordinate audit details */}
+            {verificationResult.pages_audited != null && verificationResult.pages_audited > 0 && (
+              <div className="text-[10px] text-muted-foreground">
+                Audited {verificationResult.pages_audited} pages
+                {verificationResult.audit_consistency != null && (
+                  <> · Record consistency: {verificationResult.audit_consistency}%</>
+                )}
+              </div>
+            )}
+
+            {/* Static filter audit trail */}
+            {verificationResult.removed_static && Object.keys(verificationResult.removed_static).length > 0 && (
+              <div className="bg-amber-50 border border-amber-200 rounded p-2 space-y-1">
+                <p className="text-[10px] font-medium text-amber-800">Static values filtered</p>
+                {Object.entries(verificationResult.removed_static).map(([field, values]) => (
+                  <div key={field} className="text-[10px] text-amber-700">
+                    <span className="font-medium">{field.replace(/_/g, " ")}:</span>{" "}
+                    {values.slice(0, 3).map((v, i) => (
+                      <span key={i} className="bg-amber-100 rounded px-1 mx-0.5">{v}</span>
+                    ))}
+                    {values.length > 3 && <span className="text-amber-500"> +{values.length - 3} more</span>}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     )
   }
@@ -1853,6 +1938,11 @@ function AnalysisReviewPanel({ jobId, onExtractionComplete }: { jobId: string; o
               <div className="flex items-center justify-between">
                 <p className="text-xs font-medium text-cyan-800">
                   Vision Analysis
+                  {doc.vision_routing.template_cache_hit && (
+                    <span className="ml-1.5 text-[10px] font-normal bg-cyan-100 text-cyan-600 rounded px-1 py-0.5">
+                      cached
+                    </span>
+                  )}
                 </p>
                 <span className={`text-[10px] px-1.5 py-0.5 rounded ${
                   doc.vision_routing.recommended_path === "coordinate"
@@ -2166,13 +2256,6 @@ function AnalysisReviewPanel({ jobId, onExtractionComplete }: { jobId: string; o
 // ---------------------------------------------------------------------------
 // Jobs tab
 // ---------------------------------------------------------------------------
-
-function formatDuration(seconds: number | null): string {
-  if (seconds == null) return "--"
-  if (seconds < 60) return `${Math.round(seconds)}s`
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${Math.round(seconds % 60)}s`
-  return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`
-}
 
 function formatDate(iso: string | null): string {
   if (!iso) return "--"

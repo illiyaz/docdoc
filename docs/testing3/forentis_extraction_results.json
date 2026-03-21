@@ -1,0 +1,56 @@
+{
+  "results": [
+    {
+      "total_records": 1,
+      "fields": {
+        "PERSON": 1,
+        "US_SSN": 1,
+        "DATE_OF_BIRTH": 1,
+        "LOCATION": 1,
+        "CITY_STATE_ZIP": 1,
+        "GOVERNMENT_ID": 1,
+        "DRIVER_LICENSE_EXPIRATION": 1,
+        "DRIVER_LICENSE_ISSUE_DATE": 1,
+        "DRIVER_LICENSE_CLASS": 1,
+        "RESTRICTIONS": 1,
+        "EYES": 1,
+        "SEX": 1,
+        "HEIGHT": 1,
+        "SIGNATURE": 1
+      },
+      "method": "vision",
+      "filename": "Vamp0000068254.jpg",
+      "extension": ".jpg",
+      "size_bytes": 288063,
+      "time_seconds": 43.16
+    },
+    {
+      "total_pages": 17,
+      "extraction_mode": "quick_regex",
+      "total_records": 0,
+      "filename": "Vamp0000072380.pdf",
+      "extension": ".pdf",
+      "size_bytes": 83308,
+      "time_seconds": 30.53
+    }
+  ],
+  "total_records": 1,
+  "records_sample": [
+    {
+      "PERSON": "Marcelo Figueroa",
+      "US_SSN": "191860901103",
+      "DATE_OF_BIRTH": "04/05/1986",
+      "LOCATION": "835 N Lime St, PO Box 7932, Lancaster, PA 17602",
+      "CITY_STATE_ZIP": "Lancaster, PA 17602",
+      "GOVERNMENT_ID": "27 565 276",
+      "DRIVER_LICENSE_EXPIRATION": "04/06/2023",
+      "DRIVER_LICENSE_ISSUE_DATE": "06/29/2019",
+      "DRIVER_LICENSE_CLASS": "C",
+      "RESTRICTIONS": "1",
+      "EYES": "BRO",
+      "SEX": "M",
+      "HEIGHT": "5'05\"",
+      "SIGNATURE": "Present (but not transcribed)"
+    }
+  ]
+}

@@ -809,6 +809,24 @@ export interface VisionRoutingInfo {
   pii_field_count: number
   records_per_page: number
   cross_page_data: boolean
+  template_cache_hit?: boolean  // Step 24a
+}
+
+// Coordinate extraction verification result (Step 24c)
+export interface VerificationResult {
+  success_rate: number
+  successful: number
+  reconciled: number
+  failed: number
+  field_rates: Record<string, number>
+  is_acceptable: boolean
+  // Coordinate audit (Step 23)
+  audit_status?: string  // "PASS" | "REVIEW" | "FAIL" | "NO_DATA"
+  audit_confidence?: number  // 0-100
+  audit_consistency?: number  // 0-100
+  pages_audited?: number
+  // Static filter (Step 23d)
+  removed_static?: Record<string, string[]>
 }
 
 export interface AnalysisReviewDetail {

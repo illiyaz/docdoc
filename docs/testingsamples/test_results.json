@@ -1,0 +1,771 @@
+{
+  "abcny": {
+    "filename": "ABCNY_560_0001384129.pdf",
+    "type": "ADP Personnel Master Control",
+    "total_pages": 67,
+    "vision": {
+      "parsed": {
+        "pii_fields": [
+          {
+            "type": "PERSON",
+            "value": "ABRAHAM, MARY D",
+            "label": "PERSONNEL",
+            "position": "top_left"
+          },
+          {
+            "type": "LOCATION",
+            "value": "655 ALABAMA AVENUE, 2R, BROOKLYN, NY 11207",
+            "label": "Mailing & Home Address",
+            "position": "top_left"
+          },
+          {
+            "type": "US_SSN",
+            "value": "On File",
+            "label": "SSN",
+            "position": "middle_left"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "11/22/2005",
+            "label": "Birth",
+            "position": "middle_left"
+          },
+          {
+            "type": "DATE",
+            "value": "08/09/2022",
+            "label": "Hire",
+            "position": "middle_left"
+          },
+          {
+            "type": "DATE",
+            "value": "09/02/2022",
+            "label": "Date 3",
+            "position": "middle_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "AIZENMAN, SOFIA",
+            "label": "PERSONNEL",
+            "position": "middle_left"
+          },
+          {
+            "type": "LOCATION",
+            "value": "2 RIVER TERRACE, APT. 30A, NEW YORK, NY 10282",
+            "label": "Mailing & Home Address",
+            "position": "middle_left"
+          },
+          {
+            "type": "US_SSN",
+            "value": "On File",
+            "label": "SSN",
+            "position": "middle_left"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "10/21/1996",
+            "label": "Birth",
+            "position": "middle_left"
+          },
+          {
+            "type": "DATE",
+            "value": "08/26/2019",
+            "label": "Hire",
+            "position": "middle_left"
+          },
+          {
+            "type": "DATE",
+            "value": "12/17/2019",
+            "label": "Date 3",
+            "position": "middle_left"
+          },
+          {
+            "type": "DATE",
+            "value": "08/26/2019",
+            "label": "Date 5",
+            "position": "middle_left"
+          },
+          {
+            "type": "DATE",
+            "value": "08/26/2019",
+            "label": "Date 9",
+            "position": "middle_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "ALEXANDER, MARILYN CHANEL",
+            "label": "PERSONNEL",
+            "position": "middle_left"
+          },
+          {
+            "type": "LOCATION",
+            "value": "135 RICHMOND STREET, BROOKLYN, NY 11208",
+            "label": "Mailing & Home Address",
+            "position": "middle_left"
+          },
+          {
+            "type": "US_SSN",
+            "value": "On File",
+            "label": "SSN",
+            "position": "middle_left"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "07/25/1996",
+            "label": "Birth",
+            "position": "middle_left"
+          },
+          {
+            "type": "DATE",
+            "value": "01/06/2022",
+            "label": "Hire",
+            "position": "middle_left"
+          },
+          {
+            "type": "DATE",
+            "value": "08/12/2022",
+            "label": "Date 3",
+            "position": "middle_left"
+          }
+        ],
+        "structure_type": "table",
+        "records_per_page": 3,
+        "cross_page_data": false,
+        "pages_per_instance": 1
+      }
+    },
+    "extraction": {
+      "doc": "ABCNY (ADP Personnel Master Control)",
+      "total_pages": 67,
+      "pages_scanned": 49,
+      "unique_persons": 124,
+      "name_mentions": 150,
+      "dob": 26,
+      "addresses": 118,
+      "bank_accounts": 3,
+      "ssn": 0,
+      "time_s": 0.34,
+      "sample_names": [
+        "LAMBERT,EMILY",
+        "BOOKMAN,SAMUEL",
+        "DOLCE,WENDY",
+        "WONG,MAY",
+        "CANESSA,ROMINA PIA",
+        "MONAHAN,MARIANA LYNN",
+        "MOORE,CINDY",
+        "TILLONA,THOMAS",
+        "ABRAHAM,MARY D",
+        "GALIANO HERRERA,KARLA ARGENTINA"
+      ],
+      "sample_dob": [
+        {
+          "page": 20,
+          "dob": "06/15/2015"
+        },
+        {
+          "page": 21,
+          "dob": "11/18/2019"
+        },
+        {
+          "page": 23,
+          "dob": "10/30/1995"
+        },
+        {
+          "page": 24,
+          "dob": "07/13/2005"
+        },
+        {
+          "page": 25,
+          "dob": "06/18/2018"
+        }
+      ],
+      "sample_addr": [
+        {
+          "page": 19,
+          "address": "655 ALABAMA AVENUE / BROOKLYN NY 11207"
+        },
+        {
+          "page": 19,
+          "address": "0 00 / Q MED / 2 40 / 0 00"
+        },
+        {
+          "page": 19,
+          "address": "eVoucher / F / 3 / 12/17/2019"
+        }
+      ]
+    }
+  },
+  "edmonds": {
+    "filename": "EdmondsSD_0003650859.pdf",
+    "type": "Student Course Verification",
+    "total_pages": 484,
+    "vision": {
+      "parsed": {
+        "pii_fields": [
+          {
+            "type": "PERSON",
+            "value": "Aalgaard, Michelle J.",
+            "label": "STUDENT NAME",
+            "position": "middle_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "Aanenson, Jamie",
+            "label": "STUDENT NAME",
+            "position": "middle_middle"
+          },
+          {
+            "type": "PERSON",
+            "value": "Abader, Mogammad",
+            "label": "STUDENT NAME",
+            "position": "middle_right"
+          },
+          {
+            "type": "PERSON",
+            "value": "Abaga, English",
+            "label": "STUDENT NAME",
+            "position": "middle_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "Abaga, Nelson",
+            "label": "STUDENT NAME",
+            "position": "middle_middle"
+          },
+          {
+            "type": "PERSON",
+            "value": "Abaga, Wilfrida",
+            "label": "STUDENT NAME",
+            "position": "middle_right"
+          },
+          {
+            "type": "PERSON",
+            "value": "Abanto, Faria",
+            "label": "STUDENT NAME",
+            "position": "middle_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "Abarta, Ian",
+            "label": "STUDENT NAME",
+            "position": "middle_middle"
+          },
+          {
+            "type": "PERSON",
+            "value": "Abbott, Bonnie",
+            "label": "STUDENT NAME",
+            "position": "middle_right"
+          },
+          {
+            "type": "PERSON",
+            "value": "Abdelsayed, Merna",
+            "label": "STUDENT NAME",
+            "position": "middle_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "Abdel-Kader, Mohammed",
+            "label": "STUDENT NAME",
+            "position": "middle_middle"
+          },
+          {
+            "type": "PERSON",
+            "value": "Abdi, Ibrahim",
+            "label": "STUDENT NAME",
+            "position": "middle_right"
+          },
+          {
+            "type": "PERSON",
+            "value": "Abdi, Mohamed",
+            "label": "STUDENT NAME",
+            "position": "middle_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "Abdi, Sagel",
+            "label": "STUDENT NAME",
+            "position": "middle_middle"
+          },
+          {
+            "type": "PERSON",
+            "value": "Abdi, Samater",
+            "label": "STUDENT NAME",
+            "position": "middle_right"
+          },
+          {
+            "type": "PERSON",
+            "value": "Abdi, Samiya",
+            "label": "STUDENT NAME",
+            "position": "middle_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "Abdon, Tucker",
+            "label": "STUDENT NAME",
+            "position": "middle_middle"
+          },
+          {
+            "type": "PERSON",
+            "value": "Abdugaparova, Ruf-Fiam",
+            "label": "STUDENT NAME",
+            "position": "middle_right"
+          },
+          {
+            "type": "PERSON",
+            "value": "Abdul-Nabi, Ahmed",
+            "label": "STUDENT NAME",
+            "position": "middle_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "Abdulmalik, Jamal",
+            "label": "STUDENT NAME",
+            "position": "middle_middle"
+          },
+          {
+            "type": "PERSON",
+            "value": "Abdul Wahid, Muhammad A",
+            "label": "STUDENT NAME",
+            "position": "middle_right"
+          },
+          {
+            "type": "LOCATION",
+            "value": "Lynnwood High School",
+            "label": "School Name",
+            "position": "top_middle"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "03/20/13",
+            "label": "Date",
+            "position": "top_right"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "05.13.02.00.08-10.2",
+            "label": "Unknown Date Format",
+            "position": "top_left"
+          }
+        ],
+        "structure_type": "table",
+        "records_per_page": 30,
+        "cross_page_data": false,
+        "pages_per_instance": 1
+      }
+    },
+    "extraction": {
+      "doc": "EdmondsSD (Student Course Verification)",
+      "total_pages": 484,
+      "pages_scanned": 484,
+      "unique_students": 8038,
+      "time_s": 1.55,
+      "pii_types": [
+        "PERSON (name)",
+        "GENDER",
+        "GRADE_LEVEL"
+      ],
+      "note": "No SSN/DOB/address in this document - only names and demographics",
+      "sample": [
+        {
+          "page": 1,
+          "alphakey": "AALGAMIC000",
+          "name": "Aalgaard, Michelle J.",
+          "grade": "13",
+          "gender": "F"
+        },
+        {
+          "page": 1,
+          "alphakey": "AANENJAM001",
+          "name": "Aanenson, Jamie",
+          "grade": "GD",
+          "gender": "F"
+        },
+        {
+          "page": 1,
+          "alphakey": "ABADEMOG000",
+          "name": "Abader, Mogammad",
+          "grade": "GD",
+          "gender": "M"
+        },
+        {
+          "page": 1,
+          "alphakey": "ABAGAENG000",
+          "name": "Abaga, English",
+          "grade": "GD",
+          "gender": "M"
+        },
+        {
+          "page": 1,
+          "alphakey": "ABAGANEL000",
+          "name": "Abaga, Nelson",
+          "grade": "GD",
+          "gender": "M"
+        },
+        {
+          "page": 1,
+          "alphakey": "ABAGAWIL000",
+          "name": "Abaga, Wilfrida",
+          "grade": "GD",
+          "gender": "F"
+        },
+        {
+          "page": 1,
+          "alphakey": "ABANTFAR000",
+          "name": "Abanto, Faria",
+          "grade": "GD",
+          "gender": "F"
+        },
+        {
+          "page": 1,
+          "alphakey": "ABARTIAN000",
+          "name": "Abarta, Ian",
+          "grade": "GD",
+          "gender": "M"
+        },
+        {
+          "page": 1,
+          "alphakey": "ABBOTBON000",
+          "name": "Abbott, Bonnie",
+          "grade": "GD",
+          "gender": "F"
+        },
+        {
+          "page": 1,
+          "alphakey": "ABDELMER000",
+          "name": "Abdelsayed, Merna",
+          "grade": "GD",
+          "gender": "F"
+        }
+      ]
+    }
+  },
+  "payroll": {
+    "filename": "TPHS2_656_0000067171.pdf",
+    "type": "Payroll Register",
+    "total_pages": 902,
+    "vision": {
+      "parsed": {
+        "pii_fields": [
+          {
+            "type": "PERSON",
+            "value": "ADAMS, BRADLEY JAY",
+            "label": "EMPLOYEE NAME",
+            "position": "middle_left"
+          },
+          {
+            "type": "LOCATION",
+            "value": "1060 FIELDING PARK CT.",
+            "label": "Address",
+            "position": "middle_left"
+          },
+          {
+            "type": "LOCATION",
+            "value": "ATLANTA GA 30319",
+            "label": "Address",
+            "position": "middle_left"
+          },
+          {
+            "type": "US_SSN",
+            "value": "XXX-XX-5589",
+            "label": "SS-NO",
+            "position": "middle_left"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "06/26/57",
+            "label": "BIRTHDATE",
+            "position": "middle_left"
+          },
+          {
+            "type": "DATE",
+            "value": "07/25/83",
+            "label": "HIRE",
+            "position": "middle_left"
+          },
+          {
+            "type": "DATE",
+            "value": "07/25/83",
+            "label": "SENIORITY DATE",
+            "position": "middle_left"
+          },
+          {
+            "type": "DATE",
+            "value": "07/25/83",
+            "label": "ADJUST HIRE DATE",
+            "position": "middle_left"
+          },
+          {
+            "type": "DATE",
+            "value": "07/25/83",
+            "label": "REHIRE DATE",
+            "position": "middle_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "ADAMS, ZACHARY S.",
+            "label": "EMPLOYEE NAME",
+            "position": "bottom_left"
+          },
+          {
+            "type": "LOCATION",
+            "value": "234 BAYWOOD DRIVE",
+            "label": "Address",
+            "position": "bottom_left"
+          },
+          {
+            "type": "LOCATION",
+            "value": "NEWPORT CA 92660",
+            "label": "Address",
+            "position": "bottom_left"
+          },
+          {
+            "type": "US_SSN",
+            "value": "XXX-XX-1676",
+            "label": "SS-NO",
+            "position": "bottom_left"
+          },
+          {
+            "type": "DATE",
+            "value": "05/18/15",
+            "label": "HIRE",
+            "position": "bottom_left"
+          }
+        ],
+        "structure_type": "fixed_single_page",
+        "records_per_page": 2,
+        "cross_page_data": false,
+        "pages_per_instance": 1
+      }
+    },
+    "extraction": {
+      "doc": "TPHS2_67171 (Payroll Register)",
+      "total_pages": 902,
+      "pages_scanned": 902,
+      "names": 1204,
+      "ssn": 1237,
+      "dob": 1236,
+      "bank_accounts": 899,
+      "addresses": 0,
+      "time_s": 106.39,
+      "sample_names": [
+        "ADAMS, BRADLEY JAY",
+        "ADAMS, ZACHARY S.",
+        "ADDISON, KARIN T.",
+        "AIKMAN, MELISSA A.",
+        "AILEO, MARJORIE E.",
+        "AKINBAMIDELE, OPEYEMI",
+        "ALBERTSON, ANN G.",
+        "ALDRICH, JULIA N.",
+        "ALEXIS-JARVIS, JOAN",
+        "ALFINO, DANIEL MICHAEL"
+      ]
+    }
+  },
+  "talx": {
+    "filename": "TPHS2_656_0000070715.pdf",
+    "type": "TALX UC Interface",
+    "total_pages": 132,
+    "vision": {
+      "error": "Server error '500 Internal Server Error' for url 'http://localhost:11434/api/generate'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500"
+    },
+    "extraction": {
+      "doc": "TPHS2_70715 (TALX UC Interface)",
+      "total_pages": 132,
+      "pages_scanned": 132,
+      "records": 1035,
+      "addresses": 713,
+      "dob": 1041,
+      "time_s": 0.37,
+      "ssn_format": "FULL (XXX-XX-XXXX) \u2014 HIGH SENSITIVITY",
+      "sample": [
+        {
+          "ssn": "300-44-XXXX",
+          "name": "ADAMS,BRADLEY JAY            A"
+        },
+        {
+          "ssn": "538-62-XXXX",
+          "name": "ADAMS,GREGORY                A"
+        },
+        {
+          "ssn": "352-78-XXXX",
+          "name": "ADAMS,STEPHEN G              A"
+        },
+        {
+          "ssn": "228-13-XXXX",
+          "name": "ADDISON,KARIN T              A"
+        },
+        {
+          "ssn": "224-29-XXXX",
+          "name": "AIKMAN,MELISSA A             A"
+        }
+      ]
+    }
+  },
+  "ppaca": {
+    "filename": "TPHS2_656_0000071913.pdf",
+    "type": "PPACA 1095-C Report",
+    "total_pages": 211,
+    "vision": {
+      "parsed": {
+        "pii_fields": [
+          {
+            "type": "PERSON",
+            "value": "MATTHEW J AARONSON",
+            "label": "EMPLOYEE NAME",
+            "position": "middle_left"
+          },
+          {
+            "type": "US_SSN",
+            "value": "XXX-XX-2092",
+            "label": "EMP ID/SSN",
+            "position": "middle_left"
+          },
+          {
+            "type": "LOCATION",
+            "value": "ADDR1 9 NOEL LANE",
+            "label": "INSIDE/LEGAL ADDRESS",
+            "position": "middle_left"
+          },
+          {
+            "type": "LOCATION",
+            "value": "ADDR2",
+            "label": "ADDR2",
+            "position": "middle_left"
+          },
+          {
+            "type": "LOCATION",
+            "value": "MUTTONTOWN, ST NY",
+            "label": "CITY, ST",
+            "position": "middle_left"
+          },
+          {
+            "type": "LOCATION",
+            "value": "11753-1311",
+            "label": "ZIP CODE",
+            "position": "middle_left"
+          },
+          {
+            "type": "US_SSN",
+            "value": "XXX-XX-2092",
+            "label": "SELF",
+            "position": "bottom_left"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "01/30/1975",
+            "label": "DOB",
+            "position": "bottom_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "LINDSAY ANNE AARONSON",
+            "label": "SPS1",
+            "position": "bottom_left"
+          },
+          {
+            "type": "US_SSN",
+            "value": "XXX-XX-9774",
+            "label": "SPS1",
+            "position": "bottom_left"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "01/30/1975",
+            "label": "DOB",
+            "position": "bottom_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "CHASE BENJAMIN AARONSON",
+            "label": "DPO1",
+            "position": "bottom_left"
+          },
+          {
+            "type": "US_SSN",
+            "value": "XXX-XX-6657",
+            "label": "DPO1",
+            "position": "bottom_left"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "01/30/1975",
+            "label": "DOB",
+            "position": "bottom_left"
+          },
+          {
+            "type": "PERSON",
+            "value": "AVERY ELANA AARONSON",
+            "label": "DPO2",
+            "position": "bottom_left"
+          },
+          {
+            "type": "US_SSN",
+            "value": "XXX-XX-6523",
+            "label": "DPO2",
+            "position": "bottom_left"
+          },
+          {
+            "type": "DATE_OF_BIRTH",
+            "value": "01/30/1975",
+            "label": "DOB",
+            "position": "bottom_left"
+          }
+        ],
+        "structure_type": "fixed_single_page",
+        "records_per_page": 1,
+        "cross_page_data": false,
+        "pages_per_instance": 1
+      }
+    },
+    "extraction": {
+      "doc": "TPHS2_71913 (PPACA 1095-C Report)",
+      "total_pages": 211,
+      "pages_scanned": 211,
+      "employees": 204,
+      "masked_ssn": 904,
+      "time_s": 0.39,
+      "ssn_format": "MASKED (XXX-XX-NNNN)",
+      "sample": [
+        {
+          "page": 2,
+          "name": "MATTHEW J AARONSON"
+        },
+        {
+          "page": 3,
+          "name": "AARON N ABRAHAM"
+        },
+        {
+          "page": 4,
+          "name": "LESLIE S AHARI"
+        },
+        {
+          "page": 5,
+          "name": "SUSAN STOOPS"
+        },
+        {
+          "page": 6,
+          "name": "ROBERT A ANGLE"
+        },
+        {
+          "page": 7,
+          "name": "DAVID N ANTHONY"
+        },
+        {
+          "page": 8,
+          "name": "JEFFERY R BANISH"
+        },
+        {
+          "page": 9,
+          "name": "ROBERT MASON"
+        },
+        {
+          "page": 10,
+          "name": "RICHARD C BEALE"
+        },
+        {
+          "page": 11,
+          "name": "ROBERT PRENTIS"
+        }
+      ]
+    }
+  }
+}
