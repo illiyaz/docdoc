@@ -31,8 +31,14 @@ logger = logging.getLogger(__name__)
 # Extensions that the reader registry handles with a dedicated reader.
 # Unknown extensions fall back to TikaReader — also valid to discover.
 _KNOWN_EXTENSIONS: frozenset[str] = frozenset({
-    "pdf", "docx", "xlsx", "xls", "csv", "html", "htm",
-    "eml", "msg", "parquet", "avro",
+    # Documents
+    "pdf", "docx", "xlsx", "xls", "xlsm", "csv", "tsv",
+    "html", "htm", "xml", "eml", "msg", "parquet", "avro",
+    # Images (Step 23b — vision-first extraction)
+    "jpg", "jpeg", "png", "bmp", "webp", "gif",
+    "heic", "heif", "tif", "tiff",
+    # Archives (extracted recursively by upload endpoint)
+    "zip", "7z",
 })
 
 

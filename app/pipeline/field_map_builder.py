@@ -100,8 +100,18 @@ class FieldMapBuilder:
         if not field_type or not value_text:
             return None
 
+        # Treat "discovered" label (from person_discovery fallback) as empty
+        if label_text in ("discovered", "Discovered"):
+            label_text = ""
+
         # Step 1: find the label in PyMuPDF words
         label_words = self._find_text_in_words(words, label_text) if label_text else None
+
+        # No label found → for PERSON, try to find nearby static text as anchor
+        if not label_words and field_type.upper() == "PERSON":
+            label_words, label_text = self._find_nearby_anchor_for_value(
+                words, value_text,
+            )
 
         # No label → skip (coordinate extraction needs an anchor)
         if not label_words:
@@ -147,6 +157,76 @@ class FieldMapBuilder:
             line_count=line_count,
             skip_pattern=skip_pattern,
         )
+
+    # ------------------------------------------------------------------
+    # Anchor discovery for unlabeled PERSON fields
+    # ------------------------------------------------------------------
+
+    def _find_nearby_anchor_for_value(
+        self,
+        words: list[tuple],
+        value_text: str,
+    ) -> tuple[list[tuple] | None, str]:
+        """Find nearby static text that can serve as an anchor for an unlabeled field.
+
+        When a PERSON field has no label (e.g., name appears without "Name:" prefix),
+        find the value in PyMuPDF words, then look for text to the LEFT on the same
+        line, or on the line ABOVE. That nearby text becomes the anchor.
+
+        Returns (anchor_words, anchor_text) or (None, "") if no anchor found.
+        """
+        # First, find the value itself
+        value_words = self._find_text_in_words(words, value_text)
+        if not value_words:
+            first_word = value_text.split()[0] if value_text.strip() else ""
+            if first_word and len(first_word) >= 3:
+                value_words = self._find_text_in_words(words, first_word)
+        if not value_words:
+            return None, ""
+
+        value_bbox = _merge_bboxes(value_words)
+        value_y = (value_bbox[1] + value_bbox[3]) / 2
+        value_x0 = value_bbox[0]
+
+        # Look for words to the LEFT on the same line (within LINE_TOLERANCE)
+        same_line_left: list[tuple] = []
+        for w in words:
+            w_y = (w[1] + w[3]) / 2
+            if abs(w_y - value_y) < _LINE_TOLERANCE and w[2] < value_x0 - 5:
+                same_line_left.append(w)
+
+        if same_line_left:
+            same_line_left.sort(key=lambda w: -w[2])  # rightmost first
+            anchor_words = same_line_left[:3]
+            anchor_words.sort(key=lambda w: w[0])  # restore left-to-right
+            anchor_text = " ".join(w[4].strip() for w in anchor_words).strip()
+            if anchor_text and len(anchor_text) >= 2:
+                logger.info(
+                    "Found nearby anchor '%s' for unlabeled PERSON '%s'",
+                    anchor_text[:30], value_text[:30],
+                )
+                return anchor_words, anchor_text
+
+        # Look for text on the line ABOVE (within 30pt vertical distance)
+        above_words: list[tuple] = []
+        for w in words:
+            w_y = (w[1] + w[3]) / 2
+            if value_y - 30 < w_y < value_y - 3:
+                if abs(w[0] - value_x0) < 100:
+                    above_words.append(w)
+
+        if above_words:
+            above_words.sort(key=lambda w: (w[1], w[0]))
+            anchor_words = above_words[:3]
+            anchor_text = " ".join(w[4].strip() for w in anchor_words).strip()
+            if anchor_text and len(anchor_text) >= 2:
+                logger.info(
+                    "Found above-line anchor '%s' for unlabeled PERSON '%s'",
+                    anchor_text[:30], value_text[:30],
+                )
+                return anchor_words, anchor_text
+
+        return None, ""
 
     # ------------------------------------------------------------------
     # Word-level text search
