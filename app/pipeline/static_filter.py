@@ -23,13 +23,19 @@ from collections import Counter
 
 logger = logging.getLogger(__name__)
 
-# Fields that should NEVER be filtered (always individual-specific)
-_NEVER_FILTER = frozenset({"PERSON", "US_SSN", "GOVERNMENT_ID"})
+# Fields that should NEVER be filtered by the general static check
+_NEVER_FILTER = frozenset({"US_SSN", "GOVERNMENT_ID"})
+
+# PERSON gets special handling: filtered ONLY if the same name appears on
+# >80% of pages (indicates a page header, not individual data).
+# Normal threshold (50%) is too aggressive for PERSON.
+_PERSON_STATIC_THRESHOLD = 0.8
 
 # Fields commonly static across pages (report metadata)
 _LIKELY_STATIC = frozenset({
     "DATE_OF_BIRTH", "PHONE_NUMBER", "EMAIL_ADDRESS",
     "LOCATION", "CITY_STATE_ZIP", "ACCOUNT_NUMBER",
+    "PERSON",  # Checked at higher threshold via _PERSON_STATIC_THRESHOLD
 })
 
 
@@ -84,9 +90,12 @@ def filter_static_values(
     # Identify static values
     static_values: set[tuple[str, str]] = set()
     cutoff = threshold * total_pages
+    person_cutoff = _PERSON_STATIC_THRESHOLD * total_pages
     
     for (field_type, value), count in value_page_counts.items():
-        if count >= cutoff:
+        # PERSON uses a higher threshold — only filter if >80% of pages
+        effective_cutoff = person_cutoff if field_type == "PERSON" else cutoff
+        if count >= effective_cutoff:
             static_values.add((field_type, value))
     
     if not static_values:

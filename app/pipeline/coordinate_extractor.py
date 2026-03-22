@@ -126,7 +126,9 @@ def _clean_name(name_str: str) -> str:
 # in each line of text.
 # ---------------------------------------------------------------------------
 
-# Comprehensive blocklist for ALL_CAPS word rejection
+# Comprehensive blocklist for ALL_CAPS word rejection (369 words)
+# Ported from standalone _LOC_WORDS — proven on 34 documents.
+# Shared source of truth: app/pipeline/person_discovery.py NAME_BLOCKLIST
 _NAME_BLOCKLIST: frozenset[str] = frozenset({
     # Address words
     "ST", "AVE", "RD", "DR", "LN", "BLVD", "WAY", "PL", "CT", "STREET", "AVENUE",
@@ -134,28 +136,55 @@ _NAME_BLOCKLIST: frozenset[str] = frozenset({
     "APT", "SUITE", "STE", "FLOOR", "UNIT", "BOX",
     # Directions / geography
     "NORTH", "SOUTH", "EAST", "WEST", "PARK", "HILL", "BEACH", "SPRINGS", "FALLS",
-    "CREEK", "LAKE", "VALLEY", "RIDGE", "HEIGHTS", "MANOR", "GROVE", "ISLAND",
-    "CENTER", "VILLAGE", "TOWN", "CITY", "COUNTY",
+    "CREEK", "LAKE", "VALLEY", "RIDGE", "HEIGHTS", "MANOR", "GROVE", "ACRES",
+    "MEADOW", "HARBOR", "POINT", "HAVEN", "ISLAND", "CENTER", "CENTRE", "VILLAGE",
+    "TOWN", "CITY", "COUNTY",
+    # Place names
+    "YORK", "VIRGINIA", "CEDAR", "SILVER", "ROCK", "SPRING", "SAGE", "CRYSTAL",
+    "SANDY", "GRAND", "PLEASANT", "MOUNT", "FORT", "PORT", "CAPE", "BAY", "KEY",
+    "PALM", "PINE", "OAK", "ELM", "MAPLE", "GREEN", "BOWLING",
     # Report/form labels
-    "REPORT", "PAYROLL", "MANAGEMENT", "SUMMARY", "TOTAL", "PAGE", "FORM", "SECTION",
-    "DEPARTMENT", "COMPANY", "DISTRICT", "OFFICE", "SYSTEM", "DATE", "NUMBER",
-    "ACCOUNT", "EMPLOYEE", "NAME", "ADDRESS", "PHONE", "EMAIL", "CODE", "TYPE",
-    "STATUS", "AMOUNT", "BALANCE", "PERIOD", "RATE", "GROUP", "CHECK", "STATEMENT",
-    "DEDUCTION", "EARNINGS", "FEDERAL", "STATE", "LOCAL", "TAX", "INSURANCE",
-    "BENEFIT", "PLAN", "COVERAGE", "PREMIUM", "INFORMATION", "DESCRIPTION",
-    # Company suffixes
-    "LLP", "LLC", "INC", "CORP", "LTD", "PLC", "HOLDINGS", "PARTNERS", "CONSULTING",
-    "SERVICES", "SOLUTIONS", "TECHNOLOGIES", "ENTERPRISES", "INTERNATIONAL", "GLOBAL",
+    "REPORT", "REPORTS", "PAYROLL", "MANAGEMENT", "SUMMARY", "TOTAL", "PAGE", "PAGES",
+    "FORM", "SECTION", "SECT", "PART", "DEPARTMENT", "COMPANY", "DISTRICT", "OFFICE",
+    "SYSTEM", "DATE", "NUMBER", "ACCOUNT", "EMPLOYEE", "EMPLOYER", "NAME", "ADDRESS",
+    "PHONE", "EMAIL", "CODE", "TYPE", "STATUS", "AMOUNT", "BALANCE", "PERIOD",
+    "BEGIN", "END", "RATE", "LEVEL", "GROUP", "CHECK", "CHECKING", "SAVINGS",
+    "ADVICE", "STATEMENT", "DEDUCTION", "EARNINGS", "FEDERAL", "STATE", "LOCAL",
+    "TAX", "INSURANCE", "BENEFIT", "PLAN", "COVERAGE", "PREMIUM", "INFORMATION",
+    "DESCRIPTION", "SCHEDULE", "RECORD", "DETAIL", "DETAILS", "VERIFICATION",
+    "IDENTIFICATION", "AUTHORIZATION", "DOCUMENT", "PROVIDER",
+    # Financial terms
+    "INCOME", "COLLECTIONS", "ATTN", "OFFER", "FOLLOWING", "START", "MONTH",
+    "DEFAULT", "ORIGINAL", "CORRECTED", "AMENDED", "VOID", "BREAKAGE", "FAST",
+    # Company/org suffixes
+    "LLP", "LLC", "INC", "CORP", "LTD", "PLC", "HOLDINGS", "PARTNERS", "ASSOCIATES",
+    "CONSULTING", "SERVICES", "SOLUTIONS", "TECHNOLOGIES", "ENTERPRISES",
+    "INTERNATIONAL", "GLOBAL", "NATIONAL", "INDUSTRIES",
     # Education
     "SCHOOL", "UNIVERSITY", "COLLEGE", "ACADEMY", "INSTITUTE", "HOSPITAL", "MEDICAL",
-    "HIGH", "GRADE", "SEMESTER", "TERM", "COURSE",
+    "HIGH", "LENGTH", "CRDTS", "CREDITS", "GRADE", "SEMESTER", "TERM", "COURSE",
+    # Legal / trust terms
+    "TRUST", "TRUSTEE", "TTEE", "REVOCABLE", "IRREVOCABLE", "LIVING", "ESTATE",
+    "CUSTODIAN", "CUST", "GUARDIAN", "BENEFICIARY", "FBO", "DIRECTED", "IRA",
+    "OTMA", "UTMA", "UGMA", "SUBJECT", "RULES", "DATED", "FORMERLY",
     # Common English function words
-    "AND", "OR", "THE", "FOR", "WITH", "FROM", "THAT", "WILL", "THIS", "HAS", "BEEN",
-    "NOT", "ARE", "ALL", "BUT", "CAN", "HER", "HIS", "MAY", "NEW", "OUR", "PER",
-    "WHO", "EACH", "THAN", "THEM", "THEN", "THEY", "INTO", "JUST", "LIKE", "MAKE",
-    "MUST", "NEED", "ALSO", "HAVE", "DOES",
-    # Suffixes (handled separately in structure analysis)
-    "JR", "SR", "II", "III", "IV", "V", "VI", "VII", "VIII", "ESQ", "MD", "PHD", "DDS",
+    "AND", "OR", "THE", "FOR", "WITH", "FROM", "THAT", "WILL", "BE", "IS", "NOT",
+    "ON", "OF", "SELF", "ONLY", "THIS", "HAS", "BEEN", "WAS", "ARE", "ALL", "ANY",
+    "BUT", "CAN", "DID", "DO", "HAD", "HER", "HIS", "HOW", "ITS", "MAY", "NEW",
+    "NOW", "OLD", "OUR", "OUT", "OWN", "PER", "PUT", "RUN", "SAY", "SHE", "TOO",
+    "USE", "HIM", "LET", "SET", "TRY", "WHO", "WHY", "EACH", "THAN", "THEM",
+    "THEN", "THEY", "INTO", "JUST", "LIKE", "MAKE", "MANY", "MOST", "MUCH", "MUST",
+    "NEED", "NEXT", "ALSO", "BACK", "CALL", "COME", "COPY", "DOES", "DOWN", "EVEN",
+    "FIND", "GIVE", "HAVE", "HERE", "KEEP", "KNOW", "LAST", "LINE", "LONG", "LOOK",
+    "MADE", "MORE", "MOVE", "NONE", "ONCE", "OPEN", "OVER", "SAME", "SHOW", "SIDE",
+    "SOME", "SUCH", "SURE", "TAKE", "TELL", "VERY", "WANT", "WHAT", "WHEN", "WORK",
+    "YEAR", "YOUR", "PRIOR", "BELOW", "ABOVE",
+    # US state abbreviations
+    "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA", "HI", "ID", "IL",
+    "IN", "IA", "KS", "KY", "LA", "ME", "MD", "MA", "MI", "MN", "MS", "MO", "MT",
+    "NV", "NH", "NJ", "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC",
+    "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY", "DC",
+    "STATION",
 })
 
 _SUFFIX_WORDS = frozenset({"JR", "SR", "II", "III", "IV", "V", "VI", "VII", "VIII", "ESQ", "MD", "PHD", "DDS"})

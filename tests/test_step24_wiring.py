@@ -52,17 +52,17 @@ class TestStaticFilterBasic:
         for recs in cleaned.values():
             assert recs[0].get("DATE_OF_BIRTH") is None or "DATE_OF_BIRTH" not in recs[0]
 
-    def test_person_never_filtered(self):
-        """PERSON field should never be removed even if repeated."""
+    def test_person_filtered_at_high_threshold(self):
+        """PERSON is now filtered at 80% threshold (was never-filtered before quality fix)."""
         page_records = {
             i: [{"PERSON": "Same Name", "US_SSN": "123-45-6789"}]
             for i in range(10)
         }
         cleaned, removed = filter_static_values(page_records)
-        # PERSON and US_SSN are in _NEVER_FILTER
-        assert "PERSON" not in removed
+        # Same Name on 100% of pages → filtered (above 80% threshold)
+        assert "PERSON" in removed
+        # US_SSN is still never-filtered
         assert "US_SSN" not in removed
-        assert all("PERSON" in recs[0] for recs in cleaned.values())
 
     def test_ssn_never_filtered(self):
         """US_SSN and GOVERNMENT_ID should never be filtered."""
@@ -124,8 +124,9 @@ class TestStaticFilterBasic:
 class TestStaticFilterNeverFilterSet:
     """Verify _NEVER_FILTER contents."""
 
-    def test_person_in_never_filter(self):
-        assert "PERSON" in _NEVER_FILTER
+    def test_person_not_in_never_filter(self):
+        """PERSON was moved out of _NEVER_FILTER (quality fix — filtered at 80%)."""
+        assert "PERSON" not in _NEVER_FILTER
 
     def test_ssn_in_never_filter(self):
         assert "US_SSN" in _NEVER_FILTER

@@ -726,6 +726,76 @@ def analyze_generator(
                                     total_pages=total_pages, is_scanned=is_scanned,
                                 )
 
+                            # --- Gate 1: Validate PERSON fields from vision ---
+                            # Vision may misidentify page headers as names
+                            # (e.g., "January Statement" as PERSON). Validate
+                            # against blocklist, fall back to text discovery.
+                            if not cache_hit and routing.pii_fields:
+                                try:
+                                    from app.pipeline.person_discovery import (
+                                        is_likely_name,
+                                        discover_person_from_text,
+                                    )
+                                    person_fields = [
+                                        f for f in routing.pii_fields
+                                        if f.get("type") == "PERSON"
+                                    ]
+                                    valid_persons = [
+                                        f for f in person_fields
+                                        if is_likely_name(f.get("value", ""))
+                                    ]
+                                    invalid_persons = [
+                                        f for f in person_fields
+                                        if not is_likely_name(f.get("value", ""))
+                                    ]
+
+                                    if invalid_persons:
+                                        logger.warning(
+                                            "Vision PERSON validation: %d/%d rejected for %s: %s",
+                                            len(invalid_persons), len(person_fields),
+                                            doc.file_name,
+                                            [f.get("value", "")[:30] for f in invalid_persons],
+                                        )
+
+                                    if person_fields and not valid_persons:
+                                        # All PERSON fields invalid — try text discovery
+                                        logger.info(
+                                            "All PERSON fields invalid for %s, trying text discovery",
+                                            doc.file_name,
+                                        )
+                                        discovered, best_page = discover_person_from_text(
+                                            doc.source_path, onset,
+                                        )
+                                        if discovered:
+                                            # Replace invalid PERSON fields with discovered ones
+                                            routing.pii_fields = [
+                                                f for f in routing.pii_fields
+                                                if f.get("type") != "PERSON"
+                                            ] + discovered
+                                            onset = best_page
+                                            logger.info(
+                                                "Text discovery found %d PERSON on page %d for %s",
+                                                len(discovered), best_page, doc.file_name,
+                                            )
+                                        else:
+                                            # No persons found at all — downgrade path
+                                            logger.warning(
+                                                "No valid PERSON found for %s, downgrading to presidio",
+                                                doc.file_name,
+                                            )
+                                            routing.recommended_path = "presidio"
+                                    elif invalid_persons and valid_persons:
+                                        # Keep only valid persons
+                                        routing.pii_fields = [
+                                            f for f in routing.pii_fields
+                                            if f.get("type") != "PERSON"
+                                        ] + valid_persons
+                                except Exception:
+                                    logger.warning(
+                                        "PERSON validation failed for %s",
+                                        doc.file_name, exc_info=True,
+                                    )
+
                             # Build field map if coordinate path recommended (skip on cache hit)
                             if not cache_hit:
                                 field_map = None
@@ -1874,12 +1944,25 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                                     # Null out static values on the actual PIIRecord objects
                                     _static_set = {(ft, v) for ft, vals in removed_static.items() for v in vals}
                                     for rec in coord_records:
+                                        if rec.raw_name and ("PERSON", rec.raw_name) in _static_set:
+                                            rec.raw_name = None
                                         if rec.raw_dob and ("DATE_OF_BIRTH", rec.raw_dob) in _static_set:
                                             rec.raw_dob = None
                                         if rec.raw_phone and ("PHONE_NUMBER", rec.raw_phone) in _static_set:
                                             rec.raw_phone = None
                                         if rec.raw_email and ("EMAIL_ADDRESS", rec.raw_email) in _static_set:
                                             rec.raw_email = None
+                                    # Remove records that lost their PERSON (header-only records)
+                                    if "PERSON" in removed_static:
+                                        before = len(coord_records)
+                                        coord_records = [
+                                            r for r in coord_records
+                                            if r.raw_name or r.raw_government_id
+                                        ]
+                                        logger.info(
+                                            "Static PERSON filter: %d → %d records",
+                                            before, len(coord_records),
+                                        )
                             except Exception:
                                 logger.warning("Static filter failed", exc_info=True)
 

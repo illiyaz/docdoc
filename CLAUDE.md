@@ -2,7 +2,7 @@
 
 Single source of truth for how this codebase is built and maintained. All contributors (human and AI) must follow these rules without exception.
 
-See [docs/PLAN.md](docs/PLAN.md) for active implementation steps (21+).
+See [docs/PLAN.md](docs/PLAN.md) for active implementation steps (Phase 5: Steps 21-24, Phase 6-8: Steps 25-35).
 See [docs/PLAN_COMPLETED.md](docs/PLAN_COMPLETED.md) for completed steps (Phases 1-4, Steps 1-20).
 See [docs/SCHEMA.md](docs/SCHEMA.md) for detailed technical architecture (PDF processing, PII detection, RRA, protocols, HITL, notifications).
 
@@ -27,6 +27,9 @@ Build an **offline-capable, air-gap-safe** system that is:
 - **Air-gap deployable** — zero runtime network dependencies
 - **Protocol-driven** — every job runs against a counsel-approved Protocol
 - **Notification-complete** — pipeline ends with email delivery or print-ready postal output
+- **Access-controlled** — every action requires authenticated identity with role-based authorization (Phase 6+)
+- **Source-verifiable** — auditors can view original document pages alongside extractions (Phase 6+)
+- **Deadline-aware** — regulatory notification deadlines are tracked and visible across all active matters (Phase 6+)
 
 ---
 
@@ -293,6 +296,15 @@ These are detailed in [docs/SCHEMA.md](docs/SCHEMA.md). Summary:
 - **Notification:** SMTP email + WeasyPrint postal letters. Template-driven. Delivery gated on APPROVED status only.
 - **Audit:** Every extraction decision traceable to a specific rule/pattern/classifier. Append-only audit trail.
 - **Coordinates:** Evidence-only — never used as search mechanism.
+- **Authentication (Phase 6):** JWT + local user store. No OAuth, no external IdP. bcrypt password hashing. Token in `Authorization: Bearer` header. All routes require auth when `auth_enabled=true` (default). Air-gap safe — no external auth dependencies.
+- **RBAC (Phase 6):** Four roles enforced at API level via `require_role()` dependency. APPROVER is superuser. QC_SAMPLER is read-only. Role hierarchy: QC_SAMPLER < REVIEWER < LEGAL_REVIEWER < APPROVER.
+- **Access logging (Phase 6):** Append-only `access_logs` table. Every authenticated request logged with user, action, resource, timestamp. No DELETE/UPDATE on access logs — immutable by design.
+- **Document viewer (Phase 6):** Page images rendered on-demand via PyMuPDF, never cached to disk (breach data shouldn't persist as images). Bounding box overlays for extraction highlighting. Auth-gated — no unauthenticated access to source documents.
+- **Deadline tracking (Phase 6):** Breach discovery date drives protocol-specific deadline computation. Dashboard shows countdown across all active matters. Color coding: green (>14d), amber (3-14d), red (<3d), black (overdue).
+- **Evidence export (Phase 7):** One-click bundle: methodology PDF + notification XLSX + audit CSV + QC report → ZIP. Methodology report auto-generated from pipeline metrics — not manually authored.
+- **Notification preview (Phase 7):** Template rendering with real (masked) subject data before batch send. APPROVER sign-off required before any notifications are delivered.
+- **Re-extraction (Phase 7):** Per-document re-run without re-running entire job. Field map edits → re-extract → verify cycle. Old results replaced atomically.
+- **Manual merge/split (Phase 7):** Auditor can link/unlink notification subjects with rationale. Logged in audit trail with before/after state.
 
 ---
 

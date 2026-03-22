@@ -566,3 +566,322 @@ def filter_static_values(page_records, threshold=0.5):
 **Problem:** Re-analyzing the same document layout burns vision model time. If the same layout/format appears in multiple documents (e.g., 50 AWIR files with identical structure), the template from the first should apply to all.
 
 **Fix:** Hash the onset page text + layout → cache template. On subsequent documents with same hash → skip vision, reuse template.
+
+---
+
+### Step 24 — Pipeline Wiring & Upload Endpoint (COMPLETE)
+
+**Status: COMPLETE.** Static filter + template cache wired into `two_phase.py`. File upload endpoint supports all 47 formats with archive/email extraction. Frontend shows coord audit results. 2538 tests passing.
+
+---
+---
+
+## Phase 6 — Production Readiness
+
+**Goal:** Close the table-stakes gaps that prevent real deployment. No law firm or breach response team will adopt a tool that handles PII without authentication, can't show source documents, or doesn't track regulatory deadlines. These three steps make Forentis AI deployable.
+
+Steps 1-24 COMPLETE (2538 tests). Phase 5 delivered the extraction engine. Phase 6 wraps it for production use.
+
+---
+
+### Step 25 — Authentication, RBAC & Access Audit Logging
+
+**Goal:** Every API call requires a verified identity. Every action is logged with who did it. The four existing roles (REVIEWER, LEGAL_REVIEWER, APPROVER, QC_SAMPLER) are enforced — not just defined.
+
+**Why table-stakes:** Breach data is attorney-client privileged. Uncontrolled access is a deal-breaker for any firm's InfoSec review. Regulators also expect access controls in the breach response process itself.
+
+---
+
+#### 25a. Auth Backend — JWT + Local User Store
+
+**Add local user management with hashed passwords and JWT tokens.**
+
+| File | What to do |
+|---|---|
+| `app/db/models.py` | Add `User` model: id, email, hashed_password, display_name, role, is_active, created_at, last_login_at |
+| `alembic/versions/` | Migration for `users` table |
+| `app/core/auth.py` | NEW — `hash_password()`, `verify_password()`, `create_access_token()`, `decode_token()`. Use bcrypt + PyJWT. Token expiry configurable via settings. |
+| `app/core/settings.py` | Add `jwt_secret_key`, `jwt_expiry_minutes` (default 480 = 8hr), `auth_enabled` (default true) |
+| `app/api/routes/auth.py` | NEW — `POST /auth/login` (email+password → JWT), `POST /auth/register` (admin-only), `GET /auth/me`, `POST /auth/change-password` |
+| `app/api/deps.py` | Add `get_current_user()` dependency — extracts JWT from `Authorization: Bearer` header, returns `User` or raises 401 |
+| `tests/test_auth.py` | Login flow, token expiry, bad credentials, password hashing |
+
+**Air-gap safe:** No OAuth, no external IdP. Local user store only. JWT secret generated on first boot and stored in settings.
+
+---
+
+#### 25b. RBAC Enforcement on All Routes
+
+**Every route gets a role guard. Existing roles are enforced, not just defined.**
+
+| Role | Can do |
+|---|---|
+| `QC_SAMPLER` | Read-only access to review queue, sampling results |
+| `REVIEWER` | Above + approve/reject documents, review subjects |
+| `LEGAL_REVIEWER` | Above + escalation decisions, regulatory protocol changes |
+| `APPROVER` | Above + start extraction, export, send notifications, manage users |
+
+| File | What to do |
+|---|---|
+| `app/core/auth.py` | Add `require_role(*roles)` dependency factory — checks `current_user.role in roles`, raises 403 if not |
+| `app/api/routes/jobs.py` | Add `require_role("REVIEWER", "APPROVER")` to upload, extraction, cancel. `APPROVER` only for delete. |
+| `app/api/routes/review.py` | Enforce `REVIEWER` minimum for approve/reject |
+| `app/api/routes/exports.py` | Enforce `APPROVER` for export creation |
+| `app/api/routes/analysis_review.py` | Enforce `REVIEWER` for approve/reject, `APPROVER` for approve-all |
+| `tests/test_rbac.py` | Test each role against each endpoint — verify 403 for insufficient privileges |
+
+---
+
+#### 25c. Access Audit Logging
+
+**Every authenticated action is logged to an append-only access log.**
+
+| File | What to do |
+|---|---|
+| `app/db/models.py` | Add `AccessLog` model: id, user_id, action, resource_type, resource_id, ip_address, timestamp |
+| `app/api/middleware/access_log.py` | NEW — middleware that logs every request with user identity, action, and resource |
+| `app/api/routes/audit.py` | Add `GET /audit/access-log` — paginated, filterable by user/action/date range. APPROVER only. |
+| `tests/test_access_log.py` | Verify log entries created for all sensitive actions |
+
+**Rule:** Access log is append-only. No DELETE endpoint. No UPDATE. Rows are immutable.
+
+---
+
+### Step 26 — Source Document Viewer
+
+**Goal:** An auditor can click on any extracted value and see the original source page with the extraction highlighted. Side-by-side: extracted data on the left, source page image on the right.
+
+**Why table-stakes:** The core audit workflow is "verify extraction against source." Without this, auditors must manually open PDFs and navigate to page numbers. That's not a product — it's a pipeline with a CSV output.
+
+---
+
+#### 26a. Page Rendering API
+
+**Serve individual PDF pages as images for the frontend viewer.**
+
+| File | What to do |
+|---|---|
+| `app/api/routes/documents.py` | NEW — `GET /documents/{doc_id}/pages/{page_num}` returns PNG image of the page. `GET /documents/{doc_id}/pages/{page_num}/text` returns page text with word bounding boxes. |
+| `app/pdf/renderer.py` | Already has `render_page_to_image()`. Expose via API. Add highlight overlay: given bounding boxes, draw semi-transparent rectangles on the rendered image. |
+| `app/core/settings.py` | Add `page_render_dpi` (default 150), `page_render_max_width` (default 1200) |
+| `tests/test_document_viewer.py` | Test page rendering, highlight overlay, page count, 404 for invalid pages |
+
+**Security:** Page images are served through auth middleware. No unauthenticated access to source documents. Images are generated on-demand, never cached to disk (breach data shouldn't persist as images).
+
+---
+
+#### 26b. Frontend Document Viewer Component
+
+**React component that shows source page alongside extraction results.**
+
+| File | What to do |
+|---|---|
+| `frontend/src/components/DocumentViewer.tsx` | NEW — side-by-side panel. Left: extraction results (name, SSN, DOB with page/bbox references). Right: rendered page image with bounding box overlays. Page navigation (prev/next). Zoom controls. |
+| `frontend/src/api/client.ts` | Add `getPageImage(docId, pageNum, highlights?)` and `getPageText(docId, pageNum)` API functions |
+| `frontend/src/pages/ProjectDetail.tsx` | Add "View Source" button on each document card in AnalysisReviewPanel. Opens DocumentViewer in a slide-over panel. |
+| `frontend/src/pages/SubjectDetail.tsx` | Add "View Source" link on each extracted value — opens DocumentViewer at the relevant page with the field highlighted |
+
+---
+
+#### 26c. Extraction-to-Source Linking
+
+**Every extracted value must link back to its source location.**
+
+| File | What to do |
+|---|---|
+| `app/api/routes/analysis_review.py` | Include page_range and bbox in extraction results returned to frontend |
+| `app/api/routes/documents.py` | `GET /documents/{doc_id}/extractions` — return all extractions for a document with page/bbox references, grouped by page |
+| `frontend/src/components/DocumentViewer.tsx` | Click an extraction → scroll to that page, highlight that bbox |
+
+---
+
+### Step 27 — Regulatory Deadline Dashboard
+
+**Goal:** Every active breach has a countdown showing days remaining until notification deadline. The dashboard shows deadline status across all active matters. Morning briefing view for breach response teams.
+
+**Why table-stakes:** The notification deadline is the single most important number in a breach response. HIPAA: 60 days. GDPR: 72 hours. Missing the deadline has regulatory consequences. Every tool in this space shows a countdown.
+
+---
+
+#### 27a. Breach Date Tracking
+
+**Add breach discovery date to the data model. Compute deadlines from protocol.**
+
+| File | What to do |
+|---|---|
+| `app/db/models.py` | Add to `IngestionRun`: `breach_discovered_at` (DateTime, nullable), `breach_occurred_at` (DateTime, nullable, for the actual incident date). Add to `Project`: `breach_discovered_at`, `breach_occurred_at` (inherited by runs). |
+| `alembic/versions/` | Migration adding date columns |
+| `app/api/routes/projects.py` | Accept `breach_discovered_at` and `breach_occurred_at` in project create/update |
+| `app/api/routes/jobs.py` | Accept `breach_discovered_at` in job submission |
+| `app/protocols/protocol.py` | Add `compute_deadline(discovery_date) → deadline_date` method. Add `days_remaining(discovery_date) → int` method. |
+| `tests/test_deadlines.py` | Test deadline computation for each protocol. Edge cases: GDPR 72 hours (not days), weekends, already-expired. |
+
+---
+
+#### 27b. Deadline Dashboard API & Frontend
+
+**Portfolio-level view of all active matters with deadline status.**
+
+| File | What to do |
+|---|---|
+| `app/api/routes/dashboard.py` | Add `GET /dashboard/deadlines` — returns all active projects with: project name, protocol, breach_discovered_at, deadline_date, days_remaining, status (on_track / at_risk / overdue), total_subjects, notification_progress (sent/total). |
+| `frontend/src/pages/Dashboard.tsx` | Add deadline widget: table of active matters sorted by urgency. Color coding: green (>14 days), amber (3-14 days), red (<3 days), black (overdue). Click → project detail. |
+| `frontend/src/components/DeadlineCountdown.tsx` | NEW — reusable countdown component. Shows "23 days remaining" or "OVERDUE by 4 days". Used in Dashboard and ProjectDetail. |
+| `frontend/src/pages/ProjectDetail.tsx` | Add deadline countdown at top of project view. Show breach date, deadline date, days remaining. |
+| `tests/test_dashboard_deadlines.py` | Test deadline API, sorting, status computation |
+
+---
+---
+
+## Phase 7 — Workflow Completeness
+
+**Goal:** Complete the auditor workflow loop. Phase 6 makes the tool deployable. Phase 7 makes it a complete product — evidence packaging, notification preview, iterative re-extraction, and manual entity management.
+
+---
+
+### Step 28 — Evidence Package Export
+
+**Goal:** One-click export of a complete evidence bundle: methodology report (PDF), notification list (XLSX), extraction audit trail, QC sampling results, and regulatory filing summary. This is what counsel attaches to the regulatory notification.
+
+---
+
+#### 28a. Methodology Report Generator
+
+| File | What to do |
+|---|---|
+| `app/export/methodology_report.py` | NEW — generates a PDF report containing: engagement summary (project name, protocol, date range), document inventory (files processed, pages, formats), extraction methodology (paths used: coordinate/vision/LLM/Presidio, per-document breakdown), verification results (audit status, field rates, static filter actions), deduplication summary (records before/after, merge criteria), QC sampling results (sample size, pass rate), notification summary (subjects found, notification required count). |
+| `app/export/evidence_bundle.py` | NEW — orchestrates: generate methodology PDF + notification list XLSX + audit trail CSV + QC sampling report → ZIP archive |
+| `app/api/routes/exports.py` | Add `POST /exports/{job_id}/evidence-bundle` — triggers bundle generation, returns download URL |
+| `frontend/src/pages/ProjectDetail.tsx` | Add "Export Evidence Bundle" button in the export section |
+| `tests/test_evidence_bundle.py` | Test bundle generation with mock data, verify all expected files present |
+
+---
+
+#### 28b. XLSX Export with Multiple Sheets
+
+| File | What to do |
+|---|---|
+| `app/export/xlsx_exporter.py` | NEW — multi-sheet XLSX: Sheet 1 "Notification List" (one row per subject), Sheet 2 "Extraction Detail" (one row per extracted value with source page), Sheet 3 "Document Inventory" (one row per file), Sheet 4 "Audit Trail" (decisions log). Use openpyxl. Auto-width columns, header formatting, freeze top row. |
+| `app/api/routes/exports.py` | Add `format` parameter to export endpoint: `csv` (existing) or `xlsx` (new) |
+| `tests/test_xlsx_export.py` | Test multi-sheet generation, column formatting, data integrity |
+
+---
+
+### Step 29 — Notification Preview & Batch Approval
+
+**Goal:** Before sending 10,000 notification letters, the auditor previews exactly what recipients will receive. Merge fields rendered with real subject data. Batch approval with final sign-off.
+
+---
+
+#### 29a. Notification Preview API
+
+| File | What to do |
+|---|---|
+| `app/api/routes/notifications.py` | NEW — `GET /notifications/{job_id}/preview/{subject_id}` renders the notification template with the subject's real data (masked for display). Returns HTML for email preview, PDF for letter preview. `GET /notifications/{job_id}/preview/sample` picks 3 random subjects and renders all 3. |
+| `app/notification/template_renderer.py` | NEW — takes template + subject data → rendered HTML/PDF. Reuse existing `print_renderer.py` for PDF path, existing templates for email. |
+| `tests/test_notification_preview.py` | Test template rendering with sample data, verify merge fields populated |
+
+---
+
+#### 29b. Batch Approval & Send
+
+| File | What to do |
+|---|---|
+| `app/api/routes/notifications.py` | `POST /notifications/{job_id}/approve` — APPROVER role required. Sets notification list status to approved. `POST /notifications/{job_id}/send` — triggers email delivery + print generation for approved subjects. |
+| `frontend/src/pages/ProjectDetail.tsx` | Add notification section: preview samples, approve batch, trigger send. Show send progress (sent/failed/total). |
+| `app/audit/audit_log.py` | Log notification approval and send events with user identity |
+| `tests/test_notification_batch.py` | Test approval flow, send triggering, audit logging |
+
+---
+
+### Step 30 — Per-Document Re-Extraction
+
+**Goal:** An auditor can re-run extraction on a single document without re-running the entire job. Supports the iterative workflow: extract → review → adjust field map → re-extract → review again.
+
+---
+
+#### 30a. Single Document Re-Extraction API
+
+| File | What to do |
+|---|---|
+| `app/api/routes/jobs.py` | Add `POST /jobs/{job_id}/extract/{doc_id}` — re-runs extraction for one document. Accepts optional field_map override. Returns SSE stream for that document only. |
+| `app/pipeline/two_phase.py` | Extract the per-document extraction logic into `_extract_single_document()`. Currently inlined in the per-doc loop of `run_extraction_background()`. Make it callable independently. |
+| `app/api/routes/analysis_review.py` | After field map update, offer "Re-extract with updated field map" action |
+| `frontend/src/pages/ProjectDetail.tsx` | Add "Re-extract" button per document. Show progress inline. Replace old results with new. |
+| `tests/test_reextraction.py` | Test single-doc re-extraction, field map override, result replacement |
+
+---
+
+### Step 31 — Manual Entity Merge/Split
+
+**Goal:** An auditor can manually link or unlink notification subjects. "John Smith" on page 4 and "J. Smith" on page 87 might be the same person — or might not. The auditor decides, and the decision is logged.
+
+---
+
+#### 31a. Manual Merge/Split API
+
+| File | What to do |
+|---|---|
+| `app/api/routes/subjects.py` | NEW — `POST /subjects/merge` (body: `{subject_ids: [id1, id2], rationale: "..."}`) — merges subjects into one, keeps the most complete record, logs decision. `POST /subjects/split` (body: `{subject_id: id, extraction_ids: [...], rationale: "..."}`) — splits one subject into two based on which extractions belong to which person. |
+| `app/rra/deduplicator.py` | Add `merge_subjects(ids, rationale, actor)` and `split_subject(id, extraction_groups, rationale, actor)` methods. Update PersonEntity links. |
+| `app/audit/audit_log.py` | Log merge/split events with before/after state |
+| `frontend/src/pages/SubjectDetail.tsx` | Add "Merge with..." (search for other subject, confirm) and "Split" (select which extractions to separate) UI |
+| `tests/test_manual_merge_split.py` | Test merge (2→1 subject, data preservation), split (1→2 subjects, extraction reassignment), audit trail |
+
+---
+---
+
+## Phase 8 — Scale & Polish
+
+**Goal:** Performance, multi-matter management, and quality-of-life improvements. Phase 6-7 make the tool deployable and complete. Phase 8 makes it efficient at scale.
+
+---
+
+### Step 32 — Orchestration & Parallel Processing
+
+**Goal:** Replace the monolithic generator in `two_phase.py` with proper Prefect orchestration. Enable parallel document extraction, per-document failure recovery, and job scheduling.
+
+| File | What to do |
+|---|---|
+| `app/pipeline/dag.py` | Implement `build_pipeline()` — wire actual Prefect tasks. Each document extraction is an independent Prefect task. Failures don't block other documents. |
+| `app/pipeline/two_phase.py` | Extract per-document extraction into standalone Prefect tasks. Keep SSE polling relay. |
+| `app/core/settings.py` | Add `max_parallel_extractions` (default 4), `extraction_timeout_minutes` (default 30) |
+| `tests/test_orchestration.py` | Test parallel extraction, failure isolation, timeout handling |
+
+---
+
+### Step 33 — Multi-Matter Portfolio Dashboard
+
+**Goal:** Firm-level view across all active breaches. "We have 6 active matters, 2 past deadline, 12,000 subjects total."
+
+| File | What to do |
+|---|---|
+| `app/api/routes/dashboard.py` | Add `GET /dashboard/portfolio` — aggregate stats across all active projects: total projects, total subjects, total notifications sent/pending, deadline status breakdown |
+| `frontend/src/pages/Dashboard.tsx` | Portfolio summary cards at top. Active matters list with status indicators. Charts: subjects by protocol, notification progress, timeline. |
+| `tests/test_portfolio.py` | Test aggregation across multiple projects |
+
+---
+
+### Step 34 — Per-Project False Positive Deny List
+
+**Goal:** Auditor says "ignore 'Washington' as PERSON in this project" and it persists across re-runs.
+
+| File | What to do |
+|---|---|
+| `app/db/models.py` | Add `ProjectDenyList` model: id, project_id, entity_type, value, reason, created_by, created_at |
+| `app/pii/presidio_engine.py` | Accept optional `deny_list` parameter. Before returning detections, filter out any that match the deny list. |
+| `app/api/routes/projects.py` | `GET/POST/DELETE /projects/{id}/deny-list` — CRUD for deny list entries |
+| `frontend/src/pages/ProjectDetail.tsx` | Add deny list management panel. "Add to deny list" action on any false positive in review. |
+| `tests/test_deny_list_project.py` | Test deny list CRUD, filtering, persistence across re-runs |
+
+---
+
+### Step 35 — PDF Report Export
+
+**Goal:** Export notification list and methodology as formatted PDF — not just CSV/XLSX. Required for regulatory filings.
+
+| File | What to do |
+|---|---|
+| `app/export/pdf_exporter.py` | NEW — uses WeasyPrint (already a dependency for print_renderer). Generates formatted PDF: cover page, table of contents, notification list table, methodology section, statistics charts. |
+| `app/api/routes/exports.py` | Add `format=pdf` option |
+| `tests/test_pdf_export.py` | Test PDF generation, verify page count, content presence |
