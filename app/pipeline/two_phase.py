@@ -642,6 +642,12 @@ def analyze_generator(
                         if not vision_fallback_model:
                             vision_fallback_model = PROTOCOL_LLM_CONFIG[base_key].get("vision_fallback_model")
 
+                # Final fallback to settings defaults
+                if not vision_model_override:
+                    vision_model_override = settings.ollama_vision_model
+                if not vision_fallback_model:
+                    vision_fallback_model = getattr(settings, "ollama_vision_fallback_model", None)
+
                 if vision_client.is_vision_available(model_override=vision_model_override):
                     router = VisionRouter(
                         vision_client,
