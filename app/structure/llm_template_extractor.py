@@ -39,6 +39,47 @@ from app.structure.document_schema import DocumentSchema
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
+# Inline PERSON name validation (shared logic with coordinate_extractor)
+# ---------------------------------------------------------------------------
+
+# Comprehensive blocklist — rejects header text, form labels, location words.
+# Imported from coordinate_extractor if available; otherwise inline subset.
+try:
+    from app.pipeline.coordinate_extractor import _NAME_BLOCKLIST
+except ImportError:
+    _NAME_BLOCKLIST: frozenset[str] = frozenset({  # type: ignore[no-redef]
+        "SUMMARY", "STATEMENT", "PAGE", "REPORT", "DOCUMENT", "INVOICE",
+        "TOTAL", "BALANCE", "ACCOUNT", "DATE", "DESCRIPTION", "FORM",
+        "PAYROLL", "MANAGEMENT", "SYSTEM", "COMPANY", "DEPARTMENT",
+    })
+
+
+def _is_likely_name(name: str) -> bool:
+    """Check if a string looks like a real person name.
+
+    Rejects header text, single words, digits, and blocklisted words.
+    """
+    if not name:
+        return False
+    t = name.strip()
+    if len(t) < 3 or len(t) > 80:
+        return False
+    if any(c.isdigit() for c in t):
+        return False
+    words = t.split()
+    if len(words) < 2:
+        return False
+    if not any(len(w) >= 3 for w in words):
+        return False
+    upper_words = [w.upper().rstrip(",.;:") for w in words]
+    if all(w in _NAME_BLOCKLIST for w in upper_words if len(w) >= 2):
+        return False
+    if upper_words and upper_words[0] in _NAME_BLOCKLIST:
+        return False
+    return True
+
+
+# ---------------------------------------------------------------------------
 # Retry / reliability constants
 # ---------------------------------------------------------------------------
 
@@ -499,8 +540,11 @@ class LLMTemplateExtractor:
                 if entity_type in _GOV_ID_TYPES:
                     government_id_type = entity_type
 
-        # Must have at least a name
+        # Must have at least a name, and it must look like a real person
         if not raw_name:
+            return None
+        if not _is_likely_name(raw_name):
+            logger.debug("LLM extraction rejected name '%s' (failed validation)", raw_name)
             return None
 
         # Build entity_types_found from actually-populated fields only

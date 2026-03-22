@@ -433,9 +433,9 @@ class TestExtractAllPages:
     def test_page_range_filter(self):
         """Only process specified pages."""
         pdf_path = self._create_test_pdf([
-            [("Client: Page1 Person", 50, 120)],
-            [("Client: Page2 Person", 50, 120)],
-            [("Client: Page3 Person", 50, 120)],
+            [("Client: Alice Brown", 50, 120)],
+            [("Client: Bob White", 50, 120)],
+            [("Client: Carol Davis", 50, 120)],
         ])
         try:
             field_map = [
@@ -450,7 +450,7 @@ class TestExtractAllPages:
     def test_out_of_range_page(self):
         """Out-of-range page number should be in failed_pages."""
         pdf_path = self._create_test_pdf([
-            [("Client: Someone", 50, 120)],
+            [("Client: Jane Doe", 50, 120)],
         ])
         try:
             field_map = [
@@ -1347,18 +1347,27 @@ class TestValidateFieldMap:
 class TestSchemaDowngradePrevention:
     """Tests that existing 'fixed' layout isn't overwritten by 'variable'."""
 
-    def test_bad_names_set_completeness(self):
-        """_FIELD_MAP_BAD_NAMES includes common header words."""
-        from app.pipeline.two_phase import _FIELD_MAP_BAD_NAMES
-        assert "summary" in _FIELD_MAP_BAD_NAMES
-        assert "statement" in _FIELD_MAP_BAD_NAMES
-        assert "page" in _FIELD_MAP_BAD_NAMES
-        assert "report" in _FIELD_MAP_BAD_NAMES
-        assert "invoice" in _FIELD_MAP_BAD_NAMES
+    def test_is_likely_name_rejects_header_words(self):
+        """_is_likely_name rejects header text and boilerplate."""
+        from app.pipeline.two_phase import _is_likely_name
+        # Single words always rejected (need first+last)
+        assert not _is_likely_name("Summary")
+        assert not _is_likely_name("Statement")
+        assert not _is_likely_name("Page")
+        # Two-word header phrases with blocklisted first word
+        assert not _is_likely_name("Summary Statement")
+        assert not _is_likely_name("Page Report")
+        assert not _is_likely_name("Total Balance")
+        # Digits in name rejected
+        assert not _is_likely_name("Page1 Person")
+        # Real names should pass
+        assert _is_likely_name("John Smith")
+        assert _is_likely_name("ADELINE CHANDLER")
+        assert _is_likely_name("Alice Brown")
 
-    def test_validate_field_map_rejects_known_bad_name(self):
-        """Directly test that known-bad names are rejected."""
-        from app.pipeline.two_phase import _FIELD_MAP_BAD_NAMES
-        # All these should be rejected if extracted as PERSON
-        for bad_name in ["summary", "statement", "page", "report", "invoice"]:
-            assert bad_name in _FIELD_MAP_BAD_NAMES
+    def test_is_likely_name_used_by_validate_field_map(self):
+        """_validate_field_map uses _is_likely_name for validation."""
+        from app.pipeline.two_phase import _is_likely_name
+        # Header text that previously needed _FIELD_MAP_BAD_NAMES
+        for bad_name in ["Summary Statement", "Page Report", "Invoice Date"]:
+            assert not _is_likely_name(bad_name)

@@ -299,17 +299,22 @@ class TestBuildOneField:
         assert fm.spatial_relationship == "same_line_right"
         assert fm.sample_bbox  # non-empty
 
-    def test_no_label_skipped(self):
-        """No label in vision result → field skipped."""
+    def test_no_label_finds_nearby_anchor(self):
+        """No label in vision result → nearby anchor discovered for PERSON."""
         pii = {"type": "PERSON", "value": "ADELINE CHANDLER", "label": ""}
         fm = self.builder._build_one_field(pii, SAMPLE_WORDS)
-        assert fm is None
+        # _find_nearby_anchor_for_value discovers "Client" to the left
+        assert fm is not None
+        assert fm.anchor_text == "Client"
+        assert fm.spatial_relationship == "same_line_right"
 
-    def test_label_not_found_skipped(self):
-        """Label text not in page words → field skipped."""
+    def test_label_not_found_finds_nearby_anchor(self):
+        """Label text not in page words → nearby anchor discovered for PERSON."""
         pii = {"type": "PERSON", "value": "ADELINE", "label": "Recipient:"}
         fm = self.builder._build_one_field(pii, SAMPLE_WORDS)
-        assert fm is None
+        # "Recipient:" not found, but _find_nearby_anchor_for_value discovers "Client"
+        assert fm is not None
+        assert fm.anchor_text == "Client"
 
     def test_value_not_found_skipped(self):
         """Value text not in page words → field skipped."""
@@ -595,3 +600,72 @@ class TestPickNearest:
         label = (36, 74, 62, 81)
         result = _pick_nearest([m1, m2], label)
         assert result == m1  # x=100 is closer to x=36 than x=400
+
+
+# ---------------------------------------------------------------------------
+# Test: _derotate_words
+# ---------------------------------------------------------------------------
+
+class TestDerotateWords:
+    """Tests for coordinate derotation on rotated pages."""
+
+    def test_rotation_0_unchanged(self):
+        """Rotation=0 → words returned unchanged."""
+        from app.pipeline.field_map_builder import _derotate_words
+        words = [_w(50, 100, 90, 115, "Hello")]
+        result = _derotate_words(words, 0, 792, 612)
+        assert result[0][0] == 50  # x0 unchanged
+        assert result[0][1] == 100  # y0 unchanged
+
+    def test_rotation_270_swaps_axes(self):
+        """Rotation=270: same x-band in raw → same y-band after derotation."""
+        from app.pipeline.field_map_builder import _derotate_words
+        # Simulate 270° layout: "Client:" and "ADELINE" at same x (~530), different y
+        raw_words = [
+            _w(530, 36, 539, 62, "Client:"),   # x-band=530-539
+            _w(530, 100, 539, 126, "ADELINE"),  # same x-band, different y
+            _w(539, 66, 548, 92, "JANUARY"),    # different x-band
+        ]
+        derotated = _derotate_words(raw_words, 270, 792, 612)
+
+        # After derotation: Client and ADELINE should have same y-band
+        client_cy = (derotated[0][1] + derotated[0][3]) / 2
+        adeline_cy = (derotated[1][1] + derotated[1][3]) / 2
+        january_cy = (derotated[2][1] + derotated[2][3]) / 2
+
+        assert abs(client_cy - adeline_cy) < 1.0, "Client and ADELINE should be on same line"
+        assert abs(january_cy - client_cy) > 5.0, "JANUARY should be on different line"
+
+    def test_rotation_270_reading_order(self):
+        """Rotation=270: increasing y in raw → increasing x after derotation (left to right)."""
+        from app.pipeline.field_map_builder import _derotate_words
+        raw_words = [
+            _w(530, 36, 539, 62, "Client:"),
+            _w(530, 100, 539, 126, "ADELINE"),
+        ]
+        derotated = _derotate_words(raw_words, 270, 792, 612)
+
+        # ADELINE (raw y=100) should be to the RIGHT of Client: (raw y=36) after derotation
+        assert derotated[1][0] > derotated[0][0], "ADELINE should be to the right of Client"
+
+    def test_rotation_90(self):
+        """Rotation=90: basic coordinate transform."""
+        from app.pipeline.field_map_builder import _derotate_words
+        words = [_w(100, 200, 120, 230, "Test")]
+        result = _derotate_words(words, 90, 792, 612)
+        # For 90°: new_x = page_height - y1, new_y = x0
+        assert result[0][0] == 612 - 230  # = 382
+        assert result[0][2] == 612 - 200  # = 412
+        assert result[0][1] == 100
+        assert result[0][3] == 120
+
+    def test_rotation_180(self):
+        """Rotation=180: basic coordinate transform."""
+        from app.pipeline.field_map_builder import _derotate_words
+        words = [_w(100, 200, 150, 220, "Test")]
+        result = _derotate_words(words, 180, 792, 612)
+        # For 180°: new_x = page_width - x1, new_y = page_height - y1
+        assert result[0][0] == 792 - 150  # = 642
+        assert result[0][2] == 792 - 100  # = 692
+        assert result[0][1] == 612 - 220  # = 392
+        assert result[0][3] == 612 - 200  # = 412

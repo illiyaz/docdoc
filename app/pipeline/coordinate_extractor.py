@@ -153,6 +153,8 @@ _NAME_BLOCKLIST: frozenset[str] = frozenset({
     "TAX", "INSURANCE", "BENEFIT", "PLAN", "COVERAGE", "PREMIUM", "INFORMATION",
     "DESCRIPTION", "SCHEDULE", "RECORD", "DETAIL", "DETAILS", "VERIFICATION",
     "IDENTIFICATION", "AUTHORIZATION", "DOCUMENT", "PROVIDER",
+    # Document/form types (previously in _FIELD_MAP_BAD_NAMES)
+    "INVOICE", "RECEIPT", "BILL", "NOTICE", "CERTIFICATE", "EXHIBIT",
     # Financial terms
     "INCOME", "COLLECTIONS", "ATTN", "OFFER", "FOLLOWING", "START", "MONTH",
     "DEFAULT", "ORIGINAL", "CORRECTED", "AMENDED", "VOID", "BREAKAGE", "FAST",
@@ -188,6 +190,41 @@ _NAME_BLOCKLIST: frozenset[str] = frozenset({
 })
 
 _SUFFIX_WORDS = frozenset({"JR", "SR", "II", "III", "IV", "V", "VI", "VII", "VIII", "ESQ", "MD", "PHD", "DDS"})
+
+
+def _is_likely_name(name: str) -> bool:
+    """Check if a string looks like a real person name (not header/boilerplate).
+
+    Validates against the comprehensive _NAME_BLOCKLIST.  Rejects:
+    - Too short (<3 chars) or too long (>80 chars)
+    - Contains digits
+    - Single-word "names"
+    - All significant words are in blocklist
+    - First word (likely surname) is a blocklisted word
+
+    Proven on 34+ document types.  Used by both coordinate_extractor
+    (inline) and two_phase.py (post-extraction).
+    """
+    if not name:
+        return False
+    t = name.strip()
+    if len(t) < 3 or len(t) > 80:
+        return False
+    if any(c.isdigit() for c in t):
+        return False
+    words = t.split()
+    if len(words) < 2:
+        return False
+    if not any(len(w) >= 3 for w in words):
+        return False
+    upper_words = [w.upper().rstrip(",.;:") for w in words]
+    # All significant words in blocklist → not a name
+    if all(w in _NAME_BLOCKLIST for w in upper_words if len(w) >= 2):
+        return False
+    # First word is blocklisted → likely a label/header
+    if upper_words and upper_words[0] in _NAME_BLOCKLIST:
+        return False
+    return True
 
 
 def _analyze_name_structure(name: str) -> tuple[str, ...]:
@@ -406,11 +443,12 @@ class CoordinateExtractor:
 
             page = doc[page_num]
             words = page.get_text("words")
-            # PyMuPDF's get_text("words") returns coordinates in the
-            # derotated visual space (matching page.rect).  page.rotation
-            # reports the raw PDF /Rotate value, but coordinates are already
-            # transformed — so always use rotation=0 for region computation.
-            rotation = 0
+            # Use page.rotation for region computation.  PyMuPDF does NOT
+            # always derotate word coordinates — some PDFs (especially those
+            # with /Rotate 90/270) return raw coordinates where same visual
+            # line = same x-band.  The rotation-aware _compute_region,
+            # _find_anchor, and _words_to_text handle this correctly.
+            rotation = page.rotation
 
             # Collect fields into a dict, then construct frozen PIIRecord
             fields: dict[str, str | dict] = {}
@@ -475,6 +513,15 @@ class CoordinateExtractor:
                     entity_types_found.append("LOCATION")
 
             raw_name = fields.get("raw_name")
+            # Inline name validation: reject header text, single words,
+            # digits, and blocklisted words before creating a record.
+            if raw_name and isinstance(raw_name, str) and not _is_likely_name(raw_name):
+                logger.debug(
+                    "Name validation rejected '%s' on page %d", raw_name, page_num,
+                )
+                raw_name = None
+                success = False
+
             if success and raw_name and isinstance(raw_name, str):
                 rec = PIIRecord(
                     record_id=str(uuid4()),

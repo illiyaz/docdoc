@@ -971,8 +971,7 @@ def analyze_generator(
                 # Validate preview quality — reject garbage extractions
                 preview_valid = True
                 if sample_records and sample_records[0].raw_name:
-                    pv_name = sample_records[0].raw_name.lower().strip()
-                    if pv_name in _FIELD_MAP_BAD_NAMES or len(pv_name.split()) < 2:
+                    if not _is_likely_name(sample_records[0].raw_name):
                         logger.warning(
                             "Coordinate preview for %s extracted bad name '%s', field map may be wrong",
                             doc.file_name, sample_records[0].raw_name,
@@ -1485,21 +1484,51 @@ def _update_extraction_progress(
     db.commit()
 
 
-# Known-bad names that indicate field map is extracting from headers/boilerplate
-_FIELD_MAP_BAD_NAMES = frozenset({
-    "summary", "statement", "page", "report", "document",
-    "invoice", "receipt", "form", "bill", "notice",
-    "certificate", "record", "schedule", "exhibit",
-    "total", "balance", "account", "date", "description",
-})
+def _is_likely_name(name: str) -> bool:
+    """Check if a string looks like a real person name (not header/boilerplate).
+
+    Ported from standalone scripts' is_likely_name() — proven on 34 documents.
+    Uses the comprehensive _NAME_BLOCKLIST from coordinate_extractor.
+    """
+    if not name:
+        return False
+    t = name.strip()
+    if len(t) < 3 or len(t) > 80:
+        return False
+    # Digits in names = not a person
+    if any(c.isdigit() for c in t):
+        return False
+    words = t.split()
+    # At least 2 words (first + last name)
+    if len(words) < 2:
+        return False
+    # At least one word has 3+ chars
+    if not any(len(w) >= 3 for w in words):
+        return False
+    # Check against the comprehensive blocklist
+    try:
+        from app.pipeline.coordinate_extractor import _NAME_BLOCKLIST
+    except ImportError:
+        _NAME_BLOCKLIST = frozenset()  # type: ignore[assignment]
+    upper_words = [w.upper().rstrip(",.;:") for w in words]
+    # If ALL words are in the blocklist, reject
+    if all(w in _NAME_BLOCKLIST for w in upper_words if len(w) >= 2):
+        return False
+    # If the first word (likely surname) is in blocklist, reject
+    if upper_words and upper_words[0] in _NAME_BLOCKLIST:
+        return False
+    return True
 
 
 def _validate_field_map(field_map: list, doc_path: str) -> bool:
-    """Validate field map quality before coordinate extraction.
+    """Validate field map quality by sampling up to 3 pages.
 
-    Quick check: extract from page 0.  If the PERSON field produces a
-    known-bad value (header text, boilerplate) or is empty, reject the
-    field map so extraction falls through to Vision / LLM paths.
+    Extracts from pages [0, mid, near_end] and checks that at least
+    2 of 3 produce valid PERSON names.  Uses the full blocklist and
+    ``_is_likely_name()`` for robust validation.
+
+    Rejects field maps that produce garbage (header text, boilerplate,
+    single-word names, digits) before they're applied to the entire document.
     """
     if not field_map:
         return False
@@ -1517,33 +1546,45 @@ def _validate_field_map(field_map: list, doc_path: str) -> bool:
     if not has_person:
         return False
 
-    # Quick test: extract from page 0
     try:
+        import fitz
         from app.pipeline.coordinate_extractor import CoordinateExtractor
 
+        pdf_doc = fitz.open(doc_path)
+        page_count = pdf_doc.page_count
+        pdf_doc.close()
+
+        # Sample up to 3 pages: first, middle, near-end
+        sample_pages = [0]
+        if page_count > 2:
+            sample_pages.append(page_count // 2)
+        if page_count > 5:
+            sample_pages.append(page_count - 2)
+
         extractor = CoordinateExtractor(field_map, doc_path, "validation")
-        records, _failed = extractor.extract_all_pages(page_range=[0])
+        records, _failed = extractor.extract_all_pages(page_range=sample_pages)
 
         if not records:
+            logger.warning("Field map validation: 0 records from %d sample pages", len(sample_pages))
             return False
 
-        name = records[0].raw_name
-        if not name:
-            return False
+        # Count how many sample pages produced valid names
+        valid_count = 0
+        for rec in records:
+            if rec.raw_name and _is_likely_name(rec.raw_name):
+                valid_count += 1
+            elif rec.raw_name:
+                logger.debug(
+                    "Field map validation: rejected name '%s' on page %s",
+                    rec.raw_name, rec.page_range,
+                )
 
-        # Reject known-bad names (page headers, document titles)
-        if name.lower().strip() in _FIELD_MAP_BAD_NAMES:
+        # Need at least 2 valid names, or all if only 1-2 pages
+        min_required = min(2, len(sample_pages))
+        if valid_count < min_required:
             logger.warning(
-                "Field map validation failed: PERSON extracted '%s' (likely header text)",
-                name,
-            )
-            return False
-
-        # Reject single-word names (likely boilerplate)
-        if len(name.strip().split()) < 2:
-            logger.warning(
-                "Field map validation failed: PERSON '%s' is single word",
-                name,
+                "Field map validation failed: only %d/%d sample pages produced valid names",
+                valid_count, len(sample_pages),
             )
             return False
 
@@ -1950,14 +1991,15 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                                     # Null out static values on the actual PIIRecord objects
                                     _static_set = {(ft, v) for ft, vals in removed_static.items() for v in vals}
                                     for rec in coord_records:
+                                        # PIIRecord is frozen — use object.__setattr__
                                         if rec.raw_name and ("PERSON", rec.raw_name) in _static_set:
-                                            rec.raw_name = None
+                                            object.__setattr__(rec, "raw_name", None)
                                         if rec.raw_dob and ("DATE_OF_BIRTH", rec.raw_dob) in _static_set:
-                                            rec.raw_dob = None
+                                            object.__setattr__(rec, "raw_dob", None)
                                         if rec.raw_phone and ("PHONE_NUMBER", rec.raw_phone) in _static_set:
-                                            rec.raw_phone = None
+                                            object.__setattr__(rec, "raw_phone", None)
                                         if rec.raw_email and ("EMAIL_ADDRESS", rec.raw_email) in _static_set:
-                                            rec.raw_email = None
+                                            object.__setattr__(rec, "raw_email", None)
                                     # Remove records that lost their PERSON (header-only records)
                                     if "PERSON" in removed_static:
                                         before = len(coord_records)
@@ -2086,11 +2128,13 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                                 all_page_nums = sorted(doc_pages)
                                 records = vision_ext.extract_table_pages(
                                     doc.source_path, all_page_nums, str(doc.id), schema,
+                                    progress_callback=_heartbeat_cb,
                                 )
                             else:
                                 all_page_nums = sorted(doc_pages)
                                 records = vision_ext.extract_pages(
                                     doc.source_path, all_page_nums, str(doc.id), schema,
+                                    progress_callback=_heartbeat_cb,
                                 )
                             if records:
                                 extraction_path = "1"
@@ -2163,6 +2207,67 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                         records = [detection_to_pii_record(det, str(doc.id)) for det in detections]
                     extraction_path = "3"
                     logger.info("Path 3 (Presidio) for %s: %d records", doc.file_name, len(records))
+
+                # --- Static filter for non-coordinate paths ---
+                # Path 0 has its own static filter; apply to Paths 1/2/3 here.
+                if extraction_path != "0-coord" and records and len(records) >= 5:
+                    try:
+                        from app.pipeline.static_filter import filter_static_values
+
+                        page_recs_sf_all: dict[int, list[dict]] = {}
+                        for rec in records:
+                            pg = int(rec.page_range) - 1 if rec.page_range and rec.page_range.isdigit() else 0
+                            rec_dict: dict[str, str] = {}
+                            if rec.raw_name: rec_dict["PERSON"] = rec.raw_name
+                            if rec.raw_government_id: rec_dict["US_SSN"] = rec.raw_government_id
+                            if rec.raw_dob: rec_dict["DATE_OF_BIRTH"] = rec.raw_dob
+                            if rec.raw_email: rec_dict["EMAIL_ADDRESS"] = rec.raw_email
+                            if rec.raw_phone: rec_dict["PHONE_NUMBER"] = rec.raw_phone
+                            if rec_dict:
+                                page_recs_sf_all.setdefault(pg, []).append(rec_dict)
+
+                        _cleaned_sf, removed_static_all = filter_static_values(page_recs_sf_all)
+                        if removed_static_all:
+                            logger.info("Static filter (Path %s) removed: %s", extraction_path, removed_static_all)
+                            _static_set_all = {(ft, v) for ft, vals in removed_static_all.items() for v in vals}
+                            for rec in records:
+                                if rec.raw_name and ("PERSON", rec.raw_name) in _static_set_all:
+                                    object.__setattr__(rec, "raw_name", None)
+                                if rec.raw_dob and ("DATE_OF_BIRTH", rec.raw_dob) in _static_set_all:
+                                    object.__setattr__(rec, "raw_dob", None)
+                                if rec.raw_phone and ("PHONE_NUMBER", rec.raw_phone) in _static_set_all:
+                                    object.__setattr__(rec, "raw_phone", None)
+                                if rec.raw_email and ("EMAIL_ADDRESS", rec.raw_email) in _static_set_all:
+                                    object.__setattr__(rec, "raw_email", None)
+                            # Remove records that lost their PERSON
+                            if "PERSON" in removed_static_all:
+                                before_sf = len(records)
+                                records = [r for r in records if r.raw_name or r.raw_government_id]
+                                if len(records) < before_sf:
+                                    logger.info("Static PERSON filter (Path %s): %d → %d records", extraction_path, before_sf, len(records))
+                    except Exception:
+                        logger.warning("Static filter failed for Path %s", extraction_path, exc_info=True)
+
+                # --- Inline PERSON validation for all paths ---
+                if records:
+                    before_name_val = len(records)
+                    valid_records = []
+                    for rec in records:
+                        if rec.raw_name and not _is_likely_name(rec.raw_name):
+                            # Null out the bad name but keep record if it has gov ID
+                            if rec.raw_government_id:
+                                object.__setattr__(rec, "raw_name", None)
+                                object.__setattr__(rec, "normalized_value", rec.raw_government_id)
+                                valid_records.append(rec)
+                            # else: drop the record entirely
+                        else:
+                            valid_records.append(rec)
+                    records = valid_records
+                    if len(records) < before_name_val:
+                        logger.info(
+                            "Inline PERSON validation: %d → %d records for %s",
+                            before_name_val, len(records), doc.file_name,
+                        )
 
                 # --- Persist records immediately (before validation) ---
                 all_records.extend(records)
@@ -2366,7 +2471,6 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                     "heartbeat": datetime.now(timezone.utc).isoformat(),
                 }
                 run.metrics = metrics
-                from sqlalchemy.orm.attributes import flag_modified
                 flag_modified(run, "metrics")
                 db.commit()
             except Exception:

@@ -30,6 +30,7 @@ from app.structure.llm_template_extractor import (
     _FIELD_TO_RAW,
     _GOV_ID_TYPES,
     _deduplicate_records,
+    _is_likely_name,
     _parse_json,
 )
 
@@ -136,6 +137,8 @@ class VisionDocumentExtractor:
         page_numbers: list[int],
         doc_id: str,
         schema: DocumentSchema | None = None,
+        *,
+        progress_callback: "Callable[[int, int, int], None] | None" = None,
     ) -> list[PIIRecord]:
         """Extract PII from individual pages using vision.
 
@@ -177,6 +180,16 @@ class VisionDocumentExtractor:
                 )
                 continue
 
+            if progress_callback is not None:
+                try:
+                    progress_callback(
+                        page_numbers.index(page_num) + 1,
+                        len(page_numbers),
+                        len(all_records),
+                    )
+                except Exception:
+                    pass
+
         return _deduplicate_records(all_records, instance_aware=False)
 
     # ------------------------------------------------------------------
@@ -189,6 +202,8 @@ class VisionDocumentExtractor:
         page_numbers: list[int],
         doc_id: str,
         schema: DocumentSchema | None = None,
+        *,
+        progress_callback: "Callable[[int, int, int], None] | None" = None,
     ) -> list[PIIRecord]:
         """Extract multiple individuals from tabular pages using vision.
 
@@ -229,6 +244,16 @@ class VisionDocumentExtractor:
                     page_num, doc_id, exc_info=True,
                 )
                 continue
+
+            if progress_callback is not None:
+                try:
+                    progress_callback(
+                        page_numbers.index(page_num) + 1,
+                        len(page_numbers),
+                        len(all_records),
+                    )
+                except Exception:
+                    pass
 
         return _deduplicate_records(all_records, instance_aware=False)
 
@@ -470,6 +495,10 @@ class VisionDocumentExtractor:
                     government_id_type = entity_type
 
         if not raw_name:
+            return None
+
+        if not _is_likely_name(raw_name):
+            logger.debug("Vision extraction rejected name '%s' (failed validation)", raw_name)
             return None
 
         # Build entity_types_found from actually-populated fields only

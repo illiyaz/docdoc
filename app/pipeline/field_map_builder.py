@@ -25,6 +25,54 @@ logger = logging.getLogger(__name__)
 _LINE_TOLERANCE = 8
 
 
+def _derotate_words(
+    words: list[tuple],
+    rotation: int,
+    page_width: float,
+    page_height: float,
+) -> list[tuple]:
+    """Transform word coordinates from raw PDF space to visual (rotation=0) space.
+
+    PyMuPDF sometimes returns raw coordinates without applying the page /Rotate
+    transform.  This function maps them to a standard coordinate system where
+    x increases left-to-right and y increases top-to-bottom.
+
+    For rotation=0 the words are returned unchanged.
+    """
+    if rotation == 0:
+        return words
+
+    derotated: list[tuple] = []
+    for w in words:
+        x0, y0, x1, y1, text = w[0], w[1], w[2], w[3], w[4]
+        rest = w[5:]
+
+        if rotation == 270:
+            # Visual: left→right = +y, top→bottom = -x (high x = top)
+            nx0 = y0
+            ny0 = page_width - x1
+            nx1 = y1
+            ny1 = page_width - x0
+        elif rotation == 90:
+            # Visual: left→right = -y, top→bottom = +x
+            nx0 = page_height - y1
+            ny0 = x0
+            nx1 = page_height - y0
+            ny1 = x1
+        elif rotation == 180:
+            # Visual: left→right = -x, top→bottom = -y
+            nx0 = page_width - x1
+            ny0 = page_height - y1
+            nx1 = page_width - x0
+            ny1 = page_height - y0
+        else:
+            nx0, ny0, nx1, ny1 = x0, y0, x1, y1
+
+        derotated.append((nx0, ny0, nx1, ny1, text) + rest)
+
+    return derotated
+
+
 class FieldMapBuilder:
     """Build coordinate-based FieldMappings from vision PII + PyMuPDF words."""
 
@@ -52,9 +100,21 @@ class FieldMapBuilder:
                 )
                 return []
             page = doc[page_num]
-            words = page.get_text("words")
+            raw_words = page.get_text("words")
+            rotation = page.rotation
+            page_w = page.rect.width
+            page_h = page.rect.height
         finally:
             doc.close()
+
+        # Derotate word coordinates so all spatial logic uses standard axes
+        # (x = left→right, y = top→bottom).  PyMuPDF does not always derotate.
+        words = _derotate_words(raw_words, rotation, page_w, page_h)
+        if rotation:
+            logger.info(
+                "FieldMapBuilder: page %d has rotation=%d, derotated %d words",
+                page_num, rotation, len(words),
+            )
 
         # PyMuPDF words: (x0, y0, x1, y1, text, block_no, line_no, word_no)
         field_maps: list[FieldMapping] = []

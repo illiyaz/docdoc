@@ -81,12 +81,15 @@ def _make_tabular_schema(
     )
 
 
+_SAMPLE_NAMES = ["Alice Brown", "Bob White", "Carol Davis", "Dan Evans", "Eve Fox"]
+
+
 def _make_llm_table_response(count: int = 5) -> str:
     """Build a JSON array response with N individuals."""
     records = []
     for i in range(count):
         records.append({
-            "PERSON": f"Student {i+1}",
+            "PERSON": _SAMPLE_NAMES[i % len(_SAMPLE_NAMES)],
             "LOCATION": f"{100+i} Main St, Springfield",
             "DATE_OF_BIRTH": f"0{i+1}/15/2005",
             "US_SSN": f"123-45-{6780+i}",
@@ -190,8 +193,8 @@ class TestVisionTableExtraction:
         )
 
         assert len(records) == 5
-        assert records[0].raw_name == "Student 1"
-        assert records[4].raw_name == "Student 5"
+        assert records[0].raw_name == "Alice Brown"
+        assert records[4].raw_name == "Eve Fox"
 
     @patch("app.structure.vision_extractor.render_page_to_image")
     def test_multi_page_table(self, mock_render):
@@ -280,18 +283,22 @@ class TestTextTableExtraction:
         records = ext.extract_table_pages(schema, page_texts, "doc-1")
 
         assert len(records) == 4
-        assert records[0].raw_name == "Student 1"
+        assert records[0].raw_name == "Alice Brown"
 
     def test_text_table_multi_page(self):
         mock_client = MagicMock()
         # Return unique names per call to avoid dedup
+        _batch_names = [
+            [("Alice Brown", "01/01/2000"), ("Bob White", "02/02/2001")],
+            [("Carol Davis", "03/03/2002"), ("Dan Evans", "04/04/2003")],
+        ]
         call_count = [0]
         def side_effect(*args, **kwargs):
+            idx = min(call_count[0], len(_batch_names) - 1)
             call_count[0] += 1
-            batch = call_count[0]
+            names = _batch_names[idx]
             return json.dumps([
-                {"PERSON": f"Person {batch}A", "DATE_OF_BIRTH": "01/01/2000"},
-                {"PERSON": f"Person {batch}B", "DATE_OF_BIRTH": "02/02/2001"},
+                {"PERSON": n, "DATE_OF_BIRTH": d} for n, d in names
             ])
         mock_client.generate.side_effect = side_effect
 

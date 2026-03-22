@@ -330,9 +330,9 @@ class TestExtractAllInstances:
         client = MagicMock()
         # Return a JSON array for the batch
         client.generate.return_value = json.dumps([
-            {"PERSON": "Alice", "NI_NUMBER": "AA111111A"},
-            {"PERSON": "Bob", "NI_NUMBER": "BB222222B"},
-            {"PERSON": "Charlie", "NI_NUMBER": "CC333333C"},
+            {"PERSON": "Alice Brown", "NI_NUMBER": "AA111111A"},
+            {"PERSON": "Bob White", "NI_NUMBER": "BB222222B"},
+            {"PERSON": "Charlie Davis", "NI_NUMBER": "CC333333C"},
         ])
 
         extractor = LLMTemplateExtractor(client, batch_size=3)
@@ -340,9 +340,9 @@ class TestExtractAllInstances:
 
         records = extractor.extract_all_instances(schema, page_texts, "doc-batch", total_pages=9)
         assert len(records) == 3
-        assert records[0].raw_name == "Alice"
-        assert records[1].raw_name == "Bob"
-        assert records[2].raw_name == "Charlie"
+        assert records[0].raw_name == "Alice Brown"
+        assert records[1].raw_name == "Bob White"
+        assert records[2].raw_name == "Charlie Davis"
         # Single LLM call for all 3
         assert client.generate.call_count == 1
 
