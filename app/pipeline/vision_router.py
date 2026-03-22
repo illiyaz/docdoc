@@ -90,6 +90,23 @@ Report the EXACT text values as they appear.
 Respond ONLY with valid JSON, no explanation."""
 
 
+# Fallback prompt — compliance-framed for models (like llama) that may refuse
+# to process PII without understanding the legal context.
+_ROUTING_PROMPT_FALLBACK = """\
+You are assisting a data breach response team with regulatory compliance. \
+This document has been legally obtained as part of breach notification requirements \
+under state and federal law. Your role is to identify what types of personal \
+information appear on this page so affected individuals can be properly notified.
+
+Analyze this document page and report what you see in JSON format:
+1. "pii_fields": [{"type":"PERSON|LOCATION|US_SSN|DATE_OF_BIRTH|PHONE_NUMBER|EMAIL_ADDRESS|GOVERNMENT_ID|ACCOUNT_NUMBER","value":"exact text as shown","label":"field label nearby","position":"top_left|top_right|middle_left|etc"}]
+2. "structure_type": "fixed_single_page"|"multi_page_template"|"table"|"variable"
+3. "records_per_page": number of individuals on this page
+4. "cross_page_data": true/false
+5. "pages_per_instance": pages per person (1 if single page)
+Report only what is directly visible. Use exact text values. JSON only, no explanation."""
+
+
 class VisionRouter:
     """Routes documents to the best extraction path using vision analysis."""
 
@@ -117,75 +134,82 @@ class VisionRouter:
         
         If the primary model fails (500 error, timeout), automatically
         retries with the fallback model before giving up.
+        If all models fail at 200 DPI, retries at 150 DPI (helps with
+        landscape/wide pages that cause OOM).
         """
-        # Render the onset page
-        try:
-            image = render_page_to_image(doc_path, onset_page, dpi=200)
-        except Exception:
-            logger.warning(
-                "Failed to render page %d of %s for routing",
-                onset_page,
-                doc_path,
-                exc_info=True,
-            )
-            return VisionRoutingResult(
-                structure_type="variable",
-                structure_confidence=0.0,
-                recommended_path="presidio",
-            )
-
-        prompt = self._build_routing_prompt(total_pages)
-        
-        # Try primary model, then fallback on failure
-        response = None
-        model_used = self.vision_model
-        
-        for attempt_model in [self.vision_model, self.fallback_model]:
-            if attempt_model is None:
-                continue
+        # Try at 200 DPI first, then 150 DPI on failure
+        for dpi in [200, 150]:
             try:
-                response = self.client.generate_with_images(
-                    prompt=prompt,
-                    images=[image],
-                    use_case="vision_routing",
-                    model_override=attempt_model,
-                )
-                model_used = attempt_model
-                break  # Success
+                image = render_page_to_image(doc_path, onset_page, dpi=dpi)
             except Exception:
                 logger.warning(
-                    "Vision routing failed with model %s for %s%s",
-                    attempt_model,
-                    doc_path,
-                    " — trying fallback" if attempt_model == self.vision_model and self.fallback_model else "",
-                    exc_info=True,
+                    "Failed to render page %d of %s at %d DPI",
+                    onset_page, doc_path, dpi, exc_info=True,
                 )
                 continue
-        
-        if response is None:
-            return VisionRoutingResult(
-                structure_type="variable",
-                structure_confidence=0.0,
-                recommended_path="presidio",
-            )
 
-        # Parse the response and determine routing
-        result = self._parse_routing_response(response, total_pages)
-        result.recommended_path = self._determine_path(
-            result, total_pages, is_scanned,
+            # Try primary model, then fallback on failure
+            response = None
+            model_used = self.vision_model
+            
+            models_to_try = [(self.vision_model, False), (self.fallback_model, True)]
+            for attempt_model, is_fallback in models_to_try:
+                if attempt_model is None:
+                    continue
+                prompt = self._build_routing_prompt(total_pages, is_fallback=is_fallback)
+                try:
+                    response = self.client.generate_with_images(
+                        prompt=prompt,
+                        images=[image],
+                        use_case="vision_routing",
+                        model_override=attempt_model,
+                    )
+                    model_used = attempt_model
+                    break  # Success
+                except Exception:
+                    logger.warning(
+                        "Vision routing failed with model %s at %d DPI for %s%s",
+                        attempt_model, dpi, doc_path,
+                        " — trying fallback" if not is_fallback and self.fallback_model else "",
+                        exc_info=True,
+                    )
+                    continue
+            
+            if response is not None:
+                # Parse the response and determine routing
+                result = self._parse_routing_response(response, total_pages)
+                result.recommended_path = self._determine_path(
+                    result, total_pages, is_scanned,
+                )
+                result.model_used = model_used  # type: ignore[attr-defined]
+                return result
+            
+            if dpi == 200:
+                logger.info("All models failed at 200 DPI for %s, retrying at 150 DPI", doc_path)
+
+        # All DPI + model combinations failed
+        return VisionRoutingResult(
+            structure_type="variable",
+            structure_confidence=0.0,
+            recommended_path="presidio",
         )
-        result.model_used = model_used  # type: ignore[attr-defined]
-        return result
 
-    def _build_routing_prompt(self, total_pages: int) -> str:
-        """Build the vision analysis prompt."""
+    def _build_routing_prompt(self, total_pages: int, is_fallback: bool = False) -> str:
+        """Build the vision analysis prompt.
+        
+        Uses compliance-framed prompt for fallback models (e.g., llama)
+        that may refuse to process PII without legal context.
+        """
+        base = _ROUTING_PROMPT_FALLBACK if is_fallback else _ROUTING_PROMPT
         suffix = ""
         if total_pages > 1:
             suffix = (
-                f"\n\nThis document has {total_pages} total pages. "
-                "Consider whether the layout likely repeats across pages."
+                f"\nDocument has {total_pages} total pages."
+                if is_fallback
+                else f"\n\nThis document has {total_pages} total pages. "
+                     "Consider whether the layout likely repeats across pages."
             )
-        return _ROUTING_PROMPT + suffix
+        return base + suffix
 
     def _parse_routing_response(
         self,
@@ -195,6 +219,9 @@ class VisionRouter:
         """Parse vision model JSON response into VisionRoutingResult.
 
         Handles malformed JSON gracefully — returns variable/presidio default.
+        Also normalizes edge cases:
+        - Bare list: [{"type":"PERSON",...}] → wrap in pii_fields
+        - Single field dict: {"type":"PERSON","value":"..."} → wrap in pii_fields
         """
         # Try to extract JSON from the response
         data = _parse_json(response)
@@ -204,6 +231,14 @@ class VisionRouter:
                 structure_confidence=0.0,
                 raw_response=response,
             )
+
+        # Normalize: bare list → wrap in dict
+        if isinstance(data, list):
+            data = {"pii_fields": data, "structure_type": "unknown", "records_per_page": 1}
+
+        # Normalize: single field dict → wrap in pii_fields
+        if isinstance(data, dict) and "pii_fields" not in data and "type" in data and "value" in data:
+            data = {"pii_fields": [data], "structure_type": "unknown", "records_per_page": 1}
 
         # Extract structure_type
         structure_type = str(data.get("structure_type", "variable")).strip()
@@ -284,10 +319,11 @@ class VisionRouter:
 # ------------------------------------------------------------------
 
 
-def _parse_json(text: str) -> dict | None:
+def _parse_json(text: str) -> dict | list | None:
     """Parse JSON from a vision model response.
 
-    Handles code fences, leading text, and other common LLM quirks.
+    Handles code fences, leading text, array responses, and other
+    common LLM quirks.
     """
     if not text or not text.strip():
         return None
@@ -295,34 +331,45 @@ def _parse_json(text: str) -> dict | None:
     text = text.strip()
 
     # Strip markdown code fences
-    if text.startswith("```"):
-        lines = text.split("\n")
-        # Remove first line (```json or ```)
-        lines = lines[1:]
-        # Remove last line if it's ```
-        if lines and lines[-1].strip() == "```":
-            lines = lines[:-1]
-        text = "\n".join(lines).strip()
+    if "```" in text:
+        for part in text.split("```"):
+            part = part.strip()
+            if part.startswith("json"):
+                part = part[4:].strip()
+            if part.startswith("{") or part.startswith("["):
+                text = part
+                break
 
-    # Try direct parse
+    # Try direct parse (handles both dict and list)
     try:
         data = json.loads(text)
-        if isinstance(data, dict):
+        if isinstance(data, (dict, list)):
             return data
         return None
     except json.JSONDecodeError:
         pass
 
-    # Try to find JSON object in the text
-    start = text.find("{")
-    end = text.rfind("}")
-    if start >= 0 and end > start:
+    # Try to find JSON object or array in the text
+    for start_char, end_char in [("{", "}"), ("[", "]")]:
+        start = text.find(start_char)
+        if start < 0:
+            continue
+        depth = 0
+        end = start
+        for i, ch in enumerate(text[start:], start):
+            if ch == start_char:
+                depth += 1
+            elif ch == end_char:
+                depth -= 1
+                if depth == 0:
+                    end = i + 1
+                    break
         try:
-            data = json.loads(text[start : end + 1])
-            if isinstance(data, dict):
+            data = json.loads(text[start:end])
+            if isinstance(data, (dict, list)):
                 return data
         except json.JSONDecodeError:
-            pass
+            continue
 
     return None
 
