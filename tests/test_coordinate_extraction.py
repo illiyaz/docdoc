@@ -1371,3 +1371,156 @@ class TestSchemaDowngradePrevention:
         # Header text that previously needed _FIELD_MAP_BAD_NAMES
         for bad_name in ["Summary Statement", "Page Report", "Invoice Date"]:
             assert not _is_likely_name(bad_name)
+
+
+# ---------------------------------------------------------------------------
+# Anchor drift detection
+# ---------------------------------------------------------------------------
+
+
+class TestAnchorDriftDetection:
+    """Test CoordinateExtractor.check_anchor_stability() and drift-aware field map validation."""
+
+    def _make_pdf_with_words(self, pages_words: list[list[tuple[float, float, str]]]) -> str:
+        """Create a multi-page PDF where each page has words at specified (x, y) positions.
+
+        Args:
+            pages_words: list of pages, each page is list of (x, y, text) tuples
+        Returns:
+            Path to temporary PDF
+        """
+        import fitz
+        import tempfile
+        doc = fitz.open()
+        for page_words in pages_words:
+            page = doc.new_page(width=612, height=792)
+            for x, y, text in page_words:
+                page.insert_text((x, y), text, fontsize=10)
+        path = tempfile.mktemp(suffix=".pdf")
+        doc.save(path)
+        doc.close()
+        return path
+
+    def test_stable_anchors_low_drift(self):
+        """Anchors at same position on 3 pages → drift near zero."""
+        # "Client:" at (50, 100) and "John Smith" at (120, 100) on all 3 pages
+        page = [(50, 100, "Client:"), (120, 100, "John Smith")]
+        pdf_path = self._make_pdf_with_words([page, page, page])
+
+        fm = [FieldMapping(field_type="PERSON", anchor_text="Client:", spatial_relationship="same_line_right")]
+        ext = CoordinateExtractor(fm, pdf_path, "test")
+        drift = ext.check_anchor_stability([0, 1, 2])
+
+        assert "PERSON" in drift
+        assert drift["PERSON"] < 5.0  # near-zero, minor rendering tolerance
+
+    def test_drifted_anchors_large_movement(self):
+        """Anchor moves significantly between pages → high drift."""
+        pages = [
+            [(50, 100, "Client:"), (120, 100, "Alice Brown")],
+            [(300, 500, "Client:"), (370, 500, "Bob White")],
+            [(100, 200, "Client:"), (170, 200, "Carol Davis")],
+        ]
+        pdf_path = self._make_pdf_with_words(pages)
+
+        fm = [FieldMapping(field_type="PERSON", anchor_text="Client:", spatial_relationship="same_line_right")]
+        ext = CoordinateExtractor(fm, pdf_path, "test")
+        drift = ext.check_anchor_stability([0, 1, 2])
+
+        assert "PERSON" in drift
+        assert drift["PERSON"] > 100.0  # large movement
+
+    def test_anchor_missing_on_page_excluded(self):
+        """Anchor only on 2 of 3 pages → drift computed from those 2 only."""
+        pages = [
+            [(50, 100, "Client:"), (120, 100, "Alice Brown")],
+            [(50, 200, "Other:"), (120, 200, "no anchor here")],  # no "Client:" on this page
+            [(50, 100, "Client:"), (120, 100, "Carol Davis")],
+        ]
+        pdf_path = self._make_pdf_with_words(pages)
+
+        fm = [FieldMapping(field_type="PERSON", anchor_text="Client:", spatial_relationship="same_line_right")]
+        ext = CoordinateExtractor(fm, pdf_path, "test")
+        drift = ext.check_anchor_stability([0, 1, 2])
+
+        # Only pages 0 and 2 have "Client:" at same position → low drift
+        assert "PERSON" in drift
+        assert drift["PERSON"] < 5.0
+
+    def test_single_page_empty_drift(self):
+        """Single page → no drift computable (need ≥2 positions)."""
+        page = [(50, 100, "Client:"), (120, 100, "John Smith")]
+        pdf_path = self._make_pdf_with_words([page])
+
+        fm = [FieldMapping(field_type="PERSON", anchor_text="Client:", spatial_relationship="same_line_right")]
+        ext = CoordinateExtractor(fm, pdf_path, "test")
+        drift = ext.check_anchor_stability([0])
+
+        assert drift == {}  # need 2+ positions
+
+    def test_multiple_fields_independent_drift(self):
+        """Two fields: one stable, one drifted → independent drift values."""
+        pages = [
+            [(50, 100, "Client:"), (120, 100, "Alice Brown"), (50, 200, "Tax:"), (100, 200, "123-45-6789")],
+            [(50, 100, "Client:"), (120, 100, "Bob White"), (300, 400, "Tax:"), (350, 400, "987-65-4321")],
+            [(50, 100, "Client:"), (120, 100, "Carol Davis"), (50, 200, "Tax:"), (100, 200, "111-22-3333")],
+        ]
+        pdf_path = self._make_pdf_with_words(pages)
+
+        fm = [
+            FieldMapping(field_type="PERSON", anchor_text="Client:", spatial_relationship="same_line_right"),
+            FieldMapping(field_type="US_SSN", anchor_text="Tax:", spatial_relationship="same_line_right"),
+        ]
+        ext = CoordinateExtractor(fm, pdf_path, "test")
+        drift = ext.check_anchor_stability([0, 1, 2])
+
+        # Client: stable on all 3 pages
+        assert drift.get("PERSON", 0) < 5.0
+        # Tax: moves on page 1 (300,400 vs 50,200) → high drift
+        assert drift.get("US_SSN", 0) > 100.0
+
+    def test_validate_field_map_rejects_drifted(self):
+        """_validate_field_map rejects field maps with significant anchor drift."""
+        from app.pipeline.two_phase import _validate_field_map
+        # Create PDF with drifting anchors but valid names
+        pages = [
+            [(50, 100, "Client:"), (120, 100, "Alice Brown")],
+            [(300, 500, "Client:"), (370, 500, "Bob White")],
+            [(200, 300, "Client:"), (270, 300, "Carol Davis")],
+            [(400, 100, "Client:"), (470, 100, "Dan Evans")],
+            [(50, 600, "Client:"), (120, 600, "Eve Fox")],
+            [(350, 200, "Client:"), (420, 200, "Frank Green")],
+        ]
+        pdf_path = self._make_pdf_with_words(pages)
+
+        fm = [FieldMapping(field_type="PERSON", anchor_text="Client:", spatial_relationship="same_line_right")]
+        # Should reject: names are valid but anchors drift massively
+        assert _validate_field_map(fm, pdf_path) is False
+
+    def test_validate_field_map_passes_stable(self):
+        """_validate_field_map passes field maps with stable anchors and valid names."""
+        from app.pipeline.two_phase import _validate_field_map
+        page = [(50, 100, "Client:"), (120, 100, "Alice Brown")]
+        pages = [page] * 6  # 6 identical pages
+        pdf_path = self._make_pdf_with_words(pages)
+
+        fm = [FieldMapping(field_type="PERSON", anchor_text="Client:", spatial_relationship="same_line_right")]
+        assert _validate_field_map(fm, pdf_path) is True
+
+    def test_drift_threshold_boundary(self):
+        """Exactly 20pt drift → NOT rejected (check is > not >=)."""
+        import math
+        # Place anchor at (50, 100) on page 0 and at (50, 120) on page 1 → 20pt vertical drift
+        pages = [
+            [(50, 100, "Client:"), (120, 100, "Alice Brown")],
+            [(50, 120, "Client:"), (120, 120, "Bob White")],
+        ]
+        pdf_path = self._make_pdf_with_words(pages)
+
+        fm = [FieldMapping(field_type="PERSON", anchor_text="Client:", spatial_relationship="same_line_right")]
+        ext = CoordinateExtractor(fm, pdf_path, "test")
+        drift = ext.check_anchor_stability([0, 1])
+
+        # Drift should be approximately 20pt (purely vertical)
+        assert "PERSON" in drift
+        assert 15.0 < drift["PERSON"] < 25.0  # allow rendering tolerance

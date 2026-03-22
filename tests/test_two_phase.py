@@ -1247,3 +1247,88 @@ class TestExtractionVerificationWiring:
         source = inspect.getsource(two_phase.run_extraction_background)
         for field_name in ["success_rate", "successful", "reconciled", "failed", "field_rates", "is_acceptable"]:
             assert f'"{field_name}"' in source
+
+
+# ---------------------------------------------------------------------------
+# Quality gate between extraction paths
+# ---------------------------------------------------------------------------
+
+
+class TestExtractionQualityGate:
+    """Test _check_extraction_quality() — rejects paths with mostly garbage PERSON names."""
+
+    def _make_record(self, name: str | None = None, gov_id: str | None = None):
+        from app.rra.entity_resolver import PIIRecord
+        return PIIRecord(
+            record_id="r1",
+            entity_type="PERSON",
+            normalized_value=name or gov_id or "",
+            raw_name=name,
+            raw_government_id=gov_id,
+            source_document_id="doc-1",
+            page_or_sheet=0,
+        )
+
+    def test_accepts_good_records(self):
+        """10 valid names → accepted."""
+        from app.pipeline.two_phase import _check_extraction_quality
+        names = ["Alice Smith", "Bob Jones", "Carol Brown", "Dan White", "Eve Davis",
+                 "Frank Green", "Grace Lee", "Henry Clark", "Irene Moore", "Jack Hall"]
+        records = [self._make_record(n) for n in names]
+        assert _check_extraction_quality(records, "test") is True
+
+    def test_rejects_mostly_garbage(self):
+        """8/10 blocklisted names → <50% valid → rejected."""
+        from app.pipeline.two_phase import _check_extraction_quality
+        garbage = ["Summary Statement", "Page Report", "Total Balance", "Account Date",
+                    "Report Summary", "Statement Page", "Invoice Number", "Document Form"]
+        records = [self._make_record(g) for g in garbage]
+        records.extend([self._make_record("John Smith"), self._make_record("Alice Brown")])
+        assert _check_extraction_quality(records, "test") is False
+
+    def test_rejects_empty(self):
+        """Empty list → rejected."""
+        from app.pipeline.two_phase import _check_extraction_quality
+        assert _check_extraction_quality([], "test") is False
+
+    def test_lenient_for_small_set_one_valid(self):
+        """1 valid + 1 invalid in 2-record set → accepted (lenient)."""
+        from app.pipeline.two_phase import _check_extraction_quality
+        records = [self._make_record("John Smith"), self._make_record("Summary Statement")]
+        assert _check_extraction_quality(records, "test") is True
+
+    def test_rejects_small_set_all_bad(self):
+        """0 valid in 2-record set → rejected."""
+        from app.pipeline.two_phase import _check_extraction_quality
+        records = [self._make_record("Total Balance"), self._make_record("Page Report")]
+        assert _check_extraction_quality(records, "test") is False
+
+    def test_boundary_exactly_50_percent(self):
+        """Exactly 50% valid → accepted (threshold is < 0.50)."""
+        from app.pipeline.two_phase import _check_extraction_quality
+        valid_names = ["Alice Smith", "Bob Jones", "Carol Brown", "Dan White", "Eve Davis"]
+        valid = [self._make_record(n) for n in valid_names]
+        invalid = [self._make_record("Summary Statement"), self._make_record("Page Report"),
+                   self._make_record("Total Balance"), self._make_record("Account Date"),
+                   self._make_record("Report Summary")]
+        records = valid + invalid
+        assert _check_extraction_quality(records, "test") is True
+
+    def test_below_threshold(self):
+        """4 valid / 10 total = 40% → rejected."""
+        from app.pipeline.two_phase import _check_extraction_quality
+        valid = [self._make_record(n) for n in ["Alice Smith", "Bob Jones", "Carol Brown", "Dan White"]]
+        invalid = [self._make_record("Report Page"), self._make_record("Summary Total"),
+                   self._make_record("Account Balance"), self._make_record("Statement Date"),
+                   self._make_record("Form Section"), self._make_record("Invoice Number")]
+        records = valid + invalid
+        assert _check_extraction_quality(records, "test") is False
+
+    def test_records_without_names_counted(self):
+        """Records with gov_id but no name: not counted as valid, but still in total."""
+        from app.pipeline.two_phase import _check_extraction_quality
+        valid = [self._make_record("John Smith"), self._make_record("Alice Brown"),
+                 self._make_record("Carol Davis")]
+        nameless = [self._make_record(gov_id="123-45-6789"), self._make_record(gov_id="987-65-4321")]
+        records = valid + nameless  # 3 valid of 5 total = 60% → accepted
+        assert _check_extraction_quality(records, "test") is True

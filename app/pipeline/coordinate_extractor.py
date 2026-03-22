@@ -552,6 +552,57 @@ class CoordinateExtractor:
         )
         return records, failed_pages
 
+    # -- Anchor stability ---------------------------------------------------
+
+    def check_anchor_stability(
+        self,
+        page_range: list[int],
+        drift_threshold: float = 20.0,
+    ) -> dict[str, float]:
+        """Check if anchor positions are consistent across pages.
+
+        Returns ``{field_type: max_drift_in_points}`` for fields found on
+        at least 2 pages.  20 points is approximately 7 mm — enough to
+        absorb minor rendering differences but catches real layout shifts.
+        """
+        doc = fitz.open(self.doc_path)
+        # anchor_positions: {field_type: [(center_x, center_y), ...]}
+        anchor_positions: dict[str, list[tuple[float, float]]] = {}
+
+        for page_num in page_range:
+            if page_num < 0 or page_num >= doc.page_count:
+                continue
+            page = doc[page_num]
+            words = page.get_text("words")
+            rotation = page.rotation
+
+            for fm in self.field_map:
+                norm_type = _normalize_field_type(fm.field_type)
+                anchor_words = self._find_anchor(words, fm.anchor_text, rotation)
+                if anchor_words:
+                    bbox = self._merge_bboxes(anchor_words)
+                    cx = (bbox[0] + bbox[2]) / 2
+                    cy = (bbox[1] + bbox[3]) / 2
+                    anchor_positions.setdefault(norm_type, []).append((cx, cy))
+
+            doc._forget_page(page)
+
+        doc.close()
+
+        # Compute max drift per field (Euclidean from first position)
+        drift_map: dict[str, float] = {}
+        for field_type, positions in anchor_positions.items():
+            if len(positions) < 2:
+                continue
+            base_x, base_y = positions[0]
+            max_drift = max(
+                ((px - base_x) ** 2 + (py - base_y) ** 2) ** 0.5
+                for px, py in positions[1:]
+            )
+            drift_map[field_type] = max_drift
+
+        return drift_map
+
     # -- Field extraction ---------------------------------------------------
 
     def _extract_field(

@@ -1520,6 +1520,38 @@ def _is_likely_name(name: str) -> bool:
     return True
 
 
+def _check_extraction_quality(records: list, path_label: str) -> bool:
+    """Return True if records have acceptable PERSON name quality.
+
+    Called after each extraction path to decide whether to keep results
+    or discard and try the next path.  If <50% of records have valid
+    names the path produced garbage and should be skipped.
+
+    For small sets (1-2 records), require at least 1 valid name.
+    Path 3 (Presidio final fallback) should NOT be gated.
+    """
+    if not records:
+        return False
+    total = len(records)
+    valid = sum(1 for r in records if r.raw_name and _is_likely_name(r.raw_name))
+    if total <= 2:
+        if valid >= 1:
+            return True
+        logger.warning(
+            "Quality gate (%s): %d/%d valid names — rejecting",
+            path_label, valid, total,
+        )
+        return False
+    ratio = valid / total
+    if ratio < 0.50:
+        logger.warning(
+            "Quality gate (%s): %.0f%% valid (%d/%d) — rejecting",
+            path_label, ratio * 100, valid, total,
+        )
+        return False
+    return True
+
+
 def _validate_field_map(field_map: list, doc_path: str) -> bool:
     """Validate field map quality by sampling up to 3 pages.
 
@@ -1587,6 +1619,24 @@ def _validate_field_map(field_map: list, doc_path: str) -> bool:
                 valid_count, len(sample_pages),
             )
             return False
+
+        # --- Anchor drift detection ---
+        # Check if anchor positions are stable across sample pages.
+        # If anchors move significantly, this is NOT a fixed-layout doc.
+        DRIFT_THRESHOLD = 20.0  # points (~7mm)
+        try:
+            drift_map = extractor.check_anchor_stability(sample_pages, DRIFT_THRESHOLD)
+            if drift_map:
+                drifted = {ft: d for ft, d in drift_map.items() if d > DRIFT_THRESHOLD}
+                if len(drifted) > len(drift_map) / 2:
+                    logger.warning(
+                        "Field map validation: anchor drift detected (%d/%d fields): %s",
+                        len(drifted), len(drift_map),
+                        {k: f"{v:.1f}pt" for k, v in drifted.items()},
+                    )
+                    return False
+        except Exception:
+            logger.debug("Anchor drift check failed", exc_info=True)
 
         return True
     except Exception:
@@ -2101,6 +2151,11 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                             doc.file_name, exc_info=True,
                         )
 
+                # Quality gate: reject Path 0 if names are mostly garbage
+                if records and extraction_path == "0-coord" and not _check_extraction_quality(records, "0-coord"):
+                    records = []
+                    extraction_path = ""
+
                 # --- Path 1: Vision direct (small docs or scanned) ---
                 # Respects vision routing: if recommended_path is "vision_direct",
                 # or if no records yet and vision is available.
@@ -2142,6 +2197,11 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                     except Exception:
                         logger.warning("Path 1 (Vision) failed for %s, trying Path 2", doc.file_name, exc_info=True)
 
+                # Quality gate: reject Path 1 if names are mostly garbage
+                if records and extraction_path == "1" and not _check_extraction_quality(records, "1-vision"):
+                    records = []
+                    extraction_path = ""
+
                 # --- Path 2a: Text + LLM table ---
                 if not records and settings.llm_assist_enabled and is_tabular:
                     try:
@@ -2165,6 +2225,11 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                             logger.info("Path 2a (Text+LLM table) for %s: %d records", doc.file_name, len(records))
                     except Exception:
                         logger.warning("Path 2a (Text+LLM table) failed for %s", doc.file_name, exc_info=True)
+
+                # Quality gate: reject Path 2a if names are mostly garbage
+                if records and extraction_path == "2-table" and not _check_extraction_quality(records, "2-table"):
+                    records = []
+                    extraction_path = ""
 
                 # --- Path 2b: Text + LLM template ---
                 if not records and settings.llm_assist_enabled and is_template and instances:
@@ -2190,6 +2255,11 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                             logger.info("Path 2 (Text+LLM) for %s: %d records", doc.file_name, len(records))
                     except Exception:
                         logger.warning("Path 2 (Text+LLM) failed for %s, falling back to Path 3", doc.file_name, exc_info=True)
+
+                # Quality gate: reject Path 2b if names are mostly garbage
+                if records and extraction_path == "2" and not _check_extraction_quality(records, "2-template"):
+                    records = []
+                    extraction_path = ""
 
                 # --- Path 3: Presidio only ---
                 if not records:
