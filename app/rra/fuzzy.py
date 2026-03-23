@@ -183,6 +183,70 @@ jaro_winkler_similarity = jaro_winkler
 
 
 # ---------------------------------------------------------------------------
+# Name decorator stripping (account metadata removal)
+# ---------------------------------------------------------------------------
+
+# Patterns that are account metadata, not part of the person's name:
+#   (Editor), (Composer), (Summary Account), [Us Account], [Uk Summary Acc]
+#   A/K/A ..., Re: "..."
+_NAME_DECORATOR_RE = re.compile(
+    r"\s*(?:"
+    r"\([^)]*\)"           # (Editor), (Composer/Arranger), (Summary Account)
+    r"|\[[^\]]*\]"         # [Us Account], [Uk Summary Acc]
+    r"|a/k/a\s+.*"         # A/K/A William R. Page Jr.
+    r"|re:\s+.*"           # Re: "Niska Banja"
+    r")\s*$",
+    re.IGNORECASE,
+)
+
+# Mid-string parenthetical/bracket expressions that are NOT name parts:
+#   "Doreen (Circle Of Sound) Rao" → "Doreen Rao"
+# Only strip if result still has ≥2 words (to avoid mangling "Ali (Jr)")
+_MID_PAREN_RE = re.compile(r"\s*\([^)]*\)\s*")
+_MID_BRACKET_RE = re.compile(r"\s*\[[^\]]*\]\s*")
+
+# Trailing Roman numerals used as account indicators (Ii, Iii, Iv)
+# Only strip standalone II/III/IV etc., not real name parts
+_TRAILING_ROMAN_RE = re.compile(
+    r"\s+(?:ii|iii|iv|vi{0,3}|ix|x)$", re.IGNORECASE,
+)
+
+
+def strip_name_decorators(name: str) -> str:
+    """Strip parenthetical/bracket account decorators and trailing Roman numerals.
+
+    Examples::
+
+        "Betty Bertaux Ii (Editor)" → "Betty Bertaux"
+        "Francisco Nunez (Editor)"  → "Francisco Nunez"
+        "John Stravinsky [Us Account]" → "John Stravinsky"
+        "Nick Page A/K/A William R. Page Jr." → "Nick Page"
+        "Doreen Rao (Composer/Arranger)" → "Doreen Rao"
+        "Doreen (Circle Of Sound) Rao" → "Doreen Rao"
+        "Maureen Granville-Smith (Frank O'Hara)" → "Maureen Granville-Smith"
+
+    Never returns empty — falls back to original if stripping removes everything.
+    """
+    clean = name.strip()
+    # Strip trailing suffixes first: "(Foo)", "[Bar]", "A/K/A ..."
+    for _ in range(3):
+        prev = clean
+        clean = _NAME_DECORATOR_RE.sub("", clean).strip()
+        if clean == prev:
+            break
+    # Strip mid-string parenthetical/bracket expressions
+    # "Doreen (Circle Of Sound) Rao" → "Doreen  Rao" → "Doreen Rao"
+    candidate = _MID_PAREN_RE.sub(" ", clean).strip()
+    candidate = _MID_BRACKET_RE.sub(" ", candidate).strip()
+    # Only accept if result still has ≥2 name parts
+    if len(candidate.split()) >= 2:
+        clean = " ".join(candidate.split())  # collapse whitespace
+    # Strip trailing Roman numerals (II, III) that are account indicators
+    clean = _TRAILING_ROMAN_RE.sub("", clean).strip()
+    return clean if clean else name.strip()
+
+
+# ---------------------------------------------------------------------------
 # Name matching
 # ---------------------------------------------------------------------------
 
@@ -212,21 +276,27 @@ def names_match(name1: str, name2: str) -> tuple[bool, float]:
     if not name1 or not name2:
         return False, 0.0
 
-    jw = jaro_winkler(name1, name2)
+    # Strip account decorators before comparing:
+    #   "Betty Bertaux Ii (Editor)" → "Betty Bertaux"
+    #   "Francisco Nunez (Editor)"  → "Francisco Nunez"
+    n1 = strip_name_decorators(name1)
+    n2 = strip_name_decorators(name2)
+
+    jw = jaro_winkler(n1, n2)
 
     # Non-Latin path
-    if _has_non_latin_chars(name1) or _has_non_latin_chars(name2):
+    if _has_non_latin_chars(n1) or _has_non_latin_chars(n2):
         matched = jw >= 0.88
         return matched, round(jw, 4)
 
     # Latin path
-    if name1.lower() == name2.lower():
+    if n1.lower() == n2.lower():
         return True, 1.0
 
     if jw >= 0.92:
         return True, round(jw, 4)
 
-    if soundex(name1) == soundex(name2) and jw >= 0.80:
+    if soundex(n1) == soundex(n2) and jw >= 0.80:
         return True, round(jw, 4)
 
     return False, round(jw, 4)

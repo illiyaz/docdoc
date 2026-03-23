@@ -2266,6 +2266,16 @@ function formatDate(iso: string | null): string {
   }
 }
 
+function formatTimestamp(iso: string | null): string {
+  if (!iso) return "--"
+  try {
+    const d = parseISO(iso)
+    return d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })
+  } catch {
+    return iso
+  }
+}
+
 function JobsTab({
   projectId,
   onJobCompleted,
@@ -2526,7 +2536,8 @@ function JobsTab({
                     <th className="px-4 py-2.5 text-left font-medium">Job ID</th>
                     <th className="px-4 py-2.5 text-left font-medium">Document</th>
                     <th className="px-4 py-2.5 text-left font-medium">Status</th>
-                    <th className="px-4 py-2.5 text-left font-medium">Created</th>
+                    <th className="px-4 py-2.5 text-left font-medium">Started</th>
+                    <th className="px-4 py-2.5 text-left font-medium">Ended</th>
                     <th className="px-4 py-2.5 text-right font-medium">Docs</th>
                     <th className="px-4 py-2.5 text-right font-medium">Duration</th>
                     <th className="px-4 py-2.5 text-right font-medium w-20">Actions</th>
@@ -2537,12 +2548,12 @@ function JobsTab({
                     const isExpanded = expandedJobId === job.id
                     return (
                       <tr key={job.id} className="group">
-                        <td colSpan={7} className="p-0">
+                        <td colSpan={8} className="p-0">
                           <button
                             onClick={() => setExpandedJobId(isExpanded ? null : job.id)}
                             className="w-full text-left hover:bg-accent/50 transition-colors"
                           >
-                            <div className="grid grid-cols-[minmax(90px,auto)_minmax(100px,1fr)_auto_minmax(80px,auto)_50px_80px_70px] items-center">
+                            <div className="grid grid-cols-[minmax(90px,auto)_minmax(100px,1fr)_auto_minmax(80px,auto)_minmax(80px,auto)_50px_80px_70px] items-center">
                               <span className="px-4 py-2.5 font-mono text-xs truncate">
                                 {job.id.slice(0, 8)}...
                               </span>
@@ -2561,8 +2572,11 @@ function JobsTab({
                                   {job.status}
                                 </Badge>
                               </span>
-                              <span className="px-4 py-2.5 text-xs text-muted-foreground">
-                                {formatDate(job.created_at)}
+                              <span className="px-4 py-2.5 text-xs text-muted-foreground" title={job.started_at ?? undefined}>
+                                {formatTimestamp(job.started_at)}
+                              </span>
+                              <span className="px-4 py-2.5 text-xs text-muted-foreground" title={job.completed_at ?? undefined}>
+                                {formatTimestamp(job.completed_at)}
                               </span>
                               <span className="px-4 py-2.5 text-right text-xs font-medium">
                                 {job.document_count}

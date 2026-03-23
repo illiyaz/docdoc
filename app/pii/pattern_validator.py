@@ -29,6 +29,7 @@ from app.rra.entity_resolver import PIIRecord
 VALIDATION_PATTERNS: dict[str, re.Pattern] = {
     "NI_NUMBER": re.compile(r"^[A-Z]{2}\d{6}[A-Z]$"),
     "US_SSN": re.compile(r"^\d{3}-\d{2}-\d{4}$"),
+    "US_EIN": re.compile(r"^\d{2}-\d{7}$"),
     "AADHAAR": re.compile(r"^\d{12}$"),
     "PAN_CARD": re.compile(r"^[A-Z]{5}\d{4}[A-Z]$"),
     "EMAIL_ADDRESS": re.compile(r"^[^@]+@[^@]+\.[^@]+$"),
@@ -197,6 +198,19 @@ _BUSINESS_KEYWORDS = frozenset({
     "electric", "electrical",
     # Scope
     "international", "national", "global", "worldwide",
+    # Arts / culture
+    "music", "musicians", "musica", "publishing", "publishers", "records",
+    "choir", "chorale", "orchestra", "philharmonic", "symphony", "opera",
+    "theater", "theatre", "ensemble", "singers",
+    # Cultural institutions
+    "conservatory", "museum", "gallery", "library", "archive", "archives",
+    # Charitable / social
+    "benevolent", "charitable", "charity",
+    "trust", "trustees", "trustee", "fiduciary",
+    "fund",
+    # Membership
+    "society", "guild", "league", "federation", "syndicate", "union",
+    "club",
 })
 
 # Multi-word business keywords
@@ -226,9 +240,13 @@ _spacy_load_attempted = False
 def _looks_like_business(name: str) -> bool:
     """Layer 1: Heuristic check if name looks like a business/organization.
 
-    Checks business suffixes (last word), business keywords (any word),
-    multi-word patterns, store number patterns, and firm patterns (& in name).
-    Returns True if the name matches business patterns.
+    Strips parenthetical/bracket account decorators first (e.g. "(Editor)",
+    "[Us Account]"), then checks business suffixes, keywords, multi-word
+    patterns, store numbers, C/O, and firm patterns.
+
+    Returns True if the *base name* (without decorators) matches business
+    patterns.  This prevents false positives on person names with account
+    metadata like "Doreen Rao (Summary Account)".
     """
     if not name or not name.strip():
         return False
@@ -239,10 +257,19 @@ def _looks_like_business(name: str) -> bool:
     if _ESTATE_OF_RE.match(clean):
         return False
 
-    lower = clean.lower()
+    # Strip parenthetical/bracket decorators BEFORE keyword checks
+    # "Curtis Brown Limited [Uk Summary Acc]" → "Curtis Brown Limited"
+    # "Doreen Rao (Summary Account)" → "Doreen Rao" (person, NOT org)
+    from app.rra.fuzzy import strip_name_decorators
+    base = strip_name_decorators(clean)
+    lower = base.lower()
 
     # Store number pattern: "JOHNSTONE SUPPLY #576"
-    if _STORE_NUMBER_RE.search(clean):
+    if _STORE_NUMBER_RE.search(base):
+        return True
+
+    # "C/O" pattern (care-of = company forwarding)
+    if " c/o " in lower or lower.startswith("c/o "):
         return True
 
     # Strip trailing punctuation for word analysis
@@ -365,6 +392,10 @@ def validate_extracted_records(records: list[PIIRecord]) -> list[PIIRecord]:
                 if pattern and not pattern.match(rec.raw_government_id.strip()):
                     flags.append(f"gov_id_format_mismatch:{gov_type}")
 
+            # --- EIN detection: XX-XXXXXXX is a business tax ID ---
+            if re.match(r'^\d{2}-\d{7}$', rec.raw_government_id.strip()):
+                flags.append("gov_id_is_ein")
+
         # --- Date of birth: format + context validation ---
         raw_dob = rec.raw_dob
         if raw_dob:
@@ -427,10 +458,15 @@ def validate_extracted_records(records: list[PIIRecord]) -> list[PIIRecord]:
 
 def _resolve_gov_id_type(rec: PIIRecord) -> str | None:
     """Determine the government ID type from entity_types_found."""
-    gov_id_types = {"NI_NUMBER", "US_SSN", "AADHAAR", "PAN_CARD"}
+    gov_id_types = {"NI_NUMBER", "US_SSN", "AADHAAR", "PAN_CARD", "US_EIN"}
     for et in rec.entity_types_found:
         if et in gov_id_types:
             return et
+    # Infer from format if not in entity_types
+    if rec.raw_government_id:
+        gid = rec.raw_government_id.strip()
+        if re.match(r'^\d{2}-\d{7}$', gid):
+            return "US_EIN"  # EIN, not SSN
     return None
 
 

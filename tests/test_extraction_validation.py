@@ -644,3 +644,529 @@ class TestValidateExtractedRecordsOrgSuppression:
         )
         result = validate_extracted_records([rec])
         assert len(result) == 0
+
+
+# ---------------------------------------------------------------------------
+# Arts / culture / charitable org keyword detection
+# ---------------------------------------------------------------------------
+
+
+class TestArtsAndCultureOrgDetection:
+    """Tests for arts/culture/charitable organization keyword detection."""
+
+    # --- Music industry ---
+
+    def test_music_keyword_fred_bock(self):
+        assert _looks_like_business("Fred Bock Music") is True
+
+    def test_music_keyword_round_hill(self):
+        assert _looks_like_business("Round Hill Music") is True
+
+    def test_music_keyword_hoagland(self):
+        assert _looks_like_business("Hoagland Music") is True
+
+    def test_music_keyword_kay_duke(self):
+        assert _looks_like_business("Kay Duke Music") is True
+
+    def test_music_keyword_sanga(self):
+        assert _looks_like_business("Sanga Music") is True
+
+    def test_musicians_keyword(self):
+        assert _looks_like_business("Help Musicians Uk") is True
+
+    def test_musicians_benevolent_fund(self):
+        assert _looks_like_business("Musicians Benevolent Fund") is True
+
+    def test_musica_keyword(self):
+        assert _looks_like_business("Editio Musica Budapest") is True
+
+    def test_publishing_keyword(self):
+        assert _looks_like_business("Universal Music Publishing") is True
+
+    def test_publishers_keyword(self):
+        assert _looks_like_business("Associated Music Publishers") is True
+
+    def test_conservatory_keyword(self):
+        assert _looks_like_business("San Francisco Conservatory Of Music") is True
+
+    # --- Cultural institutions ---
+
+    def test_library_keyword(self):
+        assert _looks_like_business("Trustees Of The Boston Public Library") is True
+
+    def test_trustees_keyword(self):
+        """'trustees' as keyword catches trust-related orgs."""
+        assert _looks_like_business("Trustees Of The Boston Public Library") is True
+
+    def test_museum_keyword(self):
+        assert _looks_like_business("National Museum Of Art") is True
+
+    def test_gallery_keyword(self):
+        assert _looks_like_business("Tate Gallery") is True
+
+    def test_archive_keyword(self):
+        assert _looks_like_business("British Film Archive") is True
+
+    # --- Charitable / social ---
+
+    def test_benevolent_keyword(self):
+        assert _looks_like_business("Musicians Benevolent Fund") is True
+
+    def test_charity_keyword(self):
+        assert _looks_like_business("Cancer Research Charity") is True
+
+    def test_trust_keyword(self):
+        """Standalone 'trust' keyword catches trust orgs."""
+        assert _looks_like_business("Irwin A Bazelon Marital Trust") is True
+
+    def test_fund_keyword(self):
+        assert _looks_like_business("Community Development Fund") is True
+
+    def test_fiduciary_keyword(self):
+        assert _looks_like_business("Pacific Fiduciary Services") is True
+
+    # --- Membership ---
+
+    def test_society_keyword(self):
+        assert _looks_like_business("Royal Philharmonic Society") is True
+
+    def test_guild_keyword(self):
+        assert _looks_like_business("Screen Actors Guild") is True
+
+    def test_league_keyword(self):
+        assert _looks_like_business("Urban League") is True
+
+    def test_federation_keyword(self):
+        assert _looks_like_business("International Federation Of Musicians") is True
+
+    def test_union_keyword(self):
+        assert _looks_like_business("American Civil Liberties Union") is True
+
+    def test_club_keyword(self):
+        assert _looks_like_business("Harvard Club") is True
+
+    # --- Orchestra / performing arts ---
+
+    def test_orchestra_keyword(self):
+        assert _looks_like_business("London Symphony Orchestra") is True
+
+    def test_philharmonic_keyword(self):
+        assert _looks_like_business("New York Philharmonic") is True
+
+    def test_symphony_keyword(self):
+        assert _looks_like_business("Chicago Symphony") is True
+
+    def test_opera_keyword(self):
+        assert _looks_like_business("Royal Opera House") is True
+
+    def test_theater_keyword(self):
+        assert _looks_like_business("National Theater") is True
+
+    def test_theatre_keyword(self):
+        assert _looks_like_business("Royal Shakespeare Theatre") is True
+
+    def test_ensemble_keyword(self):
+        assert _looks_like_business("Chamber Ensemble Of London") is True
+
+    def test_choir_keyword(self):
+        assert _looks_like_business("Kings College Choir") is True
+
+    def test_records_keyword(self):
+        assert _looks_like_business("Atlantic Records") is True
+
+    # --- Estate of / trust person protection ---
+
+    def test_estate_of_still_person(self):
+        """'Estate of John Doe' must NOT be flagged as business."""
+        assert _looks_like_business("Estate of John Doe") is False
+
+    def test_trust_does_not_block_estate(self):
+        """'trust' keyword should not interfere with Estate-of check."""
+        is_valid, _ = validate_person_name("Estate of John Doe")
+        assert is_valid is True
+
+
+# ---------------------------------------------------------------------------
+# Bracket / paren / C/O pattern detection
+# ---------------------------------------------------------------------------
+
+
+class TestBracketParenCOPatterns:
+    """Tests for decorator stripping + C/O detection.
+
+    Parenthetical/bracket suffixes are now stripped before keyword checks,
+    so org detection works on the BASE name only.  This prevents false
+    positives on person names like "Doreen Rao (Summary Account)".
+    """
+
+    def test_uk_summary_acc_brackets_base_is_org(self):
+        """'Curtis Brown Limited [Uk Summary Acc]' → base 'Curtis Brown Limited' → suffix 'limited'."""
+        assert _looks_like_business("Curtis Brown Limited [Uk Summary Acc]") is True
+
+    def test_us_account_parens_base_is_org(self):
+        """'Editio Musica Budapest (Us Account)' → base 'Editio Musica Budapest' → keyword 'musica'."""
+        assert _looks_like_business("Editio Musica Budapest (Us Account)") is True
+
+    def test_summary_account_parens_base_is_org(self):
+        """'Walton Music Company (Summary Account)' → base has 'music' and 'company'."""
+        assert _looks_like_business("Walton Music Company (Summary Account)") is True
+
+    def test_person_with_summary_account_not_flagged(self):
+        """'Doreen Rao (Summary Account)' → base 'Doreen Rao' → PERSON."""
+        assert _looks_like_business("Doreen Rao (Summary Account)") is False
+
+    def test_person_with_us_account_not_flagged(self):
+        """'John Stravinsky [Us Account]' → base 'John Stravinsky' → PERSON."""
+        assert _looks_like_business("John Stravinsky [Us Account]") is False
+
+    def test_parenthetical_composer_not_flagged(self):
+        """'John Smith (Composer)' → base 'John Smith' → PERSON."""
+        assert _looks_like_business("John Smith (Composer)") is False
+
+    def test_c_o_middle(self):
+        assert _looks_like_business("Amphion C/O Bmg Ricordi") is True
+
+    def test_c_o_start(self):
+        assert _looks_like_business("C/O Amphion Bmg Ricordi") is True
+
+    def test_c_o_case_insensitive(self):
+        assert _looks_like_business("Amphion c/o BMG Ricordi") is True
+
+
+# ---------------------------------------------------------------------------
+# validate_person_name — new keyword coverage
+# ---------------------------------------------------------------------------
+
+
+class TestValidatePersonNameNewKeywords:
+    """Test validate_person_name correctly rejects new org types."""
+
+    def test_music_org(self):
+        is_valid, reason = validate_person_name("Fred Bock Music")
+        assert is_valid is False
+        assert reason == "name_is_business"
+
+    def test_musicians_org(self):
+        is_valid, reason = validate_person_name("Help Musicians Uk")
+        assert is_valid is False
+        assert reason == "name_is_business"
+
+    def test_conservatory_org(self):
+        is_valid, reason = validate_person_name("San Francisco Conservatory Of Music")
+        assert is_valid is False
+        assert reason == "name_is_business"
+
+    def test_library_org(self):
+        is_valid, reason = validate_person_name("Trustees Of The Boston Public Library")
+        assert is_valid is False
+        assert reason == "name_is_business"
+
+    def test_trust_org(self):
+        is_valid, reason = validate_person_name("Irwin A Bazelon Marital Trust")
+        assert is_valid is False
+        assert reason == "name_is_business"
+
+    def test_fund_org(self):
+        is_valid, reason = validate_person_name("Musicians Benevolent Fund")
+        assert is_valid is False
+        assert reason == "name_is_business"
+
+    def test_c_o_org(self):
+        is_valid, reason = validate_person_name("Amphion C/O Bmg Ricordi")
+        assert is_valid is False
+        assert reason == "name_is_business"
+
+    def test_bracket_account_org(self):
+        is_valid, reason = validate_person_name("Curtis Brown Limited [Uk Summary Acc]")
+        assert is_valid is False
+        assert reason == "name_is_business"
+
+    def test_paren_account_org(self):
+        is_valid, reason = validate_person_name("Editio Musica Budapest (Us Account)")
+        assert is_valid is False
+        assert reason == "name_is_business"
+
+    def test_publishing_with_paren(self):
+        is_valid, reason = validate_person_name("Universal Music Publishing (Druckman)")
+        assert is_valid is False
+        assert reason == "name_is_business"
+
+    def test_publishers_with_paren(self):
+        is_valid, reason = validate_person_name("Associated Music Publishers (Harbison)")
+        assert is_valid is False
+        assert reason == "name_is_business"
+
+    def test_real_person_still_passes(self):
+        """Ensure real person names are not caught by new keywords."""
+        is_valid, _ = validate_person_name("Karen Craft")
+        assert is_valid is True
+
+    def test_person_with_normal_parens(self):
+        """Person name with non-account parenthetical should pass."""
+        is_valid, _ = validate_person_name("James Purdy")
+        assert is_valid is True
+
+
+# ---------------------------------------------------------------------------
+# validate_extracted_records — org suppression with new keywords
+# ---------------------------------------------------------------------------
+
+
+class TestValidateExtractedRecordsNewOrgs:
+    """Tests that validate_extracted_records drops records with new org names."""
+
+    @staticmethod
+    def _make_record(**kwargs) -> PIIRecord:
+        defaults = dict(
+            record_id="r1",
+            entity_type="PERSON",
+            normalized_value="Test",
+            raw_name="Test",
+            entity_types_found=("PERSON",),
+        )
+        defaults.update(kwargs)
+        return PIIRecord(**defaults)
+
+    def test_music_org_suppressed(self):
+        rec = self._make_record(
+            raw_name="Fred Bock Music",
+            normalized_value="Fred Bock Music",
+        )
+        result = validate_extracted_records([rec])
+        assert len(result) == 0
+
+    def test_trust_org_suppressed(self):
+        rec = self._make_record(
+            raw_name="Irwin A Bazelon Marital Trust",
+            normalized_value="Irwin A Bazelon Marital Trust",
+        )
+        result = validate_extracted_records([rec])
+        assert len(result) == 0
+
+    def test_c_o_org_suppressed(self):
+        rec = self._make_record(
+            raw_name="Amphion C/O Bmg Ricordi",
+            normalized_value="Amphion C/O Bmg Ricordi",
+        )
+        result = validate_extracted_records([rec])
+        assert len(result) == 0
+
+    def test_bracket_account_org_suppressed(self):
+        rec = self._make_record(
+            raw_name="Curtis Brown Limited [Uk Summary Acc]",
+            normalized_value="Curtis Brown Limited [Uk Summary Acc]",
+        )
+        result = validate_extracted_records([rec])
+        assert len(result) == 0
+
+    def test_estate_of_still_preserved(self):
+        """Estate of person must not be caught by 'trust' keyword."""
+        rec = self._make_record(
+            raw_name="Estate of John Doe",
+            normalized_value="Estate of John Doe",
+        )
+        result = validate_extracted_records([rec])
+        assert len(result) == 1
+        assert result[0].raw_name == "Estate of John Doe"
+
+
+# ---------------------------------------------------------------------------
+# EIN detection and validation
+# ---------------------------------------------------------------------------
+
+
+class TestEINDetection:
+    """Tests for US_EIN pattern validation and gov_id_is_ein flag."""
+
+    @staticmethod
+    def _make_record(**kwargs) -> PIIRecord:
+        defaults = dict(
+            record_id="r1",
+            entity_type="PERSON",
+            normalized_value="Test Corp",
+            raw_name="Test Corp",
+            entity_types_found=("PERSON",),
+        )
+        defaults.update(kwargs)
+        return PIIRecord(**defaults)
+
+    def test_ein_pattern_matches(self):
+        from app.pii.pattern_validator import VALIDATION_PATTERNS
+        assert VALIDATION_PATTERNS["US_EIN"].match("12-3456789")
+
+    def test_ein_pattern_rejects_ssn(self):
+        from app.pii.pattern_validator import VALIDATION_PATTERNS
+        assert not VALIDATION_PATTERNS["US_EIN"].match("123-45-6789")
+
+    def test_ein_pattern_rejects_short(self):
+        from app.pii.pattern_validator import VALIDATION_PATTERNS
+        assert not VALIDATION_PATTERNS["US_EIN"].match("12-345678")
+
+    def test_resolve_gov_id_type_infers_ein(self):
+        from app.pii.pattern_validator import _resolve_gov_id_type
+        rec = self._make_record(
+            raw_government_id="13-1234567",
+            entity_types_found=("PERSON",),  # no explicit US_EIN type
+        )
+        assert _resolve_gov_id_type(rec) == "US_EIN"
+
+    def test_resolve_gov_id_type_explicit_ein(self):
+        from app.pii.pattern_validator import _resolve_gov_id_type
+        rec = self._make_record(
+            raw_government_id="13-1234567",
+            entity_types_found=("PERSON", "US_EIN"),
+        )
+        assert _resolve_gov_id_type(rec) == "US_EIN"
+
+    def test_resolve_gov_id_type_ssn_not_confused(self):
+        from app.pii.pattern_validator import _resolve_gov_id_type
+        rec = self._make_record(
+            raw_government_id="123-45-6789",
+            entity_types_found=("PERSON", "US_SSN"),
+        )
+        assert _resolve_gov_id_type(rec) == "US_SSN"
+
+    def test_ein_flag_set_on_record(self):
+        """validate_extracted_records sets gov_id_is_ein flag for EIN format."""
+        rec = self._make_record(
+            raw_name="Some Person",
+            normalized_value="Some Person",
+            raw_government_id="13-1234567",
+            entity_types_found=("PERSON",),
+        )
+        result = validate_extracted_records([rec])
+        assert len(result) == 1
+        assert "gov_id_is_ein" in result[0].validation_flags
+
+    def test_ssn_no_ein_flag(self):
+        """SSN format should NOT get gov_id_is_ein flag."""
+        rec = self._make_record(
+            raw_name="Some Person",
+            normalized_value="Some Person",
+            raw_government_id="123-45-6789",
+            entity_types_found=("PERSON", "US_SSN"),
+        )
+        result = validate_extracted_records([rec])
+        assert len(result) == 1
+        assert "gov_id_is_ein" not in result[0].validation_flags
+
+    def test_us_ein_in_gov_id_entity_types(self):
+        from app.pii.pattern_validator import _GOV_ID_ENTITY_TYPES
+        assert "US_EIN" in _GOV_ID_ENTITY_TYPES
+
+
+# ---------------------------------------------------------------------------
+# Name decorator stripping + dedup matching
+# ---------------------------------------------------------------------------
+
+
+class TestStripNameDecorators:
+    """Tests for strip_name_decorators() and its effect on name matching."""
+
+    def test_parenthetical_editor(self):
+        from app.rra.fuzzy import strip_name_decorators
+        assert strip_name_decorators("Francisco Nunez (Editor)") == "Francisco Nunez"
+
+    def test_parenthetical_composer(self):
+        from app.rra.fuzzy import strip_name_decorators
+        assert strip_name_decorators("Betty Bertaux (Composer)") == "Betty Bertaux"
+
+    def test_bracket_us_account(self):
+        from app.rra.fuzzy import strip_name_decorators
+        assert strip_name_decorators("John Stravinsky [Us Account]") == "John Stravinsky"
+
+    def test_trailing_roman_numeral(self):
+        from app.rra.fuzzy import strip_name_decorators
+        assert strip_name_decorators("Betty Bertaux Ii") == "Betty Bertaux"
+
+    def test_combined_roman_and_paren(self):
+        from app.rra.fuzzy import strip_name_decorators
+        assert strip_name_decorators("Betty Bertaux Ii (Editor)") == "Betty Bertaux"
+
+    def test_aka_stripped(self):
+        from app.rra.fuzzy import strip_name_decorators
+        result = strip_name_decorators("Nick Page A/K/A William R. Page Jr.")
+        assert result == "Nick Page"
+
+    def test_re_stripped(self):
+        from app.rra.fuzzy import strip_name_decorators
+        result = strip_name_decorators('Nick Page (Re: "Niska Banja")')
+        assert result == "Nick Page"
+
+    def test_circle_of_sound_paren(self):
+        from app.rra.fuzzy import strip_name_decorators
+        result = strip_name_decorators("Doreen (Circle Of Sound) Rao")
+        # Middle parenthetical stays (regex only matches trailing)
+        assert "Doreen" in result
+
+    def test_frank_ohara_paren(self):
+        from app.rra.fuzzy import strip_name_decorators
+        result = strip_name_decorators("Maureen Granville-Smith (Frank O'Hara)")
+        assert result == "Maureen Granville-Smith"
+
+    def test_never_returns_empty(self):
+        from app.rra.fuzzy import strip_name_decorators
+        assert strip_name_decorators("(Editor)") != ""
+
+    def test_plain_name_unchanged(self):
+        from app.rra.fuzzy import strip_name_decorators
+        assert strip_name_decorators("John Smith") == "John Smith"
+
+    def test_stacked_suffixes(self):
+        from app.rra.fuzzy import strip_name_decorators
+        result = strip_name_decorators("Name (Foo) [Bar]")
+        assert result == "Name"
+
+
+class TestNameMatchingWithDecorators:
+    """Test that names_match correctly matches names after decorator stripping."""
+
+    def test_exact_duplicate_matches(self):
+        from app.rra.fuzzy import names_match
+        matched, conf = names_match("Dana Wilson", "Dana Wilson")
+        assert matched is True
+        assert conf == 1.0
+
+    def test_editor_suffix_matches(self):
+        from app.rra.fuzzy import names_match
+        matched, _ = names_match("Francisco Nunez (Editor)", "Francisco Nunez")
+        assert matched is True
+
+    def test_composer_vs_editor_matches(self):
+        """Same base name with different account descriptors should match."""
+        from app.rra.fuzzy import names_match
+        matched, _ = names_match("Betty Bertaux (Composer)", "Betty Bertaux Ii (Editor)")
+        assert matched is True
+
+    def test_bracket_account_matches(self):
+        from app.rra.fuzzy import names_match
+        matched, _ = names_match("John Stravinsky [Us Account]", "John Stravinsky")
+        assert matched is True
+
+    def test_middle_initial_matches(self):
+        """'Avrahm Galper' vs 'Avrahm M. Galper' should match via JW."""
+        from app.rra.fuzzy import names_match
+        matched, _ = names_match("Avrahm Galper", "Avrahm M. Galper")
+        assert matched is True
+
+    def test_different_people_dont_match(self):
+        """Completely different names should not match."""
+        from app.rra.fuzzy import names_match
+        matched, _ = names_match("John Moorhead", "Alice Moorhead Lynn")
+        assert matched is False
+
+    def test_doreen_rao_variants_match(self):
+        from app.rra.fuzzy import names_match
+        matched, _ = names_match(
+            "Doreen (Circle Of Sound) Rao",
+            "Doreen Rao (Composer/Arranger)",
+        )
+        assert matched is True
+
+    def test_granville_smith_matches(self):
+        from app.rra.fuzzy import names_match
+        matched, _ = names_match(
+            "Maureen Granville-Smith",
+            "Maureen Granville-Smith (Frank O'Hara)",
+        )
+        assert matched is True

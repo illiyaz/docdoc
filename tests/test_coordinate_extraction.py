@@ -1524,3 +1524,315 @@ class TestAnchorDriftDetection:
         # Drift should be approximately 20pt (purely vertical)
         assert "PERSON" in drift
         assert 15.0 < drift["PERSON"] < 25.0  # allow rendering tolerance
+
+
+# ---------------------------------------------------------------------------
+# Anchor-bounded extraction tests (text bleed prevention)
+# ---------------------------------------------------------------------------
+
+
+class TestAnchorBoundedExtraction:
+    """Tests for anchor-bounded extraction: _find_all_anchors, _clip_region,
+    and the integration into _extract_field to prevent text bleed between fields.
+
+    The core problem: on fixed-layout documents (especially rotation=270),
+    _compute_region returns regions that extend to the page edge.  When two
+    fields are on the same line (e.g. "Client:" then "In Account with:"),
+    the first field's region bleeds into the second, producing garbage names
+    like "AGENCIA LITERARIA M CASANOVAS RE: EST OF M LAINEZ In Account with ...".
+
+    The fix: pre-scan ALL anchors on the page, then clip each field's region
+    at the position of the next anchor in the reading direction.
+    """
+
+    # -- _find_all_anchors --------------------------------------------------
+
+    def test_find_all_anchors_basic(self):
+        """Two field maps, both anchors found on the page."""
+        field_map = [
+            FieldMapping(field_type="PERSON", anchor_text="Client", spatial_relationship="same_line_right"),
+            FieldMapping(field_type="US_SSN", anchor_text="Tax No", spatial_relationship="same_line_right"),
+        ]
+        words = [
+            _make_word(50, 100, 100, 115, "Client:"),
+            _make_word(110, 100, 200, 115, "John"),
+            _make_word(205, 100, 290, 115, "Smith"),
+            _make_word(50, 140, 80, 155, "Tax"),
+            _make_word(85, 140, 110, 155, "No"),
+            _make_word(120, 140, 220, 155, "123-45-6789"),
+        ]
+        ext = CoordinateExtractor(field_map, "", "doc1")
+        anchors = ext._find_all_anchors(words, rotation=0)
+        assert len(anchors) == 2
+        types = [a[0] for a in anchors]
+        assert "PERSON" in types
+        assert "US_SSN" in types
+        # Each entry has a 4-tuple bbox
+        for _, bbox in anchors:
+            assert len(bbox) == 4
+
+    def test_find_all_anchors_one_missing(self):
+        """One anchor found, the other missing from the page."""
+        field_map = [
+            FieldMapping(field_type="PERSON", anchor_text="Client", spatial_relationship="same_line_right"),
+            FieldMapping(field_type="DATE_OF_BIRTH", anchor_text="DOB", spatial_relationship="same_line_right"),
+        ]
+        words = [
+            _make_word(50, 100, 100, 115, "Client:"),
+            _make_word(110, 100, 200, 115, "John"),
+            # No "DOB" anchor on page
+        ]
+        ext = CoordinateExtractor(field_map, "", "doc1")
+        anchors = ext._find_all_anchors(words, rotation=0)
+        assert len(anchors) == 1
+        assert anchors[0][0] == "PERSON"
+
+    # -- _clip_region -------------------------------------------------------
+
+    def test_clip_region_rotation_0_same_line_right(self):
+        """Rotation 0: clip x1 at next anchor's x0 on same y-band."""
+        # Current field at x=105..580 (page-width region), y=95..120
+        region = (105.0, 95.0, 580.0, 120.0)
+        current_anchor = (50.0, 100.0, 100.0, 115.0)
+        # Next anchor at x=300, same y-band
+        all_anchors = [
+            ("PERSON", (50.0, 100.0, 100.0, 115.0)),
+            ("DATE_OF_BIRTH", (300.0, 100.0, 340.0, 115.0)),
+        ]
+        clipped = CoordinateExtractor._clip_region(
+            region, "PERSON", all_anchors, current_anchor,
+            "same_line_right", rotation=0,
+        )
+        # x1 should be clipped to 300 - 5 = 295
+        assert clipped[2] == 295.0
+        # Other bounds unchanged
+        assert clipped[0] == 105.0
+        assert clipped[1] == 95.0
+        assert clipped[3] == 120.0
+
+    def test_clip_region_rotation_270_same_line_right(self):
+        """Rotation 270: clip y1 at next anchor's y0 on same x-band.
+
+        This is the CMG scenario: "Client:" anchor at y~100-200 (x~50-70),
+        "In Account with:" anchor at y~350-400 (x~50-70, same x-band).
+        The Client region should stop before "In Account with:".
+        """
+        # Current field: x=48..72 (tight x-band), y=205..772 (extends to page bottom)
+        region = (48.0, 205.0, 72.0, 772.0)
+        current_anchor = (50.0, 100.0, 70.0, 200.0)
+        # "In Account with" anchor on same x-band, further along in y
+        all_anchors = [
+            ("PERSON", (50.0, 100.0, 70.0, 200.0)),
+            ("LOCATION", (50.0, 350.0, 70.0, 400.0)),
+        ]
+        clipped = CoordinateExtractor._clip_region(
+            region, "PERSON", all_anchors, current_anchor,
+            "same_line_right", rotation=270,
+        )
+        # y1 should be clipped to 350 - 5 = 345
+        assert clipped[3] == 345.0
+        # Other bounds unchanged
+        assert clipped[0] == 48.0
+        assert clipped[1] == 205.0
+        assert clipped[2] == 72.0
+
+    def test_clip_region_no_anchors_ahead(self):
+        """No other anchor ahead in reading direction: region unchanged."""
+        region = (105.0, 95.0, 580.0, 120.0)
+        current_anchor = (50.0, 100.0, 100.0, 115.0)
+        # Only the current anchor, no others
+        all_anchors = [
+            ("PERSON", (50.0, 100.0, 100.0, 115.0)),
+        ]
+        clipped = CoordinateExtractor._clip_region(
+            region, "PERSON", all_anchors, current_anchor,
+            "same_line_right", rotation=0,
+        )
+        assert clipped == region  # unchanged
+
+    def test_clip_region_skip_self(self):
+        """Anchor with same field_type is skipped (doesn't clip against itself)."""
+        region = (105.0, 95.0, 580.0, 120.0)
+        current_anchor = (50.0, 100.0, 100.0, 115.0)
+        # Another "PERSON" anchor further right (hypothetical duplicate) — should be skipped
+        all_anchors = [
+            ("PERSON", (50.0, 100.0, 100.0, 115.0)),
+            ("PERSON", (300.0, 100.0, 350.0, 115.0)),
+        ]
+        clipped = CoordinateExtractor._clip_region(
+            region, "PERSON", all_anchors, current_anchor,
+            "same_line_right", rotation=0,
+        )
+        assert clipped == region  # self-type is skipped
+
+    def test_clip_region_line_below_not_clipped(self):
+        """line_below relationship is NOT clipped (only same_line_right/left)."""
+        region = (0.0, 115.0, 580.0, 140.0)
+        current_anchor = (50.0, 100.0, 100.0, 115.0)
+        all_anchors = [
+            ("PERSON", (50.0, 100.0, 100.0, 115.0)),
+            ("DATE_OF_BIRTH", (300.0, 125.0, 340.0, 140.0)),
+        ]
+        clipped = CoordinateExtractor._clip_region(
+            region, "PERSON", all_anchors, current_anchor,
+            "line_below", rotation=0,
+        )
+        assert clipped == region  # unchanged for line_below
+
+    def test_clip_region_rotation_90(self):
+        """Rotation 90: same_line_right clips ry0 (reading direction is -y)."""
+        # Rotation 90: reading = decreasing y. Region starts at y=20, ends at y=395.
+        region = (48.0, 20.0, 72.0, 395.0)
+        current_anchor = (50.0, 400.0, 70.0, 500.0)
+        # Other anchor on same x-band at lower y (ahead in reading direction for rot90)
+        all_anchors = [
+            ("PERSON", (50.0, 400.0, 70.0, 500.0)),
+            ("LOCATION", (50.0, 200.0, 70.0, 250.0)),
+        ]
+        clipped = CoordinateExtractor._clip_region(
+            region, "PERSON", all_anchors, current_anchor,
+            "same_line_right", rotation=90,
+        )
+        # ry0 should be clipped to 250 + 5 = 255
+        assert clipped[1] == 255.0
+
+    def test_clip_region_rotation_180(self):
+        """Rotation 180: same_line_right clips rx0 (reading direction is -x)."""
+        region = (20.0, 95.0, 295.0, 120.0)
+        current_anchor = (300.0, 100.0, 400.0, 115.0)
+        # Other anchor at lower x (ahead in reading direction for rot180), same y-band
+        all_anchors = [
+            ("PERSON", (300.0, 100.0, 400.0, 115.0)),
+            ("DATE_OF_BIRTH", (100.0, 100.0, 140.0, 115.0)),
+        ]
+        clipped = CoordinateExtractor._clip_region(
+            region, "PERSON", all_anchors, current_anchor,
+            "same_line_right", rotation=180,
+        )
+        # rx0 should be clipped to 140 + 5 = 145
+        assert clipped[0] == 145.0
+
+    # -- Integration: _extract_field with clipping --------------------------
+
+    def test_extract_field_uses_clipping(self):
+        """Integration: _extract_field with all_anchors produces shorter text."""
+        # Layout: "Client: John Smith" at y=100, "DOB: 15/03/1980" at y=100, x=300
+        # Without clipping, "Client" same_line_right extends to page width
+        # and would capture "DOB:" and "15/03/1980" as part of the name.
+        # With clipping, it stops before the DOB anchor.
+        words = [
+            _make_word(50, 100, 100, 115, "Client:"),
+            _make_word(110, 100, 170, 115, "John"),
+            _make_word(175, 100, 250, 115, "Smith"),
+            _make_word(300, 100, 340, 115, "DOB:"),
+            _make_word(345, 100, 440, 115, "15/03/1980"),
+        ]
+        field_map = [
+            FieldMapping(field_type="PERSON", anchor_text="Client", spatial_relationship="same_line_right"),
+            FieldMapping(field_type="DATE_OF_BIRTH", anchor_text="DOB", spatial_relationship="same_line_right"),
+        ]
+        ext = CoordinateExtractor(field_map, "", "doc1")
+        page = MagicMock()
+        page.rect = MagicMock()
+        page.rect.width = 600
+        page.rect.height = 800
+
+        all_anchors = ext._find_all_anchors(words, rotation=0)
+
+        # With clipping
+        value_clipped = ext._extract_field(
+            words, field_map[0], page, rotation=0, norm_type="PERSON",
+            all_anchors=all_anchors,
+        )
+        # Without clipping
+        value_unclipped = ext._extract_field(
+            words, field_map[0], page, rotation=0, norm_type="PERSON",
+        )
+
+        # Clipped should NOT contain DOB text
+        assert value_clipped is not None
+        assert "DOB" not in value_clipped
+        assert "15/03/1980" not in value_clipped
+        assert "John" in value_clipped
+        assert "Smith" in value_clipped
+
+        # Unclipped might contain DOB text (depends on region width vs page width)
+        # The key assertion is the clipped version is clean
+        assert value_clipped is not None
+
+    def test_rotation_270_text_bleed_prevented(self):
+        """The specific CMG scenario: "Client:" followed by "In Account with:"
+        on a rotation=270 page.  Without clipping, the name bleeds into the
+        next field.  With clipping, extraction stops at the boundary.
+
+        Rotation 270 layout: x is the "cross-line" axis (narrow band),
+        y is the "along-line" axis (reading direction = increasing y).
+        """
+        # Simulate rotation=270 coordinates:
+        # "Client:" anchor at x~50-70, y=100-150
+        # Name words at x~50-70, y=155-220 (same x-band, after anchor in y)
+        # "In" anchor at x~50-70, y=300 (same x-band, further in y)
+        # "Account" at x~50-70, y=320
+        # "with" at x~50-70, y=340
+        words = [
+            _make_word(50, 100, 70, 150, "Client:"),
+            _make_word(50, 155, 70, 180, "AGENCIA"),
+            _make_word(50, 185, 70, 210, "LITERARIA"),
+            _make_word(50, 215, 70, 240, "CASANOVAS"),
+            # Next field starts here:
+            _make_word(50, 300, 70, 320, "In"),
+            _make_word(50, 325, 70, 345, "Account"),
+            _make_word(50, 350, 70, 370, "with"),
+            _make_word(50, 375, 70, 395, ":"),
+            _make_word(50, 400, 70, 430, "AGENCIA"),
+            _make_word(50, 435, 70, 465, "LITERARIA"),
+        ]
+        field_map = [
+            FieldMapping(field_type="PERSON", anchor_text="Client", spatial_relationship="same_line_right"),
+            FieldMapping(field_type="LOCATION", anchor_text="In Account with", spatial_relationship="same_line_right"),
+        ]
+        ext = CoordinateExtractor(field_map, "", "doc1")
+        page = MagicMock()
+        page.rect = MagicMock()
+        page.rect.width = 612
+        page.rect.height = 792
+
+        all_anchors = ext._find_all_anchors(words, rotation=270)
+
+        # With clipping: PERSON region clipped before "In Account with" anchor
+        value = ext._extract_field(
+            words, field_map[0], page, rotation=270, norm_type="PERSON",
+            all_anchors=all_anchors,
+        )
+        assert value is not None
+        # Name should NOT contain the "In Account with" label or its content
+        assert "In" not in value.split()  # "In" as standalone word
+        assert "Account" not in value
+        assert "with" not in value
+        # Name should contain the actual name words
+        assert "AGENCIA" in value
+        assert "LITERARIA" in value
+        assert "CASANOVAS" in value
+        # Name should be reasonably short (< 50 chars, not 76+)
+        assert len(value) < 50
+
+    def test_backwards_compatible_no_all_anchors(self):
+        """When all_anchors is not passed, behavior is identical to before (no clipping)."""
+        words = [
+            _make_word(50, 100, 100, 115, "Client:"),
+            _make_word(110, 100, 170, 115, "John"),
+            _make_word(175, 100, 250, 115, "Smith"),
+            _make_word(300, 100, 340, 115, "DOB:"),
+            _make_word(345, 100, 440, 115, "15/03/1980"),
+        ]
+        fm = FieldMapping(field_type="PERSON", anchor_text="Client", spatial_relationship="same_line_right")
+        ext = CoordinateExtractor([fm], "", "doc1")
+        page = MagicMock()
+        page.rect = MagicMock()
+        page.rect.width = 600
+        page.rect.height = 800
+
+        # No all_anchors parameter — should work exactly as before
+        value = ext._extract_field(words, fm, page, rotation=0, norm_type="PERSON")
+        assert value is not None
+        assert "John" in value

@@ -450,6 +450,9 @@ class CoordinateExtractor:
             # _find_anchor, and _words_to_text handle this correctly.
             rotation = page.rotation
 
+            # Pre-scan all anchor positions for anchor-bounded extraction
+            all_anchors = self._find_all_anchors(words, rotation)
+
             # Collect fields into a dict, then construct frozen PIIRecord
             fields: dict[str, str | dict] = {}
             entity_types_found: list[str] = []
@@ -458,7 +461,7 @@ class CoordinateExtractor:
 
             for fm in self.field_map:
                 norm_type = _normalize_field_type(fm.field_type)
-                value = self._extract_field(words, fm, page, rotation, norm_type)
+                value = self._extract_field(words, fm, page, rotation, norm_type, all_anchors=all_anchors)
                 if value:
                     raw_field = _FIELD_TO_RAW.get(norm_type)
                     if raw_field:
@@ -603,6 +606,88 @@ class CoordinateExtractor:
 
         return drift_map
 
+    # -- Anchor pre-scanning for bounded extraction -------------------------
+
+    def _find_all_anchors(
+        self,
+        words: list[tuple],
+        rotation: int,
+    ) -> list[tuple[str, tuple[float, float, float, float]]]:
+        """Find positions of ALL anchors in the field map on a page.
+
+        Returns list of ``(normalized_field_type, anchor_bbox)`` for each
+        field whose anchor was found on this page.  Used by ``_clip_region``
+        to prevent extraction regions from bleeding into adjacent fields.
+        """
+        result: list[tuple[str, tuple[float, float, float, float]]] = []
+        for fm in self.field_map:
+            anchor_words = self._find_anchor(words, fm.anchor_text, rotation)
+            if anchor_words:
+                bbox = self._merge_bboxes(anchor_words)
+                norm_type = _normalize_field_type(fm.field_type)
+                result.append((norm_type, bbox))
+        return result
+
+    @staticmethod
+    def _clip_region(
+        region: tuple[float, float, float, float],
+        field_type: str,
+        all_anchors: list[tuple[str, tuple[float, float, float, float]]],
+        current_anchor_bbox: tuple[float, float, float, float],
+        spatial_rel: str,
+        rotation: int,
+    ) -> tuple[float, float, float, float]:
+        """Clip region so it stops before the next anchor in the reading direction.
+
+        For ``same_line_right`` (rotation=0): clip ``x1`` at the ``x0`` of the
+        next anchor on the same y-band.
+        For ``same_line_right`` (rotation=270): clip ``y1`` at the ``y0`` of the
+        next anchor on the same x-band.
+        Analogous logic for rotation=90 and rotation=180.
+
+        Only clips ``same_line_right`` and ``same_line_left`` relationships
+        (the main source of text bleed).  Other relationships (``line_below``,
+        ``lines_below_N``, ``region_right``) are returned unchanged.
+
+        A 5-point gap is left before the next anchor to avoid capturing its
+        label text.
+        """
+        if spatial_rel not in ("same_line_right", "same_line_left"):
+            return region
+
+        rx0, ry0, rx1, ry1 = region
+        ax0, ay0, ax1, ay1 = current_anchor_bbox
+
+        GAP = 5  # points gap before next anchor
+
+        for other_type, other_bbox in all_anchors:
+            if other_type == field_type:
+                continue  # Skip self
+            ox0, oy0, ox1, oy1 = other_bbox
+
+            if rotation == 270:
+                # same_line_right: reading direction is increasing y, same x-band
+                x_overlap = (ox0 < ax1 + 10) and (ox1 > ax0 - 10)
+                if x_overlap and oy0 > ay1:
+                    ry1 = min(ry1, oy0 - GAP)
+            elif rotation == 90:
+                # same_line_right: reading direction is decreasing y, same x-band
+                x_overlap = (ox0 < ax1 + 10) and (ox1 > ax0 - 10)
+                if x_overlap and oy1 < ay0:
+                    ry0 = max(ry0, oy1 + GAP)
+            elif rotation == 180:
+                # same_line_right: reading direction is decreasing x, same y-band
+                y_overlap = (oy0 < ay1 + 10) and (oy1 > ay0 - 10)
+                if y_overlap and ox1 < ax0:
+                    rx0 = max(rx0, ox1 + GAP)
+            else:  # rotation == 0
+                # same_line_right: reading direction is increasing x, same y-band
+                y_overlap = (oy0 < ay1 + 10) and (oy1 > ay0 - 10)
+                if y_overlap and ox0 > ax1:
+                    rx1 = min(rx1, ox0 - GAP)
+
+        return (rx0, ry0, rx1, ry1)
+
     # -- Field extraction ---------------------------------------------------
 
     def _extract_field(
@@ -612,6 +697,8 @@ class CoordinateExtractor:
         page: object,
         rotation: int = 0,
         norm_type: str | None = None,
+        *,
+        all_anchors: list[tuple[str, tuple[float, float, float, float]]] | None = None,
     ) -> str | None:
         """Find anchor text and extract the value at the relative position.
 
@@ -628,6 +715,10 @@ class CoordinateExtractor:
         norm_type:
             Normalized field type (after alias resolution). Falls back to
             ``field.field_type`` if not provided.
+        all_anchors:
+            Pre-scanned anchor positions from ``_find_all_anchors()``.
+            When provided, the extraction region is clipped at the nearest
+            subsequent anchor to prevent text bleed between fields.
 
         Returns
         -------
@@ -645,6 +736,14 @@ class CoordinateExtractor:
         region = self._compute_region(anchor_bbox, field, page, rotation)
         if region is None:
             return None
+
+        # Clip region at next anchor boundary to prevent text bleed
+        if all_anchors:
+            effective_type = norm_type or _normalize_field_type(field.field_type)
+            region = self._clip_region(
+                region, effective_type, all_anchors,
+                anchor_bbox, field.spatial_relationship, rotation,
+            )
 
         # Collect words in the region, excluding standalone punctuation
         region_words_raw = [
