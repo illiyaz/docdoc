@@ -317,6 +317,83 @@ def find_structural_names(
 
     return found
 
+
+# ---------------------------------------------------------------------------
+# Regex-based name format learning for mixed-case names (Gap 1 fix)
+#
+# When vision samples contain mixed-case names ("Smith, John", "John Smith",
+# "Mr. John Smith"), the structural matcher (ALL_CAPS only) won't find them.
+# This function learns a format-specific regex from the first sample and
+# returns it for use as a second fallback after structural matching.
+# ---------------------------------------------------------------------------
+
+# Unicode character classes for name patterns
+_U = r"A-Z\u00C0-\u00D6\u00D8-\u00DE"  # uppercase Latin + diacritics
+_L = r"a-z\u00E0-\u00F6\u00F8-\u00FF"  # lowercase Latin + diacritics
+
+
+def _learn_name_regex(
+    samples: list[str],
+) -> tuple[re.Pattern | None, str]:
+    """Learn a format-specific regex from person name samples.
+
+    Detects 5 name formats from the first non-empty sample:
+    - ``"last_first"``: comma-separated (``"Smith, John"``)
+    - ``"titled"``: title prefix (``"Mr. John Smith"``)
+    - ``"first_last"``: mixed-case standard (``"John Smith"``)
+    - ``"all_caps"``: uppercase (``"JOHN SMITH"``)
+    - ``"generic"``: catch-all
+
+    Unicode-aware: handles José, García, Müller, O'Brien-García.
+
+    Returns ``(compiled_pattern, format_name)`` or ``(None, "unknown")``
+    when samples are empty.
+    """
+    if not samples:
+        return None, "unknown"
+
+    # Find first non-empty sample
+    sample = ""
+    for s in samples:
+        s = s.strip()
+        if s:
+            sample = s
+            break
+    if not sample:
+        return None, "unknown"
+
+    U, L = _U, _L
+
+    if "," in sample:
+        # Last, First — allows multi-word surnames: "DE LA CRUZ, JOHN"
+        pattern = rf"[{U}][{U}{L}' -]{{1,30}},\s*[{U}][{U}{L} .'-]+"
+        return re.compile(pattern), "last_first"
+
+    if re.match(r"(?:Mr|Mrs|Ms|Dr|Miss)\b", sample):
+        pattern = rf"(?:Mr|Mrs|Ms|Dr|Miss)\.?\s+[{U}][{U}{L}'-]*(?:\s+[{U}][{U}{L}'-]*)+"
+        return re.compile(pattern), "titled"
+
+    if re.match(rf"[{U}][{L}]", sample):
+        # First Last — allows hyphens, diacritics, suffixes
+        pattern = (
+            rf"[{U}][{L}'-]+(?:[-\s]+[{U}]\.?)?(?:[-\s]+[{U}][{L}'-]+)+"
+            r"(?:\s+(?:Jr|Sr|II|III|IV|V|VI)\.?)?"
+        )
+        return re.compile(pattern), "first_last"
+
+    if re.match(r"[A-Z]+ [A-Z]", sample):
+        # ALL_CAPS — structural matcher handles this too, but provide regex
+        pattern = (
+            r"(?:DR\s+)?[A-Z]{2,}(?:\s+[A-Z]\.?\s*)*[A-Z]{2,}"
+            r"(?:\s+(?:JR|SR|II|III|IV|V|VI|VII|VIII|ESQ|MD|PHD))?"
+        )
+        return re.compile(pattern), "all_caps"
+
+    # Generic fallback
+    pattern = rf"[{U}][{U}{L}'-]{{1,25}}(?:[,\s]+[{U}][{U}{L} .'-]+)+"
+    return re.compile(pattern), "generic"
+
+
 # Address validation: US state abbreviations (2-letter), ZIP codes, country names
 _US_STATE_ABBRS = frozenset({
     "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA",
@@ -408,6 +485,10 @@ class CoordinateExtractor:
         self._name_structures: set[tuple[str, ...]] = set()
         self._struct_min_w = 2
         self._struct_max_w = 4
+        # Regex-based name pattern for mixed-case names (Gap 1 fix)
+        self._name_regex: re.Pattern | None = None
+        self._name_format: str = "unknown"
+
         if name_samples:
             self._name_structures, self._struct_min_w, self._struct_max_w = (
                 _build_name_structures(name_samples)
@@ -416,6 +497,13 @@ class CoordinateExtractor:
                 logger.info(
                     "Structural name matcher: %d patterns from %d samples",
                     len(self._name_structures), len(name_samples),
+                )
+            # Also learn regex for mixed-case name fallback
+            self._name_regex, self._name_format = _learn_name_regex(name_samples)
+            if self._name_regex:
+                logger.info(
+                    "Name regex matcher: format=%s from %d samples",
+                    self._name_format, len(name_samples),
                 )
 
     def extract_all_pages(
@@ -477,12 +565,16 @@ class CoordinateExtractor:
                     # PERSON is mandatory — page fails without it
                     success = False
 
+            # Name fallback: get page text once for both structural and regex
+            page_text: str | None = None
+            if not success and (self._name_structures or self._name_regex):
+                page_text = page.get_text()
+
             # Structural name fallback (Step 23a):
             # When anchor-based PERSON extraction fails but we have structural
             # patterns from vision samples, scan the page text for ALL_CAPS names.
             # Proven on Complex1 (0→8,617) and PPACA (0→1,650).
-            if not success and self._name_structures:
-                page_text = page.get_text()
+            if not success and self._name_structures and page_text:
                 for line in page_text.split("\n"):
                     line_stripped = line.strip()
                     if len(line_stripped) < 4:
@@ -498,6 +590,24 @@ class CoordinateExtractor:
                         entity_types_found.append("PERSON")
                         success = True
                         break  # Use first name found on page
+
+            # Regex name fallback (Gap 1 fix):
+            # When both anchor-based and structural (ALL_CAPS) matching fail,
+            # try format-specific regex for mixed-case names (first_last,
+            # last_first, titled).
+            if not success and self._name_regex and page_text:
+                for line in page_text.split("\n"):
+                    line_stripped = line.strip()
+                    if len(line_stripped) < 4:
+                        continue
+                    match = self._name_regex.search(line_stripped)
+                    if match:
+                        candidate = match.group(0).strip()
+                        if _is_likely_name(candidate):
+                            fields["raw_name"] = candidate
+                            entity_types_found.append("PERSON")
+                            success = True
+                            break
 
             # Address fallback: if PERSON found but no LOCATION in field_map,
             # look for address lines below the PERSON anchor.  Common in

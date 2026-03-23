@@ -374,7 +374,7 @@ These are detailed in [docs/SCHEMA.md](docs/SCHEMA.md). Summary:
 | 20. Vision-First Extraction Architecture | COMPLETE | Vision-language model as primary extractor. VisionDocumentExtractor, PDF page renderer, instance boundary detector, OllamaClient.generate_with_images. 4 extraction strategies: template, table, vision page, Presidio fallback. Pattern validation. Per-protocol model config. Table extraction. Background extraction (SSE decoupling). Configurable dedup anchors. Batch reliability with retry/backoff. 79 new tests. |
 | 21. Coordinate-Based Extraction for Structured Documents | COMPLETE | For fixed-layout documents (accounting statements, payslips), LLM analyzes layout once → builds field map (anchor text + spatial relationships + coordinates) → Python extracts ALL pages using coordinate-based text extraction in seconds. Auditor reviews/edits field map before extraction. Reconciliation: failed pages sent to LLM fallback. ADDITIVE — existing LLM template/table/page paths unchanged. |
 | 22. Vision-Based Document Routing | COMPLETE | VisionRouter reads ONE page with vision model → determines structure type, PII fields, extraction path. FieldMapBuilder bridges vision PII to PyMuPDF coordinates. ExtractionVerifier validates post-extraction completeness. Frontend auditor panel shows vision routing results with field map editor. |
-| 23. Hybrid Pipeline & Multi-Format Orchestration | **PROVEN** | Standalone testing on 34 real documents: 78,471 records, 33/34 working. PDF hybrid (vision+template+coord), scanned PDF OCR, 47 file formats, coordinate-based audit. See PLAN.md Step 23 for integration plan. |
+| 23. Hybrid Pipeline & Multi-Format Orchestration | **COMPLETE** | Gap analysis + 2 fixes. Static value filtering, name format learning, consistency scoring all in UI pipeline. **Gap 1 fix:** `_learn_name_regex()` in `coordinate_extractor.py` — mixed-case name fallback (last_first, titled, first_last, all_caps, generic) with Unicode support. Person samples persisted to `metadata_json` during vision routing, loaded for extraction. **Gap 2 fix:** Archive pre-extraction in `discovery.py` — two-pass `list_documents()` extracts .zip/.7z contents via `upload_helpers.extract_archive()`, idempotent. Original testing: 34 real documents, 78,471 records, 33/34 working. |
 
 **Step 23 — Standalone Scripts (proven, awaiting integration):**
 
@@ -551,7 +551,7 @@ Folder → Discover → Route → Extract → Audit → Normalize → Dedup → 
   - **Fix D — Preview validation**: Coordinate preview in `analyze_generator()` validates extracted names against `_FIELD_MAP_BAD_NAMES`, warns if field map produces garbage.
   - `tests/test_coordinate_extraction.py`: 8 new tests (good field map passes, header text rejected, empty/no-PERSON/nonexistent rejected, single-word rejected, bad names set completeness)
 
-**2424 tests passing. (1 pre-existing failure in test_template_detection unrelated.)**
+**2787 tests passing. (Pre-existing failures in test_pattern_validator, test_vision_extraction, test_vision_router, test_step23_hybrid unrelated.)**
 
 **Step 22a (Run 1): VisionRouter — Vision-Based Document Routing** ✅
   - `app/pipeline/vision_router.py` NEW: `VisionRouter` class + `VisionRoutingResult` dataclass

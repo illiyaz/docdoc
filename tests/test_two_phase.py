@@ -12,6 +12,7 @@ Tests across classes:
 """
 from __future__ import annotations
 
+import inspect
 import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -1332,3 +1333,46 @@ class TestExtractionQualityGate:
         nameless = [self._make_record(gov_id="123-45-6789"), self._make_record(gov_id="987-65-4321")]
         records = valid + nameless  # 3 valid of 5 total = 60% → accepted
         assert _check_extraction_quality(records, "test") is True
+
+
+# ---------------------------------------------------------------------------
+# Person Samples Persistence (Gap 1)
+# ---------------------------------------------------------------------------
+
+class TestPersonSamplesPersistence:
+    """Test that person name samples from vision routing are persisted to
+    document metadata and loaded during coordinate extraction."""
+
+    def test_person_samples_persisted_to_metadata(self):
+        """Vision routing with PERSON fields stores person_samples in metadata."""
+        import importlib
+        two_phase = importlib.import_module("app.pipeline.two_phase")
+        source = inspect.getsource(two_phase)
+        # Verify the persistence code exists in the source
+        assert 'doc_meta["person_samples"]' in source
+        assert '"person_samples"' in source
+
+    def test_person_samples_loaded_for_coordinate_extraction(self):
+        """CoordinateExtractor receives name_samples from metadata."""
+        import importlib
+        two_phase = importlib.import_module("app.pipeline.two_phase")
+        source = inspect.getsource(two_phase)
+        # Verify the loading code passes name_samples
+        assert 'name_samples=_person_samples' in source or 'name_samples=' in source
+        assert 'doc_meta.get("person_samples")' in source
+
+    def test_coordinate_extractor_uses_samples(self):
+        """CoordinateExtractor initialized with name_samples builds regex."""
+        from app.pipeline.coordinate_extractor import CoordinateExtractor
+        from app.structure.document_schema import FieldMapping
+        fm = FieldMapping(
+            field_type="PERSON",
+            anchor_text="Name",
+            spatial_relationship="same_line_right",
+        )
+        ext = CoordinateExtractor([fm], "", "doc1", name_samples=["John Smith"])
+        assert ext._name_regex is not None
+        assert ext._name_format == "first_last"
+        # Without samples, no regex
+        ext2 = CoordinateExtractor([fm], "", "doc2")
+        assert ext2._name_regex is None

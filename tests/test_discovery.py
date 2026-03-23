@@ -251,3 +251,113 @@ class TestDiscoveryTask:
         task = DiscoveryTask()
         result = task.run([self._make_connector([])])
         assert result == []
+
+
+# ---------------------------------------------------------------------------
+# Archive Extraction in Discovery (Gap 2)
+# ---------------------------------------------------------------------------
+
+class TestArchiveDiscovery:
+    """Test that archives (.zip, .7z) are extracted during discovery
+    and their contents appear as individual documents."""
+
+    def test_zip_contents_discovered(self, tmp_path: Path):
+        """Zip archive contents should appear; zip itself should not."""
+        import zipfile
+        archive = tmp_path / "data.zip"
+        with zipfile.ZipFile(archive, "w") as zf:
+            zf.writestr("report.pdf", b"%PDF-1.4 fake pdf content")
+            zf.writestr("data.csv", b"a,b,c\n1,2,3")
+        conn = FilesystemConnector(tmp_path)
+        docs = conn.list_documents()
+        names = {d["file_name"] for d in docs}
+        types = {d["file_type"] for d in docs}
+        assert "report.pdf" in names
+        assert "data.csv" in names
+        assert "data.zip" not in names
+        assert "zip" not in types
+
+    def test_regular_files_alongside_archives(self, tmp_path: Path):
+        """Regular files and extracted archive contents both appear."""
+        import zipfile
+        # Regular file
+        (tmp_path / "standalone.pdf").write_bytes(b"%PDF standalone")
+        # Archive with one file
+        archive = tmp_path / "archive.zip"
+        with zipfile.ZipFile(archive, "w") as zf:
+            zf.writestr("inner.xlsx", b"fake xlsx content")
+        conn = FilesystemConnector(tmp_path)
+        docs = conn.list_documents()
+        names = {d["file_name"] for d in docs}
+        assert "standalone.pdf" in names
+        assert "inner.xlsx" in names
+        assert "archive.zip" not in names
+
+    def test_bad_zip_skipped_with_warning(self, tmp_path: Path):
+        """Corrupted archive is skipped without crash."""
+        (tmp_path / "bad.zip").write_bytes(b"this is not a zip")
+        (tmp_path / "good.pdf").write_bytes(b"%PDF good")
+        conn = FilesystemConnector(tmp_path)
+        docs = conn.list_documents()
+        names = {d["file_name"] for d in docs}
+        assert "good.pdf" in names
+        assert "bad.zip" not in names
+
+    def test_unsupported_files_in_zip_filtered(self, tmp_path: Path):
+        """Files with unsupported extensions inside zip are excluded."""
+        import zipfile
+        archive = tmp_path / "mixed.zip"
+        with zipfile.ZipFile(archive, "w") as zf:
+            zf.writestr("readme.txt", b"just text")  # unsupported
+            zf.writestr("data.pdf", b"%PDF content")  # supported
+        conn = FilesystemConnector(tmp_path)
+        docs = conn.list_documents()
+        names = {d["file_name"] for d in docs}
+        assert "data.pdf" in names
+        assert "readme.txt" not in names
+
+    def test_archive_extraction_idempotent(self, tmp_path: Path):
+        """Running list_documents() twice gives same results."""
+        import zipfile
+        archive = tmp_path / "data.zip"
+        with zipfile.ZipFile(archive, "w") as zf:
+            zf.writestr("report.pdf", b"%PDF content")
+        conn = FilesystemConnector(tmp_path)
+        docs1 = conn.list_documents()
+        docs2 = conn.list_documents()
+        names1 = {d["file_name"] for d in docs1}
+        names2 = {d["file_name"] for d in docs2}
+        assert names1 == names2
+        assert "report.pdf" in names1
+
+    def test_nested_zip_extracted(self, tmp_path: Path):
+        """Nested archives are extracted recursively (1 level)."""
+        import zipfile
+        inner = tmp_path / "inner.zip"
+        with zipfile.ZipFile(inner, "w") as zf:
+            zf.writestr("nested.csv", b"x,y\n1,2")
+        outer = tmp_path / "outer.zip"
+        with zipfile.ZipFile(outer, "w") as zf:
+            zf.write(inner, "inner.zip")
+        inner.unlink()  # remove the standalone inner.zip
+        conn = FilesystemConnector(tmp_path)
+        docs = conn.list_documents()
+        names = {d["file_name"] for d in docs}
+        assert "nested.csv" in names
+        assert "outer.zip" not in names
+
+    def test_extracted_dir_reused(self, tmp_path: Path):
+        """Pre-existing _extracted directory is reused without re-extraction."""
+        import zipfile
+        archive = tmp_path / "data.zip"
+        with zipfile.ZipFile(archive, "w") as zf:
+            zf.writestr("report.pdf", b"%PDF content")
+        # Pre-create the extracted directory manually
+        extracted_dir = tmp_path / "data_extracted"
+        extracted_dir.mkdir()
+        (extracted_dir / "manual.csv").write_bytes(b"a,b\n1,2")
+        conn = FilesystemConnector(tmp_path)
+        docs = conn.list_documents()
+        names = {d["file_name"] for d in docs}
+        # Should pick up the manually-placed file, not re-extract
+        assert "manual.csv" in names

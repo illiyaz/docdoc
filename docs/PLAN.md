@@ -5,7 +5,7 @@ See [CLAUDE.md](../CLAUDE.md) for project overview and conventions.
 
 **Phase 5 — Forentis AI Evolution (IN PROGRESS)**
 
-Steps 1-20 COMPLETE (2185+ tests). See PLAN_COMPLETED.md for full details.
+Steps 1-24 COMPLETE (2787+ tests). See PLAN_COMPLETED.md for full details.
 
 ---
 
@@ -339,10 +339,30 @@ Run pytest. Update CLAUDE.md.
 ```
 ---
 
-### Step 23 — Hybrid Pipeline Integration & Multi-Format Orchestration (PROVEN — NEEDS WIRING)
+### Step 23 — Hybrid Pipeline Integration & Multi-Format Orchestration (COMPLETE — NO REMAINING GAPS)
 
-**Status: Extraction logic PROVEN on 34 real documents (78,471 records, 33/34 working). 
-Standalone scripts validated. Now wire into main pipeline.**
+**Status: COMPLETE. Initial gap analysis found 3 features already present + 2 additional gaps that were then fixed.**
+
+**Features already present (no changes needed):**
+
+1. **Static Value Filtering** — `app/pipeline/static_filter.py` → `filter_static_values()`, wired into `two_phase.py` for Path 0 and Paths 1/2/3. Thresholds: PERSON >80%, other >50%, min 5 pages. Never filters US_SSN/GOVERNMENT_ID.
+
+2. **Consistency Scoring / Audit** — `app/pipeline/extraction_verifier.py` → `verify_by_coordinates()`, median-based outlier detection, weighted scoring, PASS/REVIEW/FAIL thresholds. Wired into `two_phase.py` after ALL extraction paths.
+
+**Gap 1 fix — Mixed-case name regex learning:**
+- **Problem:** Structural name matcher only handled ALL_CAPS. Mixed-case names ("Smith, John", "John Smith") had no fallback when anchor extraction failed.
+- **Fix:** `_learn_name_regex()` in `app/pipeline/coordinate_extractor.py` — detects 5 name formats from vision samples (last_first, titled, first_last, all_caps, generic) with Unicode support (José, García, Müller). Returns compiled regex. Used as second fallback in `extract_all_pages()` after structural matching, before address fallback.
+- **Wiring:** `app/pipeline/two_phase.py` — person samples persisted to `doc.metadata_json["person_samples"]` during vision routing (analysis phase), loaded and passed as `name_samples=` to `CoordinateExtractor` during extraction.
+- **Tests:** `TestNameRegexLearning` (12 tests), `TestNameRegexFallback` (5 tests), `TestPersonSamplesPersistence` (3 tests).
+
+**Gap 2 fix — Archive extraction in folder-based discovery:**
+- **Problem:** Archives (.zip/.7z) in `_KNOWN_EXTENSIONS` got discovered but couldn't be read — no reader registered, `TikaReader` raised `NotImplementedError`. Upload jobs handled this via `upload_helpers.extract_archive()`, but source_directory jobs failed.
+- **Fix:** Two-pass `list_documents()` in `app/tasks/discovery.py` — Pass 1 extracts any archives to `<stem>_extracted/` subdirectories (reusing `upload_helpers.extract_archive()`). Pass 2 discovers all non-archive files including extracted contents. Idempotent (reuses existing `_extracted/` directories). Graceful failure on bad archives.
+- **Tests:** `TestArchiveDiscovery` (7 tests — zip contents, regular files alongside, bad zip, unsupported filter, idempotent, nested, reuse).
+
+**2787 tests passing (26 new). Pre-existing failures in test_pattern_validator, test_vision_extraction, test_vision_router, test_step23_hybrid unrelated.**
+
+**Original proven metrics (March 2026, 34 real breach documents):**
 
 #### What Was Proven (standalone testing — March 2026)
 
@@ -571,7 +591,7 @@ def filter_static_values(page_records, threshold=0.5):
 
 ### Step 24 — Pipeline Wiring & Upload Endpoint (COMPLETE)
 
-**Status: COMPLETE.** Static filter + template cache wired into `two_phase.py`. File upload endpoint supports all 47 formats with archive/email extraction. Frontend shows coord audit results. 2538 tests passing.
+**Status: COMPLETE.** Static filter + template cache wired into `two_phase.py`. File upload endpoint supports all 47 formats with archive/email extraction. Frontend shows coord audit results. 2787+ tests passing.
 
 ---
 ---
@@ -580,7 +600,7 @@ def filter_static_values(page_records, threshold=0.5):
 
 **Goal:** Close the table-stakes gaps that prevent real deployment. No law firm or breach response team will adopt a tool that handles PII without authentication, can't show source documents, or doesn't track regulatory deadlines. These three steps make Forentis AI deployable.
 
-Steps 1-24 COMPLETE (2538 tests). Phase 5 delivered the extraction engine. Phase 6 wraps it for production use.
+Steps 1-24 COMPLETE (2787+ tests). Phase 5 delivered the extraction engine. Phase 6 wraps it for production use.
 
 ---
 

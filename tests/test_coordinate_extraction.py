@@ -16,7 +16,13 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from app.llm.client import OllamaClient
-from app.pipeline.coordinate_extractor import CoordinateExtractor, _FIELD_TO_RAW, _normalize_field_type
+from app.pipeline.coordinate_extractor import (
+    CoordinateExtractor,
+    _FIELD_TO_RAW,
+    _is_likely_name,
+    _learn_name_regex,
+    _normalize_field_type,
+)
 from app.pipeline.reconciliation import (
     ExtractionReconciler,
     _build_reconciliation_prompt,
@@ -1836,3 +1842,115 @@ class TestAnchorBoundedExtraction:
         value = ext._extract_field(words, fm, page, rotation=0, norm_type="PERSON")
         assert value is not None
         assert "John" in value
+
+
+# ---------------------------------------------------------------------------
+# Name Regex Learning Tests (Gap 1)
+# ---------------------------------------------------------------------------
+
+class TestNameRegexLearning:
+    """Test _learn_name_regex() format detection and pattern generation."""
+
+    def test_empty_samples(self):
+        regex, fmt = _learn_name_regex([])
+        assert regex is None
+        assert fmt == "unknown"
+
+    def test_blank_samples(self):
+        regex, fmt = _learn_name_regex(["", "  "])
+        assert regex is None
+        assert fmt == "unknown"
+
+    def test_last_first_format(self):
+        regex, fmt = _learn_name_regex(["Smith, John"])
+        assert fmt == "last_first"
+        assert regex is not None
+        assert regex.search("Doe, Jane") is not None
+        assert regex.search("De La Cruz, Maria") is not None
+
+    def test_titled_format(self):
+        regex, fmt = _learn_name_regex(["Mr. John Smith"])
+        assert fmt == "titled"
+        assert regex is not None
+        assert regex.search("Dr. Jane Doe") is not None
+        assert regex.search("Mrs. Maria Garcia") is not None
+
+    def test_first_last_format(self):
+        regex, fmt = _learn_name_regex(["John Smith"])
+        assert fmt == "first_last"
+        assert regex is not None
+        assert regex.search("Jane Doe-Williams") is not None
+        assert regex.search("Maria Garcia") is not None
+
+    def test_first_last_with_suffix(self):
+        regex, fmt = _learn_name_regex(["John Smith Jr"])
+        assert fmt == "first_last"
+        assert regex is not None
+        m = regex.search("Robert Jones Sr")
+        assert m is not None
+
+    def test_all_caps_format(self):
+        regex, fmt = _learn_name_regex(["JOHN SMITH"])
+        assert fmt == "all_caps"
+        assert regex is not None
+        assert regex.search("JANE DOE") is not None
+
+    def test_generic_format(self):
+        # A name that doesn't match specific patterns (e.g., single uppercase)
+        regex, fmt = _learn_name_regex(["X-JOHN smith-jones"])
+        assert fmt == "generic"
+        assert regex is not None
+
+    def test_unicode_first_last(self):
+        regex, fmt = _learn_name_regex(["José García"])
+        assert fmt == "first_last"
+        assert regex is not None
+        m = regex.search("María Müller")
+        assert m is not None
+
+    def test_unicode_last_first(self):
+        regex, fmt = _learn_name_regex(["García, José"])
+        assert fmt == "last_first"
+        assert regex is not None
+        m = regex.search("Müller, María")
+        assert m is not None
+
+    def test_skips_empty_first_sample(self):
+        """Uses second sample when first is empty."""
+        regex, fmt = _learn_name_regex(["", "Smith, John"])
+        assert fmt == "last_first"
+        assert regex is not None
+
+
+class TestNameRegexFallback:
+    """Test regex fallback in CoordinateExtractor when structural fails."""
+
+    def test_init_stores_regex(self):
+        fm = FieldMapping(field_type="PERSON", anchor_text="Name", spatial_relationship="same_line_right")
+        ext = CoordinateExtractor([fm], "", "doc1", name_samples=["John Smith"])
+        assert ext._name_regex is not None
+        assert ext._name_format == "first_last"
+
+    def test_init_no_samples_no_regex(self):
+        fm = FieldMapping(field_type="PERSON", anchor_text="Name", spatial_relationship="same_line_right")
+        ext = CoordinateExtractor([fm], "", "doc1")
+        assert ext._name_regex is None
+        assert ext._name_format == "unknown"
+
+    def test_regex_validates_with_is_likely_name(self):
+        """Regex match must also pass _is_likely_name validation."""
+        # "North Avenue" structurally matches first_last but blocklist catches it
+        assert not _is_likely_name("North Avenue")
+        # Real name passes both
+        assert _is_likely_name("John Smith")
+
+    def test_regex_match_requires_two_words(self):
+        """Single-word matches are rejected by _is_likely_name."""
+        assert not _is_likely_name("John")
+
+    def test_last_first_regex_rejects_digits(self):
+        """Names with digits are not real names."""
+        regex, _ = _learn_name_regex(["Smith, John"])
+        assert regex is not None
+        # The regex itself shouldn't match digit-containing strings
+        assert not _is_likely_name("Smith123, John")

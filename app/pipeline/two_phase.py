@@ -898,6 +898,16 @@ def analyze_generator(
                                     }
                                     for fm in field_map
                                 ]
+                            # Persist person name samples for extraction phase (Gap 1)
+                            if routing and routing.pii_fields:
+                                _person_samples = [
+                                    f.get("value", "").strip()
+                                    for f in routing.pii_fields
+                                    if f.get("type") == "PERSON" and f.get("value", "").strip()
+                                ]
+                                if _person_samples:
+                                    doc_meta["person_samples"] = _person_samples
+
                             doc.metadata_json = doc_meta
                             flag_modified(doc, "metadata_json")
 
@@ -2003,8 +2013,12 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                         from app.pipeline.coordinate_extractor import CoordinateExtractor
                         from app.pipeline.reconciliation import ExtractionReconciler
 
+                        # Load person name samples for mixed-case fallback (Gap 1)
+                        _person_samples = doc_meta.get("person_samples") if doc_meta else None
+
                         coord_ext = CoordinateExtractor(
                             effective_field_map, doc.source_path, str(doc.id),
+                            name_samples=_person_samples or None,
                         )
                         coord_records, failed_pages = coord_ext.extract_all_pages()
 

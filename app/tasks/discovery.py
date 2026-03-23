@@ -37,9 +37,12 @@ _KNOWN_EXTENSIONS: frozenset[str] = frozenset({
     # Images (Step 23b — vision-first extraction)
     "jpg", "jpeg", "png", "bmp", "webp", "gif",
     "heic", "heif", "tif", "tiff",
-    # Archives (extracted recursively by upload endpoint)
+    # Archives (extracted during discovery or upload)
     "zip", "7z",
 })
+
+# Archive extensions that need pre-extraction before reader processing
+_ARCHIVE_EXTENSIONS: frozenset[str] = frozenset({"zip", "7z"})
 
 
 class DocumentInfo(TypedDict):
@@ -86,7 +89,21 @@ class FilesystemConnector(DataSourceConnector):
         self.extensions = extensions if extensions is not None else _KNOWN_EXTENSIONS
 
     def list_documents(self) -> list[DocumentInfo]:
-        """Recursively walk root and return a DocumentInfo for every matching file."""
+        """Recursively walk root and return a DocumentInfo for every matching file.
+
+        Archive files (.zip, .7z) are pre-extracted into subdirectories and
+        their contents are included in the result.  The archive files
+        themselves are excluded (they have no reader).
+        """
+        # Pass 1: extract any archives found in the tree
+        for path in sorted(self.root.rglob("*")):
+            if not path.is_file():
+                continue
+            ext = path.suffix.lstrip(".").lower()
+            if ext in _ARCHIVE_EXTENSIONS and (not self.extensions or ext in self.extensions):
+                self._extract_archive_for_discovery(path)
+
+        # Pass 2: discover all non-archive files (including extracted ones)
         docs: list[DocumentInfo] = []
         for path in sorted(self.root.rglob("*")):
             if not path.is_file():
@@ -94,6 +111,8 @@ class FilesystemConnector(DataSourceConnector):
             ext = path.suffix.lstrip(".").lower()
             if self.extensions and ext not in self.extensions:
                 continue
+            if ext in _ARCHIVE_EXTENSIONS:
+                continue  # skip archive files themselves
             try:
                 docs.append(self._describe(path))
             except OSError as exc:
@@ -103,6 +122,45 @@ class FilesystemConnector(DataSourceConnector):
     def fetch_document(self, doc_id: str) -> bytes:
         """Read and return the bytes of the file at doc_id (treated as a path)."""
         return Path(doc_id).read_bytes()
+
+    @staticmethod
+    def _extract_archive_for_discovery(archive_path: Path) -> list[Path]:
+        """Extract archive contents to a subdirectory next to the archive.
+
+        Creates ``<archive_stem>_extracted/`` next to the archive file,
+        extracts supported files into it, and returns extracted file paths.
+        Reuses ``upload_helpers.extract_archive()`` — no code duplication.
+
+        If already extracted (directory exists and is non-empty), reuses
+        existing files without re-extracting.  Archive file itself is NOT
+        deleted (kept for audit trail).
+
+        Returns empty list on failure (bad archive, missing py7zr).
+        """
+        dest_dir = archive_path.parent / f"{archive_path.stem}_extracted"
+
+        # Reuse existing extraction if already done (idempotent)
+        if dest_dir.is_dir() and any(dest_dir.iterdir()):
+            return [
+                f for f in sorted(dest_dir.rglob("*"))
+                if f.is_file()
+                and f.suffix.lstrip(".").lower() in _KNOWN_EXTENSIONS
+                and f.suffix.lstrip(".").lower() not in _ARCHIVE_EXTENSIONS
+            ]
+
+        dest_dir.mkdir(exist_ok=True)
+        try:
+            from app.api.upload_helpers import extract_archive
+            extracted = extract_archive(archive_path, dest_dir)
+        except Exception as exc:
+            logger.warning("Failed to extract archive %s: %s", archive_path, exc)
+            return []
+
+        return [
+            dest_dir / item["name"]
+            for item in extracted
+            if (dest_dir / item["name"]).is_file()
+        ]
 
     @staticmethod
     def _describe(path: Path) -> DocumentInfo:
