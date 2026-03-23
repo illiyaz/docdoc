@@ -2362,6 +2362,90 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                 except Exception:
                     logger.warning("Pattern validation failed for %s, using raw records", doc.file_name, exc_info=True)
 
+                # --- Post-extraction audit (all paths) ---
+                # Coordinate text audit: verify values exist in source
+                audit_result = None
+                if (
+                    records
+                    and doc.source_path
+                    and (doc.file_type or "").lower() in ("pdf", ".pdf", "application/pdf")
+                ):
+                    try:
+                        from app.pipeline.extraction_verifier import (
+                            ExtractionVerifier,
+                            records_to_page_dict,
+                        )
+                        verifier = ExtractionVerifier()
+                        page_recs_audit = records_to_page_dict(records)
+                        if page_recs_audit:
+                            audit_result = verifier.verify_by_coordinates(
+                                doc.source_path, page_recs_audit, sample_size=15,
+                            )
+                            logger.info(
+                                "Post-extraction audit (%s, Path %s): %s (%d%% confidence, %d%% consistency)",
+                                doc.file_name, extraction_path,
+                                audit_result.audit_status, audit_result.audit_confidence,
+                                audit_result.audit_consistency,
+                            )
+                    except Exception:
+                        logger.debug("Post-extraction audit failed for %s", doc.file_name, exc_info=True)
+
+                # --- Vision gap-fill: fill missing fields on records ---
+                gap_fill_result = None
+                if (
+                    records
+                    and settings.llm_assist_enabled
+                    and settings.use_vision_extraction
+                    and doc.source_path
+                    and (doc.file_type or "").lower() in ("pdf", ".pdf", "application/pdf")
+                ):
+                    try:
+                        from app.llm.client import OllamaClient
+                        from app.pipeline.extraction_verifier import ExtractionVerifier
+
+                        verifier = ExtractionVerifier()
+                        gap_pages = verifier.find_gap_pages(records)
+                        if gap_pages:
+                            gap_client = OllamaClient(db_session=db, timeout_s=120)
+                            if gap_client.is_vision_available(model_override=vision_model):
+                                _heartbeat_cb(0, 1, len(all_records) + len(records))
+                                records, gap_fill_result = verifier.vision_gap_fill(
+                                    records=records,
+                                    doc_path=doc.source_path,
+                                    doc_id=str(doc.id),
+                                    ollama_client=gap_client,
+                                    vision_model=vision_model,
+                                    max_pages=50,
+                                )
+                                # Update persisted records with gap-filled data
+                                meta_gf = dict(doc.metadata_json or {})
+                                meta_gf["extracted_records"] = [_serialize_pii_record(r) for r in records]
+                                doc.metadata_json = meta_gf
+                                flag_modified(doc, "metadata_json")
+                                # Update all_records with the gap-filled versions
+                                all_records[-len(records):] = records
+                                logger.info(
+                                    "Vision gap-fill for %s: %d/%d pages succeeded, fields: %s",
+                                    doc.file_name,
+                                    gap_fill_result.gap_fill_succeeded,
+                                    gap_fill_result.gap_fill_attempted,
+                                    gap_fill_result.gap_fill_fields,
+                                )
+                    except Exception:
+                        logger.debug("Vision gap-fill failed for %s", doc.file_name, exc_info=True)
+
+                # Store audit + gap-fill metrics
+                audit_detail: dict = {"extraction_path": extraction_path, "records": len(records), "total": len(approved_docs), "current": i, "status": "running"}
+                if audit_result:
+                    audit_detail["audit_status"] = audit_result.audit_status
+                    audit_detail["audit_confidence"] = audit_result.audit_confidence
+                    audit_detail["audit_consistency"] = audit_result.audit_consistency
+                    audit_detail["pages_audited"] = audit_result.pages_audited
+                if gap_fill_result:
+                    audit_detail["gap_fill_attempted"] = gap_fill_result.gap_fill_attempted
+                    audit_detail["gap_fill_succeeded"] = gap_fill_result.gap_fill_succeeded
+                    audit_detail["gap_fill_fields"] = gap_fill_result.gap_fill_fields
+
                 completed_doc_ids.append(str(doc.id))
                 _update_extraction_progress(
                     db, run,
@@ -2370,7 +2454,7 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                     completed_doc_ids=completed_doc_ids,
                     total_docs=len(approved_docs), current_doc=i,
                     records_found=len(all_records),
-                    detail={"extraction_path": extraction_path, "records": len(records), "total": len(approved_docs), "current": i, "status": "running"},
+                    detail=audit_detail,
                 )
 
             except Exception as e:
