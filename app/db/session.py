@@ -11,7 +11,12 @@ def get_engine():
     global _engine
     if _engine is None:
         settings = get_settings()
-        _engine = create_engine(settings.database_url, pool_pre_ping=True)
+        _engine = create_engine(
+            settings.database_url,
+            pool_pre_ping=True,
+            pool_size=20,
+            max_overflow=10,
+        )
     return _engine
 
 

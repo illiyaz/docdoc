@@ -31,6 +31,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import re
+import threading
 from dataclasses import dataclass, field
 
 import fitz  # PyMuPDF
@@ -69,6 +70,7 @@ class TemplateCache:
     def __init__(self, max_entries: int = 100) -> None:
         self._cache: dict[str, CacheEntry] = {}
         self._max_entries = max_entries
+        self._lock = threading.Lock()
     
     def _compute_key(self, doc_path: str, onset_page: int) -> str | None:
         """Compute structure fingerprint from onset page text.
@@ -112,15 +114,16 @@ class TemplateCache:
         key = self._compute_key(doc_path, onset_page)
         if key is None:
             return None
-        
-        entry = self._cache.get(key)
-        if entry is not None:
-            entry.hit_count += 1
-            logger.info(
-                "Template cache HIT for %s (key=%s, hits=%d)",
-                doc_path, key, entry.hit_count,
-            )
-        return entry
+
+        with self._lock:
+            entry = self._cache.get(key)
+            if entry is not None:
+                entry.hit_count += 1
+                logger.info(
+                    "Template cache HIT for %s (key=%s, hits=%d)",
+                    doc_path, key, entry.hit_count,
+                )
+            return entry
     
     def put(
         self,
@@ -141,22 +144,23 @@ class TemplateCache:
         key = self._compute_key(doc_path, onset_page)
         if key is None:
             return
-        
-        # Evict oldest if at capacity
-        if len(self._cache) >= self._max_entries:
-            oldest = min(self._cache, key=lambda k: self._cache[k].hit_count)
-            del self._cache[oldest]
-        
-        self._cache[key] = CacheEntry(
-            routing_dict=routing_dict,
-            field_map_dicts=field_map_dicts,
-            name_samples=name_samples or [],
-        )
-        
-        logger.info(
-            "Template cache STORE for %s (key=%s, total=%d)",
-            doc_path, key, len(self._cache),
-        )
+
+        with self._lock:
+            # Evict oldest if at capacity
+            if len(self._cache) >= self._max_entries:
+                oldest = min(self._cache, key=lambda k: self._cache[k].hit_count)
+                del self._cache[oldest]
+
+            self._cache[key] = CacheEntry(
+                routing_dict=routing_dict,
+                field_map_dicts=field_map_dicts,
+                name_samples=name_samples or [],
+            )
+
+            logger.info(
+                "Template cache STORE for %s (key=%s, total=%d)",
+                doc_path, key, len(self._cache),
+            )
     
     @property
     def size(self) -> int:

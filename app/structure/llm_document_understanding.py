@@ -113,7 +113,10 @@ class LLMDocumentUnderstanding:
     """
 
     def __init__(self, db_session: Session | None = None) -> None:
-        self.client = OllamaClient(db_session=db_session)
+        from app.core.settings import get_settings as _get_settings
+        settings = _get_settings()
+        understanding_model = settings.ollama_understanding_model or settings.ollama_model
+        self.client = OllamaClient(db_session=db_session, model=understanding_model)
 
     def understand(
         self,
@@ -158,6 +161,88 @@ class LLMDocumentUnderstanding:
             return None
         except Exception:
             logger.exception("LLM document understanding failed")
+            return None
+
+    # Renderable image formats for vision fallback
+    _RENDERABLE_TYPES = frozenset({
+        "pdf", "heic", "heif", "jpg", "jpeg", "png", "tiff", "tif", "bmp",
+    })
+
+    def understand_with_vision(
+        self,
+        doc_path: str,
+        *,
+        file_type: str = "",
+        file_name: str = "",
+        onset_page: int = 0,
+        document_id: str = "",
+    ) -> DocumentSchema | None:
+        """Vision fallback for docs with no text blocks (scanned PDFs, images).
+
+        Renders the onset page as an image, sends it to the vision model with
+        ``UNDERSTAND_DOCUMENT_VISION`` prompt, and parses the response using
+        the existing ``_parse_response()`` logic.
+
+        Returns ``None`` on any failure.  Never raises.
+        """
+        ft = (file_type or "").lower().lstrip(".")
+        if ft not in self._RENDERABLE_TYPES:
+            return None
+
+        try:
+            import base64
+
+            image_b64: str | None = None
+
+            if ft == "pdf":
+                from app.pdf.renderer import render_page_to_image
+                image_b64 = render_page_to_image(doc_path, onset_page, dpi=200)
+            elif ft in ("heic", "heif"):
+                try:
+                    from pillow_heif import register_heif_opener
+                    register_heif_opener()
+                except ImportError:
+                    pass
+                from PIL import Image
+                import io
+                img = Image.open(doc_path)
+                buf = io.BytesIO()
+                img.save(buf, format="PNG")
+                image_b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+            else:
+                # jpg, png, tiff, bmp — read and encode
+                from PIL import Image
+                import io
+                img = Image.open(doc_path)
+                buf = io.BytesIO()
+                img.save(buf, format="PNG")
+                image_b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+
+            if not image_b64:
+                return None
+
+            prompt_template = PROMPT_TEMPLATES["understand_document_vision"]
+            prompt = prompt_template.format(
+                file_name=file_name or doc_path.split("/")[-1],
+                file_type=file_type or "unknown",
+            )
+
+            response_text = self.client.generate_with_images(
+                prompt=prompt,
+                images=[image_b64],
+                use_case="understand_document_vision",
+                document_id=document_id,
+            )
+
+            return self._parse_response(response_text)
+
+        except LLMDisabledError:
+            logger.debug("LLM disabled; skipping vision document understanding")
+            return None
+        except Exception:
+            logger.warning(
+                "Vision document understanding failed for %s", doc_path, exc_info=True,
+            )
             return None
 
     def _resolve_pages_to_read(

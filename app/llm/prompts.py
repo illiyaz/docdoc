@@ -422,6 +422,69 @@ UNDERSTAND_MULTI_PAGE_DOCUMENT = (
 )
 
 # ---------------------------------------------------------------------------
+# UNDERSTAND_DOCUMENT_VISION (Vision fallback for docs with no text blocks)
+# ---------------------------------------------------------------------------
+
+UNDERSTAND_DOCUMENT_VISION = (
+    "You are analyzing a document image to understand its structure and identify what "
+    "data fields mean.  The document text could not be extracted digitally, so you must "
+    "read the visible content from the image.\n"
+    "\n"
+    "Document: {file_name} ({file_type})\n"
+    "\n"
+    "Look at the document image and respond ONLY with a JSON object:\n"
+    '{{\n'
+    '  "document_type": "the type of document (financial_statement, medical_record, '
+    'hr_file, insurance_claim, legal_filing, tax_form, correspondence, etc.)",\n'
+    '  "document_subtype": "more specific type if identifiable",\n'
+    '  "issuing_entity": "the organization that produced this document, or null",\n'
+    '  "field_map": [\n'
+    '    {{\n'
+    '      "label": "the field label as it appears in the document",\n'
+    '      "value_example": "the value next to this label",\n'
+    '      "semantic_type": "what this field actually represents",\n'
+    '      "is_pii": true,\n'
+    '      "presidio_override": "Presidio entity type or null",\n'
+    '      "suppress_types": []\n'
+    '    }}\n'
+    '  ],\n'
+    '  "people": [\n'
+    '    {{\n'
+    '      "name": "person name visible in the document",\n'
+    '      "role": "primary_subject | related_party | institutional_contact | provider",\n'
+    '      "context": "how this person relates to the document",\n'
+    '      "is_pii_subject": true\n'
+    '    }}\n'
+    '  ],\n'
+    '  "organizations": ["list of organizations visible"],\n'
+    '  "date_contexts": [\n'
+    '    {{\n'
+    '      "value": "the date as it appears",\n'
+    '      "semantic_type": "transaction_date | date_of_birth | filing_date | etc.",\n'
+    '      "is_pii": false\n'
+    '    }}\n'
+    '  ],\n'
+    '  "tables": [],\n'
+    '  "suppression_hints": [],\n'
+    '  "extraction_notes": "brief note about what PII is visible and how it is organized",\n'
+    '  "schema_confidence": 0.7,\n'
+    '  "is_tabular": false,\n'
+    '  "records_per_page_estimate": 1,\n'
+    '  "layout_type": "variable",\n'
+    '  "layout_confidence": 0.0,\n'
+    '  "layout_field_map": null\n'
+    '}}\n'
+    "\n"
+    "IMPORTANT:\n"
+    "- Read ALL text visible in the image carefully.\n"
+    "- Report EXACT values as you see them — do not guess or infer.\n"
+    "- Be precise about what IS and ISN'T PII.\n"
+    "- If you cannot read the document clearly, set schema_confidence low.\n"
+    "\n"
+    "Respond ONLY with valid JSON.  No additional text."
+)
+
+# ---------------------------------------------------------------------------
 # Template registry for programmatic access
 # ---------------------------------------------------------------------------
 
@@ -433,4 +496,5 @@ PROMPT_TEMPLATES: dict[str, str] = {
     "analyze_entity_relationships": ANALYZE_ENTITY_RELATIONSHIPS,
     "understand_document": UNDERSTAND_DOCUMENT,
     "understand_multi_page_document": UNDERSTAND_MULTI_PAGE_DOCUMENT,
+    "understand_document_vision": UNDERSTAND_DOCUMENT_VISION,
 }

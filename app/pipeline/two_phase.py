@@ -12,6 +12,7 @@ Both generators follow the exact same SSE pattern as
 """
 from __future__ import annotations
 
+import concurrent.futures
 import dataclasses
 import hashlib
 import json
@@ -85,6 +86,22 @@ def _resolve_target_entities(
 def _sse(data: dict) -> str:
     """Format a dict as an SSE data line."""
     return f"data: {json.dumps(data)}\n\n"
+
+
+def _refresh_session(db: Session, run_id, doc_ids: list):
+    """Close session and create a new one, reattaching ORM objects by ID.
+
+    Releases the DB connection back to the pool during long operations
+    (e.g. LLM/vision model calls) so API endpoints are not starved.
+    """
+    db.close()
+    from app.api.deps import _get_session_factory
+    new_db = _get_session_factory()()
+    run = new_db.get(IngestionRun, run_id)
+    docs = new_db.execute(
+        select(Document).where(Document.id.in_(doc_ids))
+    ).scalars().all()
+    return new_db, run, {d.id: d for d in docs}
 
 
 # Mapping from LLM field names to canonical preview field names
@@ -192,6 +209,217 @@ def _parse_preview_response(
             fields_found[canonical] = {"value": value_str, "page": default_page}
 
     return fields_found
+
+
+# ---------------------------------------------------------------------------
+# Schema-based vision skip (Step 2 optimization)
+# ---------------------------------------------------------------------------
+
+
+def _try_schema_skip(schema, doc_total_pages: int = 0):
+    """Check if LLM Document Understanding already produced enough info to skip vision.
+
+    Returns ``(routing_dict, field_map_dicts)`` if the schema is sufficient
+    to determine the extraction path, otherwise ``None``.
+
+    ``routing_dict`` follows the same shape as ``VisionRoutingResult`` serialized
+    to dict.  ``field_map_dicts`` is a list of FieldMapping dicts or ``None``.
+    """
+    if schema is None:
+        return None
+
+    layout_type = getattr(schema, "layout_type", "variable")
+    field_map = getattr(schema, "layout_field_map", None)
+
+    # Fixed/template_with_drift + has field map → coordinate path
+    if layout_type in ("fixed", "template_with_drift") and field_map:
+        fm_dicts = [
+            {
+                "field_type": fm.field_type,
+                "anchor_text": fm.anchor_text,
+                "spatial_relationship": fm.spatial_relationship,
+                "value_pattern": fm.value_pattern,
+                "sample_bbox": getattr(fm, "sample_bbox", []),
+                "line_count": getattr(fm, "line_count", 1),
+                "skip_pattern": getattr(fm, "skip_pattern", None),
+            }
+            for fm in field_map
+        ]
+        return {
+            "structure_type": "fixed_single_page",
+            "structure_confidence": getattr(schema, "layout_confidence", 0.8),
+            "pii_fields": [],
+            "records_per_page": 1,
+            "cross_page_data": False,
+            "pages_per_instance": 1,
+            "recommended_path": "coordinate",
+        }, fm_dicts
+
+    # Tabular doc with multi-record pages → llm_table path
+    is_tabular = getattr(schema, "is_tabular", False)
+    rpp = getattr(schema, "records_per_page_estimate", 1)
+    if is_tabular and rpp > 1:
+        return {
+            "structure_type": "table",
+            "structure_confidence": getattr(schema, "schema_confidence", 0.7),
+            "pii_fields": [],
+            "records_per_page": rpp,
+            "cross_page_data": False,
+            "pages_per_instance": 1,
+            "recommended_path": "llm_table",
+        }, None
+
+    # Multi-page template → llm_template path
+    template = getattr(schema, "template", None)
+    if template is not None and getattr(template, "pages_per_instance", 1) >= 2:
+        return {
+            "structure_type": "multi_page_template",
+            "structure_confidence": getattr(schema, "schema_confidence", 0.7),
+            "pii_fields": [],
+            "records_per_page": 1,
+            "cross_page_data": True,
+            "pages_per_instance": getattr(template, "pages_per_instance", 2),
+            "recommended_path": "llm_template",
+        }, None
+
+    # Not enough info — needs vision routing
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Parallel vision routing worker (Step 3 optimization)
+# ---------------------------------------------------------------------------
+
+
+def _route_single_document(doc_info: dict, router, template_cache, builder_cls) -> dict:
+    """Route one document via vision model.  Thread-safe, no DB access.
+
+    Parameters
+    ----------
+    doc_info : dict
+        Keys: doc_id, source_path, file_name, file_type, onset, total_pages, is_scanned
+    router : VisionRouter
+    template_cache : TemplateCache (thread-safe)
+    builder_cls : FieldMapBuilder class
+
+    Returns
+    -------
+    dict with keys: routing_dict, field_map_dicts, name_samples, cache_hit, error
+    """
+    source_path = doc_info["source_path"]
+    onset = doc_info["onset"]
+    total_pages = doc_info["total_pages"]
+    is_scanned = doc_info["is_scanned"]
+
+    result = {
+        "doc_id": doc_info["doc_id"],
+        "routing_dict": None,
+        "field_map_dicts": None,
+        "name_samples": [],
+        "cache_hit": False,
+        "error": None,
+    }
+
+    try:
+        # --- Template cache check ---
+        cached_entry = template_cache.get(source_path, onset)
+        if cached_entry:
+            result["routing_dict"] = cached_entry.routing_dict
+            result["field_map_dicts"] = cached_entry.field_map_dicts
+            result["name_samples"] = cached_entry.name_samples
+            result["cache_hit"] = True
+            return result
+
+        # --- Vision model call ---
+        from app.pipeline.vision_router import VisionRoutingResult
+        routing = router.analyze_document(
+            source_path, onset_page=onset,
+            total_pages=total_pages, is_scanned=is_scanned,
+        )
+
+        # --- PERSON validation ---
+        try:
+            from app.pipeline.person_discovery import is_likely_name, discover_person_from_text
+            person_fields = [f for f in routing.pii_fields if f.get("type") == "PERSON"]
+            valid_persons = [f for f in person_fields if is_likely_name(f.get("value", ""))]
+            invalid_persons = [f for f in person_fields if not is_likely_name(f.get("value", ""))]
+
+            if person_fields and not valid_persons:
+                discovered, best_page = discover_person_from_text(source_path, onset)
+                if discovered:
+                    routing.pii_fields = [
+                        f for f in routing.pii_fields if f.get("type") != "PERSON"
+                    ] + discovered
+                    onset = best_page
+                else:
+                    routing.recommended_path = "presidio"
+            elif invalid_persons and valid_persons:
+                routing.pii_fields = [
+                    f for f in routing.pii_fields if f.get("type") != "PERSON"
+                ] + valid_persons
+        except Exception:
+            pass  # PERSON validation is best-effort
+
+        # --- Build field map for coordinate path ---
+        field_map = None
+        if routing.recommended_path == "coordinate":
+            builder = builder_cls()
+            field_map = builder.build_field_map(routing, source_path, page_num=onset)
+
+            if field_map:
+                try:
+                    from app.pipeline.coordinate_extractor import CoordinateExtractor
+                    test_ext = CoordinateExtractor(field_map, source_path, "validation")
+                    test_records, _ = test_ext.extract_all_pages(page_range=[onset])
+                    if not test_records or not test_records[0].raw_name:
+                        field_map = None
+                        routing.recommended_path = "vision_direct" if total_pages <= 5 else "presidio"
+                except Exception:
+                    field_map = None
+                    routing.recommended_path = "vision_direct" if total_pages <= 5 else "presidio"
+
+        # --- Serialize results ---
+        routing_dict = {
+            "structure_type": routing.structure_type,
+            "structure_confidence": routing.structure_confidence,
+            "pii_fields": routing.pii_fields,
+            "records_per_page": routing.records_per_page,
+            "cross_page_data": routing.cross_page_data,
+            "pages_per_instance": routing.pages_per_instance,
+            "recommended_path": routing.recommended_path,
+        }
+        fm_dicts = None
+        if field_map:
+            fm_dicts = [
+                {
+                    "field_type": fm.field_type,
+                    "anchor_text": fm.anchor_text,
+                    "spatial_relationship": fm.spatial_relationship,
+                    "value_pattern": fm.value_pattern,
+                    "sample_bbox": fm.sample_bbox,
+                    "line_count": fm.line_count,
+                    "skip_pattern": fm.skip_pattern,
+                }
+                for fm in field_map
+            ]
+        name_samples = [
+            f.get("value", "") for f in routing.pii_fields if f.get("type") == "PERSON"
+        ]
+
+        # Store in template cache
+        try:
+            template_cache.put(source_path, onset, routing_dict, fm_dicts, name_samples)
+        except Exception:
+            pass
+
+        result["routing_dict"] = routing_dict
+        result["field_map_dicts"] = fm_dicts
+        result["name_samples"] = name_samples
+        return result
+
+    except Exception as exc:
+        result["error"] = str(exc)
+        return result
 
 
 # ---------------------------------------------------------------------------
@@ -396,6 +624,12 @@ def analyze_generator(
                 logger.warning("Structure analysis failed for doc %s: %s", doc.file_name, type(e).__name__)
 
         db.commit()
+
+        # Release session before onset detection (may do Presidio + fitz I/O)
+        all_doc_ids = [d.id for d in doc_records]
+        db, run, _doc_map = _refresh_session(db, run.id, all_doc_ids)
+        doc_records = [_doc_map[did] for did in all_doc_ids if did in _doc_map]
+
         yield _sse({
             "stage": "structure_analysis", "status": "complete",
             "message": f"Analyzed structure of {len(doc_records)} document(s)",
@@ -583,6 +817,24 @@ def analyze_generator(
                         protocol_config=protocol_config,
                     )
 
+                    # Vision fallback: if text-based understanding returned
+                    # nothing (e.g. scanned PDF, image-only doc), try vision.
+                    if schema is None and doc.source_path:
+                        ft = (doc.file_type or "").lower().lstrip(".")
+                        if ft in doc_understanding._RENDERABLE_TYPES:
+                            schema = doc_understanding.understand_with_vision(
+                                doc.source_path,
+                                file_type=ft,
+                                file_name=doc.file_name or "",
+                                onset_page=onset_page,
+                                document_id=str(doc.id),
+                            )
+                            if schema is not None:
+                                logger.info(
+                                    "Vision fallback produced schema for %s",
+                                    doc.file_name,
+                                )
+
                     doc_schemas[doc.id] = schema
 
                     if schema is not None:
@@ -638,13 +890,19 @@ def analyze_generator(
             },
         })
 
+        # Release session before vision routing (long model calls)
+        all_doc_ids = [d.id for d in doc_records]
+        db, run, _doc_map = _refresh_session(db, run.id, all_doc_ids)
+        doc_records = [_doc_map[did] for did in all_doc_ids if did in _doc_map]
+
         # --- Stage 4b-0: Vision-based routing for extraction path ---
         # Uses vision model to classify document structure and identify PII
-        # fields. Replaces LLM layout_type classification as primary routing.
+        # fields.  Optimized: schema-skip + parallel routing.
 
         doc_previews: dict[UUID, dict] = {}
         preview_count = 0
         vision_routed_docs: set[UUID] = set()
+        schema_skipped_docs: set[UUID] = set()
 
         if settings.llm_assist_enabled and settings.use_vision_extraction:
             try:
@@ -689,30 +947,22 @@ def analyze_generator(
                         "detail": {"total": len(doc_records), "current": 0},
                     })
 
+                    # --- Phase A: Schema-based skip (no vision call needed) ---
+                    work_items: list[dict] = []
+
                     for vr_idx, doc in enumerate(doc_records, 1):
                         if not doc.source_path:
                             continue
 
-                        yield _sse({
-                            "stage": "vision_routing", "status": "running",
-                            "message": f"Routing document {vr_idx}/{len(doc_records)}...",
-                            "detail": {"total": len(doc_records), "current": vr_idx},
-                        })
-
-                        # Determine if scanned
                         blocks = doc_blocks_cache.get(doc.id, [])
                         is_scanned = (
                             len(blocks) == 0
                             and (doc.file_type or "").lower() in ("pdf", ".pdf", "application/pdf")
                         )
-
-                        # Get onset page and total pages
                         onset = doc.sample_onset_page or 0
                         total_pages = doc_total_pages.get(doc.id, 0)
                         if total_pages == 0:
                             total_pages = len(set(b.page_or_sheet for b in blocks)) if blocks else 0
-
-                        # For scanned docs, get page count from PyMuPDF
                         if total_pages == 0 and is_scanned and doc.source_path:
                             try:
                                 import fitz
@@ -722,255 +972,186 @@ def analyze_generator(
                             except Exception:
                                 pass
 
-                        try:
-                            # --- Template cache (Step 23e): skip vision on repeat layouts ---
-                            cached_entry = template_cache.get(doc.source_path, onset)
-                            cache_hit = False
+                        # Try schema-based skip first
+                        schema = doc_schemas.get(doc.id)
+                        skip_result = _try_schema_skip(schema, total_pages)
 
-                            if cached_entry:
-                                # Reconstruct routing + field_map from cache
-                                rd = cached_entry.routing_dict
-                                routing = VisionRoutingResult(
-                                    structure_type=rd.get("structure_type", "variable"),
-                                    structure_confidence=rd.get("structure_confidence", 0.8),
-                                    pii_fields=rd.get("pii_fields", []),
-                                    records_per_page=rd.get("records_per_page", 1),
-                                    cross_page_data=rd.get("cross_page_data", False),
-                                    pages_per_instance=rd.get("pages_per_instance", 1),
-                                    recommended_path=rd.get("recommended_path", "presidio"),
-                                )
-                                field_map = None
-                                if cached_entry.field_map_dicts:
-                                    from app.structure.document_schema import FieldMapping
-                                    field_map = [
-                                        FieldMapping(
-                                            field_type=fm["field_type"],
-                                            anchor_text=fm["anchor_text"],
-                                            spatial_relationship=fm["spatial_relationship"],
-                                            value_pattern=fm.get("value_pattern"),
-                                            sample_bbox=fm.get("sample_bbox", []),
-                                            line_count=fm.get("line_count", 1),
-                                            skip_pattern=fm.get("skip_pattern"),
-                                        )
-                                        for fm in cached_entry.field_map_dicts
-                                    ]
-                                cache_hit = True
-                                logger.info(
-                                    "Template cache hit for %s — skipping vision call",
-                                    doc.file_name,
-                                )
-                            else:
-                                routing = router.analyze_document(
-                                    doc.source_path, onset_page=onset,
-                                    total_pages=total_pages, is_scanned=is_scanned,
-                                )
+                        if skip_result is not None:
+                            routing_dict, fm_dicts = skip_result
+                            schema_skipped_docs.add(doc.id)
 
-                            # --- Gate 1: Validate PERSON fields from vision ---
-                            # Vision may misidentify page headers as names
-                            # (e.g., "January Statement" as PERSON). Validate
-                            # against blocklist, fall back to text discovery.
-                            if not cache_hit and routing.pii_fields:
-                                try:
-                                    from app.pipeline.person_discovery import (
-                                        is_likely_name,
-                                        discover_person_from_text,
-                                    )
-                                    person_fields = [
-                                        f for f in routing.pii_fields
-                                        if f.get("type") == "PERSON"
-                                    ]
-                                    valid_persons = [
-                                        f for f in person_fields
-                                        if is_likely_name(f.get("value", ""))
-                                    ]
-                                    invalid_persons = [
-                                        f for f in person_fields
-                                        if not is_likely_name(f.get("value", ""))
-                                    ]
-
-                                    if invalid_persons:
-                                        logger.warning(
-                                            "Vision PERSON validation: %d/%d rejected for %s: %s",
-                                            len(invalid_persons), len(person_fields),
-                                            doc.file_name,
-                                            [f.get("value", "")[:30] for f in invalid_persons],
-                                        )
-
-                                    if person_fields and not valid_persons:
-                                        # All PERSON fields invalid — try text discovery
-                                        logger.info(
-                                            "All PERSON fields invalid for %s, trying text discovery",
-                                            doc.file_name,
-                                        )
-                                        discovered, best_page = discover_person_from_text(
-                                            doc.source_path, onset,
-                                        )
-                                        if discovered:
-                                            # Replace invalid PERSON fields with discovered ones
-                                            routing.pii_fields = [
-                                                f for f in routing.pii_fields
-                                                if f.get("type") != "PERSON"
-                                            ] + discovered
-                                            onset = best_page
-                                            logger.info(
-                                                "Text discovery found %d PERSON on page %d for %s",
-                                                len(discovered), best_page, doc.file_name,
-                                            )
-                                        else:
-                                            # No persons found at all — downgrade path
-                                            logger.warning(
-                                                "No valid PERSON found for %s, downgrading to presidio",
-                                                doc.file_name,
-                                            )
-                                            routing.recommended_path = "presidio"
-                                    elif invalid_persons and valid_persons:
-                                        # Keep only valid persons
-                                        routing.pii_fields = [
-                                            f for f in routing.pii_fields
-                                            if f.get("type") != "PERSON"
-                                        ] + valid_persons
-                                except Exception:
-                                    logger.warning(
-                                        "PERSON validation failed for %s",
-                                        doc.file_name, exc_info=True,
-                                    )
-
-                            # Build field map if coordinate path recommended (skip on cache hit)
-                            if not cache_hit:
-                                field_map = None
-                            if not cache_hit and routing.recommended_path == "coordinate":
-                                builder = FieldMapBuilder()
-                                field_map = builder.build_field_map(
-                                    routing, doc.source_path, page_num=onset,
-                                )
-
-                                # Validate field map with sample extraction
-                                if field_map:
-                                    try:
-                                        from app.pipeline.coordinate_extractor import CoordinateExtractor
-                                        test_ext = CoordinateExtractor(field_map, doc.source_path, "validation")
-                                        test_records, test_failed = test_ext.extract_all_pages(page_range=[onset])
-
-                                        if not test_records or not test_records[0].raw_name:
-                                            logger.warning(
-                                                "Vision field map failed validation for %s, downgrading to %s",
-                                                doc.file_name,
-                                                "vision_direct" if total_pages <= 5 else "presidio",
-                                            )
-                                            field_map = None
-                                            routing.recommended_path = "vision_direct" if total_pages <= 5 else "presidio"
-                                        else:
-                                            logger.info(
-                                                "Vision field map validated: %s → '%s' on page %d",
-                                                doc.file_name, test_records[0].raw_name, onset,
-                                            )
-                                    except Exception:
-                                        logger.warning(
-                                            "Vision field map validation failed for %s",
-                                            doc.file_name, exc_info=True,
-                                        )
-                                        field_map = None
-                                        routing.recommended_path = "vision_direct" if total_pages <= 5 else "presidio"
-
-                                # Store in template cache on successful vision routing
-                                try:
-                                    routing_dict = {
-                                        "structure_type": routing.structure_type,
-                                        "structure_confidence": routing.structure_confidence,
-                                        "pii_fields": routing.pii_fields,
-                                        "records_per_page": routing.records_per_page,
-                                        "cross_page_data": routing.cross_page_data,
-                                        "pages_per_instance": routing.pages_per_instance,
-                                        "recommended_path": routing.recommended_path,
-                                    }
-                                    fm_dicts = None
-                                    if field_map:
-                                        fm_dicts = [
-                                            {
-                                                "field_type": fm.field_type,
-                                                "anchor_text": fm.anchor_text,
-                                                "spatial_relationship": fm.spatial_relationship,
-                                                "value_pattern": fm.value_pattern,
-                                                "sample_bbox": fm.sample_bbox,
-                                                "line_count": fm.line_count,
-                                                "skip_pattern": fm.skip_pattern,
-                                            }
-                                            for fm in field_map
-                                        ]
-                                    name_samples = [
-                                        f.get("value", "")
-                                        for f in routing.pii_fields
-                                        if f.get("type") == "PERSON"
-                                    ]
-                                    template_cache.put(
-                                        doc.source_path, onset, routing_dict, fm_dicts, name_samples,
-                                    )
-                                except Exception:
-                                    logger.debug("Template cache store failed", exc_info=True)
-
-                            # Persist routing result and field map to document metadata
+                            # Persist routing to metadata (same as vision path)
                             doc_meta = doc.metadata_json or {}
                             doc_meta["vision_routing"] = {
-                                "structure_type": routing.structure_type,
-                                "recommended_path": routing.recommended_path,
-                                "pii_field_count": len(routing.pii_fields),
-                                "records_per_page": routing.records_per_page,
-                                "cross_page_data": routing.cross_page_data,
-                                "template_cache_hit": cache_hit,
+                                "structure_type": routing_dict["structure_type"],
+                                "recommended_path": routing_dict["recommended_path"],
+                                "pii_field_count": len(routing_dict.get("pii_fields", [])),
+                                "records_per_page": routing_dict.get("records_per_page", 1),
+                                "cross_page_data": routing_dict.get("cross_page_data", False),
+                                "template_cache_hit": False,
+                                "schema_skip": True,
                             }
-                            if field_map:
-                                doc_meta["vision_field_map"] = [
-                                    {
-                                        "field_type": fm.field_type,
-                                        "anchor_text": fm.anchor_text,
-                                        "spatial_relationship": fm.spatial_relationship,
-                                        "value_pattern": fm.value_pattern,
-                                        "sample_bbox": fm.sample_bbox,
-                                        "line_count": fm.line_count,
-                                        "skip_pattern": fm.skip_pattern,
-                                    }
-                                    for fm in field_map
-                                ]
-                            # Persist person name samples for extraction phase (Gap 1)
-                            if routing and routing.pii_fields:
-                                _person_samples = [
-                                    f.get("value", "").strip()
-                                    for f in routing.pii_fields
-                                    if f.get("type") == "PERSON" and f.get("value", "").strip()
-                                ]
-                                if _person_samples:
-                                    doc_meta["person_samples"] = _person_samples
-
+                            if fm_dicts:
+                                doc_meta["vision_field_map"] = fm_dicts
                             doc.metadata_json = doc_meta
                             flag_modified(doc, "metadata_json")
 
-                            # Build preview for the analysis review panel
                             preview = {
-                                "extraction_method": routing.recommended_path,
-                                "structure_type": routing.structure_type,
-                                "pii_fields": [f.get("type", "") for f in routing.pii_fields],
-                                "field_map_count": len(field_map) if field_map else 0,
+                                "extraction_method": routing_dict["recommended_path"],
+                                "structure_type": routing_dict["structure_type"],
+                                "pii_fields": [f.get("type", "") for f in routing_dict.get("pii_fields", [])],
+                                "field_map_count": len(fm_dicts) if fm_dicts else 0,
                                 "total_instances_estimate": (
-                                    total_pages if routing.records_per_page == 1
-                                    else total_pages * routing.records_per_page
+                                    total_pages if routing_dict.get("records_per_page", 1) == 1
+                                    else total_pages * routing_dict.get("records_per_page", 1)
                                 ),
-                                "sample_values": {
-                                    f.get("type", ""): f.get("value", "")[:50]
-                                    for f in routing.pii_fields[:5]
-                                },
+                                "sample_values": {},
+                                "schema_skip": True,
                             }
                             doc_previews[doc.id] = preview
                             vision_routed_docs.add(doc.id)
 
-                        except Exception:
-                            logger.warning("Vision routing failed for %s", doc.file_name, exc_info=True)
+                            yield _sse({
+                                "stage": "vision_routing", "status": "running",
+                                "message": f"Schema skip for {doc.file_name} → {routing_dict['recommended_path']}",
+                                "detail": {
+                                    "total": len(doc_records), "current": vr_idx,
+                                    "doc_name": doc.file_name,
+                                    "recommended_path": routing_dict["recommended_path"],
+                                    "schema_skip": True,
+                                },
+                            })
+                        else:
+                            # Needs vision routing — add to work queue
+                            work_items.append({
+                                "doc_id": doc.id,
+                                "source_path": doc.source_path,
+                                "file_name": doc.file_name,
+                                "file_type": doc.file_type,
+                                "onset": onset,
+                                "total_pages": total_pages,
+                                "is_scanned": is_scanned,
+                            })
 
                     db.commit()
 
+                    # --- Phase B: Parallel vision routing for remaining docs ---
+                    if work_items:
+                        yield _sse({
+                            "stage": "vision_routing", "status": "running",
+                            "message": f"Vision routing {len(work_items)} document(s) "
+                                       f"({len(schema_skipped_docs)} skipped via schema)...",
+                            "detail": {
+                                "total": len(doc_records),
+                                "current": len(schema_skipped_docs),
+                                "schema_skipped": len(schema_skipped_docs),
+                                "needs_vision": len(work_items),
+                            },
+                        })
+
+                        # Build doc lookup for post-processing
+                        doc_by_id = {d.id: d for d in doc_records}
+
+                        max_workers = min(settings.vision_routing_workers, len(work_items))
+                        vision_results: dict[UUID, dict] = {}
+
+                        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
+                            future_to_item = {
+                                pool.submit(
+                                    _route_single_document, item, router,
+                                    template_cache, FieldMapBuilder,
+                                ): item
+                                for item in work_items
+                            }
+                            for future in concurrent.futures.as_completed(future_to_item):
+                                item = future_to_item[future]
+                                try:
+                                    res = future.result(timeout=180)
+                                    vision_results[item["doc_id"]] = res
+                                except Exception as exc:
+                                    logger.warning(
+                                        "Vision routing worker failed for %s: %s",
+                                        item["file_name"], exc,
+                                    )
+
+                        # --- Phase C: Write results to DB on main thread ---
+                        for item in work_items:
+                            doc_id = item["doc_id"]
+                            doc = doc_by_id.get(doc_id)
+                            if doc is None:
+                                continue
+
+                            res = vision_results.get(doc_id)
+                            if res is None or res.get("routing_dict") is None:
+                                continue
+
+                            routing_dict = res["routing_dict"]
+                            fm_dicts = res.get("field_map_dicts")
+                            cache_hit = res.get("cache_hit", False)
+
+                            # Persist to metadata
+                            doc_meta = doc.metadata_json or {}
+                            doc_meta["vision_routing"] = {
+                                "structure_type": routing_dict.get("structure_type", "variable"),
+                                "recommended_path": routing_dict.get("recommended_path", "presidio"),
+                                "pii_field_count": len(routing_dict.get("pii_fields", [])),
+                                "records_per_page": routing_dict.get("records_per_page", 1),
+                                "cross_page_data": routing_dict.get("cross_page_data", False),
+                                "template_cache_hit": cache_hit,
+                            }
+                            if fm_dicts:
+                                doc_meta["vision_field_map"] = fm_dicts
+                            # Persist person samples
+                            name_samples = res.get("name_samples", [])
+                            if name_samples:
+                                doc_meta["person_samples"] = [
+                                    s.strip() for s in name_samples if s.strip()
+                                ]
+                            doc.metadata_json = doc_meta
+                            flag_modified(doc, "metadata_json")
+
+                            pii_fields = routing_dict.get("pii_fields", [])
+                            total_pages = item["total_pages"]
+                            rpp = routing_dict.get("records_per_page", 1)
+                            preview = {
+                                "extraction_method": routing_dict.get("recommended_path", "presidio"),
+                                "structure_type": routing_dict.get("structure_type", "variable"),
+                                "pii_fields": [f.get("type", "") for f in pii_fields],
+                                "field_map_count": len(fm_dicts) if fm_dicts else 0,
+                                "total_instances_estimate": (
+                                    total_pages if rpp == 1 else total_pages * rpp
+                                ),
+                                "sample_values": {
+                                    f.get("type", ""): f.get("value", "")[:50]
+                                    for f in pii_fields[:5]
+                                },
+                                "cache_hit": cache_hit,
+                            }
+                            doc_previews[doc.id] = preview
+                            vision_routed_docs.add(doc.id)
+
+                            yield _sse({
+                                "stage": "vision_routing", "status": "running",
+                                "message": f"Routed {doc.file_name} → {routing_dict.get('recommended_path', 'presidio')}",
+                                "detail": {
+                                    "total": len(doc_records),
+                                    "current": len(vision_routed_docs),
+                                    "doc_name": doc.file_name,
+                                    "recommended_path": routing_dict.get("recommended_path", "presidio"),
+                                    "cache_hit": cache_hit,
+                                },
+                            })
+
+                        db.commit()
+
                     yield _sse({
                         "stage": "vision_routing", "status": "complete",
-                        "message": f"Vision-routed {len(vision_routed_docs)} document(s)",
-                        "detail": {"routed": len(vision_routed_docs)},
+                        "message": f"Vision-routed {len(vision_routed_docs)} document(s) "
+                                   f"({len(schema_skipped_docs)} schema-skipped)",
+                        "detail": {
+                            "routed": len(vision_routed_docs),
+                            "schema_skipped": len(schema_skipped_docs),
+                        },
                     })
             except ImportError:
                 logger.info("Vision routing not available (missing dependencies)")

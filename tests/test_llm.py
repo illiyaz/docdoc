@@ -458,7 +458,8 @@ class TestPromptTemplates:
         assert "analyze_entity_relationships" in PROMPT_TEMPLATES
         assert "understand_document" in PROMPT_TEMPLATES
         assert "understand_multi_page_document" in PROMPT_TEMPLATES
-        assert len(PROMPT_TEMPLATES) == 7
+        assert "understand_document_vision" in PROMPT_TEMPLATES
+        assert len(PROMPT_TEMPLATES) == 8
 
     def test_classify_template_has_entity_type_key(self) -> None:
         """The template response schema should mention entity_type."""
@@ -517,6 +518,10 @@ class TestPromptTemplates:
                 "total_pages": 6,
                 "protocol_name": "dpdpa",
                 "pages_text": "--- PAGE 0 ---\nStatement of Entitlement\n--- PAGE 1 ---\nMember Details",
+            },
+            "understand_document_vision": {
+                "file_name": "scanned_report.pdf",
+                "file_type": "pdf",
             },
         }
         for name, template in PROMPT_TEMPLATES.items():
@@ -794,3 +799,28 @@ class TestAuditPIISafety:
         # Warning was issued
         mock_warn.assert_called_once()
         assert "PII" in mock_warn.call_args[0][0]
+
+
+# ---------------------------------------------------------------------------
+# Configurable understanding model (Step 4)
+# ---------------------------------------------------------------------------
+
+
+class TestConfigurableUnderstandingModel:
+    """Test that LLMDocumentUnderstanding uses ollama_understanding_model."""
+
+    def test_setting_default_is_none(self) -> None:
+        """ollama_understanding_model defaults to None."""
+        from app.core.settings import Settings
+        s = Settings(DATABASE_URL="sqlite:///test.db")
+        assert s.ollama_understanding_model is None
+
+    def test_understanding_uses_override_model(self) -> None:
+        """When OLLAMA_UNDERSTANDING_MODEL is set, LLMDocumentUnderstanding uses it."""
+        import inspect
+        from app.structure.llm_document_understanding import LLMDocumentUnderstanding
+        source = inspect.getsource(LLMDocumentUnderstanding.__init__)
+        # The __init__ should read ollama_understanding_model
+        assert "ollama_understanding_model" in source
+        # And fall back to ollama_model
+        assert "ollama_model" in source

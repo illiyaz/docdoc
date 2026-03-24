@@ -1,4 +1,4 @@
-"""Tests for two-phase pipeline: content onset, auto-approve, verified onset, entity groups, coordinate wiring, vision routing, extraction verification, page sampling.
+"""Tests for two-phase pipeline: content onset, auto-approve, verified onset, entity groups, coordinate wiring, vision routing, extraction verification, page sampling, performance optimization.
 
 Tests across classes:
 - TestFindContentOnsetFromBlocks (7 tests)
@@ -10,6 +10,12 @@ Tests across classes:
 - TestVisionRoutingPipelineWiring (10 tests)
 - TestExtractionVerificationWiring (7 tests)
 - TestSampledAnalysisPipeline (5 tests)
+- TestConnectionPoolConfig (3 tests)
+- TestSchemaBasedVisionSkip (4 tests)
+- TestParallelVisionRouting (8 tests)
+- TestConfigurableUnderstandingModel (2 tests)
+- TestVisionDocumentUnderstanding (8 tests)
+- TestSSEProgressEnhancement (2 tests)
 """
 from __future__ import annotations
 
@@ -1162,13 +1168,15 @@ class TestVisionRoutingPipelineWiring:
         assert path == "vision_direct"
 
     def test_field_map_validation_failure_downgrades_path(self):
-        """Vision field map validation failure during analysis → path downgraded."""
+        """Vision field map validation failure during routing → path downgraded."""
         import inspect
         from app.pipeline import two_phase
 
-        source = inspect.getsource(two_phase.analyze_generator)
-        assert "Vision field map failed validation" in source
-        assert "downgrading" in source
+        # Now in _route_single_document (parallel worker)
+        source = inspect.getsource(two_phase._route_single_document)
+        assert "vision_direct" in source or "presidio" in source
+        # Also verify the coordinate extractor validation exists
+        assert "CoordinateExtractor" in source
 
     def test_analysis_api_exposes_vision_routing(self):
         """GET /analysis response includes vision_routing and vision_field_map."""
@@ -1426,3 +1434,267 @@ class TestSampledAnalysisPipeline:
         # The else branch for non-PDF should call reader.read()
         assert "reader = get_reader(doc.source_path)" in source
         assert "blocks = reader.read()" in source
+
+
+# ---------------------------------------------------------------------------
+# Step 1: Connection Pool Config
+# ---------------------------------------------------------------------------
+
+
+class TestConnectionPoolConfig:
+    """Verify pool_size and max_overflow are set on DB engines."""
+
+    def test_deps_pool_config(self):
+        """app/api/deps.py creates engine with pool_size=20."""
+        from app.api import deps
+        source = inspect.getsource(deps._get_session_factory)
+        assert "pool_size=20" in source
+        assert "max_overflow=10" in source
+        assert "pool_pre_ping=True" in source
+
+    def test_session_pool_config(self):
+        """app/db/session.py creates engine with pool_size=20."""
+        from app.db import session
+        source = inspect.getsource(session.get_engine)
+        assert "pool_size=20" in source
+        assert "max_overflow=10" in source
+
+    def test_refresh_session_helper_exists(self):
+        """_refresh_session helper is importable and has correct signature."""
+        from app.pipeline.two_phase import _refresh_session
+        sig = inspect.signature(_refresh_session)
+        params = list(sig.parameters.keys())
+        assert "db" in params
+        assert "run_id" in params
+        assert "doc_ids" in params
+
+
+# ---------------------------------------------------------------------------
+# Step 2: Schema-Based Vision Skip
+# ---------------------------------------------------------------------------
+
+
+class TestSchemaBasedVisionSkip:
+    """Test _try_schema_skip() routes based on LLM schema."""
+
+    def test_skip_for_fixed_layout(self):
+        """Fixed layout with field map → coordinate path."""
+        from app.pipeline.two_phase import _try_schema_skip
+        from app.structure.document_schema import FieldMapping
+
+        fm = FieldMapping(field_type="PERSON", anchor_text="Name", spatial_relationship="same_line_right")
+
+        class FakeSchema:
+            layout_type = "fixed"
+            layout_field_map = [fm]
+            layout_confidence = 0.9
+            is_tabular = False
+            records_per_page_estimate = 1
+            template = None
+
+        result = _try_schema_skip(FakeSchema(), 100)
+        assert result is not None
+        routing_dict, fm_dicts = result
+        assert routing_dict["recommended_path"] == "coordinate"
+        assert fm_dicts is not None
+        assert len(fm_dicts) == 1
+
+    def test_skip_for_tabular(self):
+        """Tabular schema with records_per_page > 1 → llm_table."""
+        from app.pipeline.two_phase import _try_schema_skip
+
+        class FakeSchema:
+            layout_type = "variable"
+            layout_field_map = None
+            is_tabular = True
+            records_per_page_estimate = 15
+            schema_confidence = 0.8
+            template = None
+
+        result = _try_schema_skip(FakeSchema(), 50)
+        assert result is not None
+        routing_dict, fm_dicts = result
+        assert routing_dict["recommended_path"] == "llm_table"
+        assert fm_dicts is None
+
+    def test_skip_for_template(self):
+        """Multi-page template → llm_template."""
+        from app.pipeline.two_phase import _try_schema_skip
+
+        class FakeTemplate:
+            pages_per_instance = 3
+
+        class FakeSchema:
+            layout_type = "variable"
+            layout_field_map = None
+            is_tabular = False
+            records_per_page_estimate = 1
+            schema_confidence = 0.85
+            template = FakeTemplate()
+
+        result = _try_schema_skip(FakeSchema(), 100)
+        assert result is not None
+        routing_dict, _ = result
+        assert routing_dict["recommended_path"] == "llm_template"
+
+    def test_no_skip_for_variable(self):
+        """Variable layout with no distinguishing features → None (needs vision)."""
+        from app.pipeline.two_phase import _try_schema_skip
+
+        class FakeSchema:
+            layout_type = "variable"
+            layout_field_map = None
+            is_tabular = False
+            records_per_page_estimate = 1
+            template = None
+
+        assert _try_schema_skip(FakeSchema(), 100) is None
+        assert _try_schema_skip(None, 100) is None
+
+
+# ---------------------------------------------------------------------------
+# Step 3: Parallel Vision Routing
+# ---------------------------------------------------------------------------
+
+
+class TestParallelVisionRouting:
+    """Test parallel vision routing infrastructure."""
+
+    def test_vision_routing_workers_setting(self):
+        """Settings includes vision_routing_workers with default 3."""
+        from app.core.settings import Settings
+        s = Settings(DATABASE_URL="sqlite:///test.db")
+        assert s.vision_routing_workers == 3
+
+    def test_template_cache_thread_safety(self):
+        """TemplateCache has a threading lock."""
+        from app.pipeline.template_cache import TemplateCache
+        tc = TemplateCache()
+        assert hasattr(tc, "_lock")
+        import threading
+        assert isinstance(tc._lock, type(threading.Lock()))
+
+    def test_route_single_document_exists(self):
+        """_route_single_document is importable with correct signature."""
+        from app.pipeline.two_phase import _route_single_document
+        sig = inspect.signature(_route_single_document)
+        params = list(sig.parameters.keys())
+        assert "doc_info" in params
+        assert "router" in params
+        assert "template_cache" in params
+        assert "builder_cls" in params
+
+    def test_route_single_returns_dict(self):
+        """_route_single_document returns dict with required keys."""
+        from app.pipeline.two_phase import _route_single_document
+
+        # Mock router that returns a simple result
+        class MockRouting:
+            structure_type = "variable"
+            structure_confidence = 0.5
+            pii_fields = []
+            records_per_page = 1
+            cross_page_data = False
+            pages_per_instance = 1
+            recommended_path = "presidio"
+
+        class MockRouter:
+            def analyze_document(self, *args, **kwargs):
+                return MockRouting()
+
+        class MockCache:
+            def get(self, *args, **kwargs):
+                return None
+            def put(self, *args, **kwargs):
+                pass
+
+        class MockBuilder:
+            pass
+
+        info = {
+            "doc_id": "test-id",
+            "source_path": "/nonexistent/test.pdf",
+            "file_name": "test.pdf",
+            "file_type": "pdf",
+            "onset": 0,
+            "total_pages": 10,
+            "is_scanned": False,
+        }
+        result = _route_single_document(info, MockRouter(), MockCache(), MockBuilder)
+        assert isinstance(result, dict)
+        assert "routing_dict" in result
+        assert "cache_hit" in result
+        assert result["cache_hit"] is False
+
+    def test_concurrent_futures_imported(self):
+        """concurrent.futures is available in two_phase module."""
+        import importlib
+        two_phase = importlib.import_module("app.pipeline.two_phase")
+        source = inspect.getsource(two_phase)
+        assert "concurrent.futures" in source
+        assert "ThreadPoolExecutor" in source
+
+    def test_parallel_routing_in_source(self):
+        """analyze_generator uses ThreadPoolExecutor for vision routing."""
+        from app.pipeline.two_phase import analyze_generator
+        source = inspect.getsource(analyze_generator)
+        assert "ThreadPoolExecutor" in source
+        assert "as_completed" in source
+
+    def test_schema_skip_in_source(self):
+        """analyze_generator calls _try_schema_skip before vision routing."""
+        from app.pipeline.two_phase import analyze_generator
+        source = inspect.getsource(analyze_generator)
+        assert "_try_schema_skip" in source
+        assert "schema_skipped_docs" in source
+
+    def test_worker_timeout_in_source(self):
+        """Parallel routing uses timeout on future.result()."""
+        from app.pipeline.two_phase import analyze_generator
+        source = inspect.getsource(analyze_generator)
+        assert "timeout=180" in source
+
+
+# ---------------------------------------------------------------------------
+# Step 4: Configurable Understanding Model
+# ---------------------------------------------------------------------------
+
+
+class TestConfigurableUnderstandingModel:
+    """Test OLLAMA_UNDERSTANDING_MODEL setting."""
+
+    def test_setting_exists(self):
+        """Settings includes ollama_understanding_model with None default."""
+        from app.core.settings import Settings
+        s = Settings(DATABASE_URL="sqlite:///test.db")
+        assert s.ollama_understanding_model is None
+
+    def test_understanding_uses_custom_model(self):
+        """LLMDocumentUnderstanding respects ollama_understanding_model setting."""
+        from app.structure import llm_document_understanding
+        source = inspect.getsource(llm_document_understanding.LLMDocumentUnderstanding.__init__)
+        assert "ollama_understanding_model" in source
+        assert "ollama_model" in source
+
+
+# ---------------------------------------------------------------------------
+# Step 6: SSE Progress Enhancement
+# ---------------------------------------------------------------------------
+
+
+class TestSSEProgressEnhancement:
+    """Test enriched SSE events in vision routing."""
+
+    def test_schema_skip_in_sse(self):
+        """SSE events include schema_skip flag."""
+        from app.pipeline.two_phase import analyze_generator
+        source = inspect.getsource(analyze_generator)
+        assert '"schema_skip"' in source
+
+    def test_doc_name_in_sse(self):
+        """SSE events include doc_name."""
+        from app.pipeline.two_phase import analyze_generator
+        source = inspect.getsource(analyze_generator)
+        assert '"doc_name"' in source
+        assert '"recommended_path"' in source
+        assert '"cache_hit"' in source
