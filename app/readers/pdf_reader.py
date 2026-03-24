@@ -40,6 +40,20 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def get_pdf_page_count(path: str | Path) -> int:
+    """Return the number of pages in a PDF without reading content.
+
+    Returns 0 on any error (missing file, corrupt PDF, etc.).
+    """
+    try:
+        doc = fitz.open(str(path))
+        count = doc.page_count
+        doc.close()
+        return count
+    except Exception:
+        return 0
+
+
 def _bbox_overlaps(
     block_bbox: tuple[float, float, float, float],
     table_bbox: tuple[float, float, float, float],
@@ -86,6 +100,35 @@ class PDFReader(BaseReader):
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
+
+    def read_pages(self, page_numbers: list[int]) -> list[ExtractedBlock]:
+        """Read only the specified pages (0-based) and return blocks.
+
+        Uses PyMuPDF random access — pages not in ``page_numbers`` are never
+        loaded.  ``_forget_page()`` is called after each page for memory
+        efficiency.  Out-of-range page numbers are silently skipped.
+        """
+        if not page_numbers:
+            return []
+
+        doc = fitz.open(str(self.path))
+        stitcher = PageStitcher()
+        ocr_engine = None
+        all_blocks: list[ExtractedBlock] = []
+
+        with pdfplumber.open(str(self.path)) as plumber_doc:
+            for page_num in page_numbers:
+                if page_num < 0 or page_num >= len(doc):
+                    continue
+                page = doc.load_page(page_num)
+                page_blocks, ocr_engine = self._process_page(
+                    page, page_num, plumber_doc, stitcher, ocr_engine
+                )
+                all_blocks.extend(page_blocks)
+                doc._forget_page(page_num)
+
+        doc.close()
+        return all_blocks
 
     def read(self) -> list[ExtractedBlock]:
         """Process all pages from onset_page onward and return blocks.

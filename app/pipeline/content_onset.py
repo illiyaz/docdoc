@@ -12,6 +12,7 @@ PII-Verified Onset (Step 13-onset):
 from __future__ import annotations
 
 import logging
+import random
 from typing import TYPE_CHECKING
 
 from app.readers.base import ExtractedBlock
@@ -23,6 +24,44 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _TABULAR = frozenset({"csv", "xlsx", "xls", "parquet", "avro"})
+
+
+def compute_sample_pages(total_pages: int) -> list[int]:
+    """Return sorted 0-based page numbers to sample for structure analysis.
+
+    Tiered strategy:
+      1-10 pages   → all pages
+      11-50        → first 5 + last 2 + 3 random middle
+      51-200       → first 5 + last 2 + 8 random middle
+      201-500      → first 7 + last 3 + 10 random middle
+      500+         → first 8 + last 3 + 14 random middle
+
+    Uses a deterministic seed (total_pages) for reproducibility.
+    """
+    if total_pages <= 0:
+        return []
+
+    if total_pages <= 10:
+        return list(range(total_pages))
+
+    if total_pages <= 50:
+        first_n, last_n, mid_n = 5, 2, 3
+    elif total_pages <= 200:
+        first_n, last_n, mid_n = 5, 2, 8
+    elif total_pages <= 500:
+        first_n, last_n, mid_n = 7, 3, 10
+    else:
+        first_n, last_n, mid_n = 8, 3, 14
+
+    first_pages = set(range(first_n))
+    last_pages = set(range(total_pages - last_n, total_pages))
+
+    # Middle pages: everything not in first or last
+    middle_pool = [p for p in range(total_pages) if p not in first_pages and p not in last_pages]
+    rng = random.Random(total_pages)  # deterministic seed
+    mid_sample = set(rng.sample(middle_pool, min(mid_n, len(middle_pool))))
+
+    return sorted(first_pages | last_pages | mid_sample)
 _PII_VERIFICATION_SCORE = 0.70  # minimum confidence to count as verified PII
 _MAX_SEQUENTIAL_SCAN = 20  # max pages to scan if no heuristic candidates have PII
 _MAX_HEURISTIC_CANDIDATES = 5  # max candidate pages from heuristic pass

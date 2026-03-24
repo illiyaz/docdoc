@@ -39,6 +39,7 @@ from app.pipeline.record_mapper import (
 )
 from app.core.constants import DEFAULT_EXTRACTION_BATCH_SIZE, PROTOCOL_LLM_CONFIG
 from app.pipeline.content_onset import (
+    compute_sample_pages,
     filter_sample_blocks,
     find_content_onset_from_blocks,
     find_verified_onset,
@@ -336,10 +337,12 @@ def analyze_generator(
         })
 
         from app.readers.registry import get_reader
+        from app.readers.pdf_reader import PDFReader, get_pdf_page_count
         from app.tasks.structure_analysis import StructureAnalysisTask
 
         structure_task = StructureAnalysisTask()
         doc_blocks_cache: dict[UUID, list] = {}  # cache blocks for sample_extraction
+        doc_total_pages: dict[UUID, int] = {}  # true page count (not derived from blocks)
 
         for i, doc in enumerate(doc_records, 1):
             yield _sse({
@@ -348,11 +351,30 @@ def analyze_generator(
                 "detail": {"total": len(doc_records), "current": i},
             })
             try:
-                reader = get_reader(doc.source_path)
-                blocks = reader.read()
+                is_pdf = (doc.file_type or "").lower() in ("pdf", ".pdf", "application/pdf")
+
+                # Tiered page sampling: for large PDFs, read only a sample
+                if is_pdf and doc.source_path:
+                    page_count = get_pdf_page_count(doc.source_path)
+                    doc_total_pages[doc.id] = page_count
+
+                    if page_count > 10:
+                        sample_page_nums = compute_sample_pages(page_count)
+                        reader = PDFReader(doc.source_path)
+                        blocks = reader.read_pages(sample_page_nums)
+                        logger.info(
+                            "Sampled %d/%d pages for structure analysis of %s",
+                            len(sample_page_nums), page_count, doc.file_name,
+                        )
+                    else:
+                        reader = get_reader(doc.source_path)
+                        blocks = reader.read()
+                else:
+                    reader = get_reader(doc.source_path)
+                    blocks = reader.read()
 
                 # Scanned PDF fallback: run OCR when no text blocks found
-                if not blocks and (doc.file_type or "").lower() in ("pdf", ".pdf", "application/pdf") and doc.source_path:
+                if not blocks and is_pdf and doc.source_path:
                     try:
                         from app.readers.ocr import ocr_pdf_to_blocks
                         blocks = ocr_pdf_to_blocks(doc.source_path)
@@ -541,9 +563,12 @@ def analyze_generator(
                     if doc.structure_analysis and isinstance(doc.structure_analysis, dict):
                         heuristic_doc_type = doc.structure_analysis.get("document_type", "unknown")
 
-                    # Compute total_pages for multi-page template detection
-                    all_blocks = doc_blocks_cache.get(doc.id, [])
-                    total_pages = len(set(b.page_or_sheet for b in all_blocks)) if all_blocks else 0
+                    # Use true page count when available (from PDF metadata),
+                    # fall back to distinct block pages (sampled blocks undercount)
+                    total_pages = doc_total_pages.get(doc.id, 0)
+                    if total_pages == 0:
+                        all_blocks = doc_blocks_cache.get(doc.id, [])
+                        total_pages = len(set(b.page_or_sheet for b in all_blocks)) if all_blocks else 0
 
                     schema = doc_understanding.understand(
                         sample_blocks,
@@ -664,9 +689,15 @@ def analyze_generator(
                         "detail": {"total": len(doc_records), "current": 0},
                     })
 
-                    for doc in doc_records:
+                    for vr_idx, doc in enumerate(doc_records, 1):
                         if not doc.source_path:
                             continue
+
+                        yield _sse({
+                            "stage": "vision_routing", "status": "running",
+                            "message": f"Routing document {vr_idx}/{len(doc_records)}...",
+                            "detail": {"total": len(doc_records), "current": vr_idx},
+                        })
 
                         # Determine if scanned
                         blocks = doc_blocks_cache.get(doc.id, [])
@@ -677,10 +708,12 @@ def analyze_generator(
 
                         # Get onset page and total pages
                         onset = doc.sample_onset_page or 0
-                        total_pages = len(set(b.page_or_sheet for b in blocks)) if blocks else 0
+                        total_pages = doc_total_pages.get(doc.id, 0)
+                        if total_pages == 0:
+                            total_pages = len(set(b.page_or_sheet for b in blocks)) if blocks else 0
 
                         # For scanned docs, get page count from PyMuPDF
-                        if is_scanned and doc.source_path:
+                        if total_pages == 0 and is_scanned and doc.source_path:
                             try:
                                 import fitz
                                 pdf_doc = fitz.open(doc.source_path)
@@ -1006,9 +1039,11 @@ def analyze_generator(
                     if rec.raw_phone:
                         fields_found["PHONE"] = {"value": rec.raw_phone, "page": onset_pg}
 
-                # Estimate total pages from blocks cache
-                blocks = doc_blocks_cache.get(doc.id, [])
-                total_pages_coord = len(set(b.page_or_sheet for b in blocks)) if blocks else 0
+                # Use true page count when available, fall back to blocks
+                total_pages_coord = doc_total_pages.get(doc.id, 0)
+                if total_pages_coord == 0:
+                    blocks = doc_blocks_cache.get(doc.id, [])
+                    total_pages_coord = len(set(b.page_or_sheet for b in blocks)) if blocks else 0
 
                 preview = {
                     "preview_instance": 0,
@@ -1230,8 +1265,8 @@ def analyze_generator(
                     except Exception:
                         sample_records = []
 
-                    # Build tabular preview
-                    total_pages_tab = len(page_texts_preview)
+                    # Build tabular preview — use true page count when available
+                    total_pages_tab = doc_total_pages.get(doc.id, 0) or len(page_texts_preview)
                     rpp = schema.records_per_page_estimate
 
                     sample_rows: list[dict[str, str]] = []

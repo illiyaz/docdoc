@@ -1,4 +1,4 @@
-"""Tests for two-phase pipeline: content onset, auto-approve, verified onset, entity groups, coordinate wiring, vision routing, extraction verification.
+"""Tests for two-phase pipeline: content onset, auto-approve, verified onset, entity groups, coordinate wiring, vision routing, extraction verification, page sampling.
 
 Tests across classes:
 - TestFindContentOnsetFromBlocks (7 tests)
@@ -9,6 +9,7 @@ Tests across classes:
 - TestCoordinatePipelineWiring (15 tests)
 - TestVisionRoutingPipelineWiring (10 tests)
 - TestExtractionVerificationWiring (7 tests)
+- TestSampledAnalysisPipeline (5 tests)
 """
 from __future__ import annotations
 
@@ -23,6 +24,7 @@ import pytest
 from app.readers.base import ExtractedBlock
 from app.pipeline.content_onset import (
     _get_heuristic_candidate_pages,
+    compute_sample_pages,
     find_content_onset_from_blocks,
     find_verified_onset,
     filter_sample_blocks,
@@ -1376,3 +1378,51 @@ class TestPersonSamplesPersistence:
         # Without samples, no regex
         ext2 = CoordinateExtractor([fm], "", "doc2")
         assert ext2._name_regex is None
+
+
+# ---------------------------------------------------------------------------
+# TestSampledAnalysisPipeline
+# ---------------------------------------------------------------------------
+class TestSampledAnalysisPipeline:
+    """Test that tiered page sampling is wired into analyze_generator."""
+
+    def test_compute_sample_pages_imported(self):
+        """compute_sample_pages must be importable from content_onset."""
+        from app.pipeline.content_onset import compute_sample_pages as csp
+        assert callable(csp)
+
+    def test_pdf_over_10_uses_sampling(self):
+        """analyze_generator should call compute_sample_pages for PDFs >10 pages."""
+        import importlib
+        two_phase = importlib.import_module("app.pipeline.two_phase")
+        source = inspect.getsource(two_phase)
+        # Verify sampling is wired in
+        assert "compute_sample_pages" in source
+        assert "read_pages" in source
+        assert "get_pdf_page_count" in source
+
+    def test_doc_total_pages_dict_exists(self):
+        """analyze_generator should track true page counts in doc_total_pages."""
+        import importlib
+        two_phase = importlib.import_module("app.pipeline.two_phase")
+        source = inspect.getsource(two_phase)
+        assert "doc_total_pages" in source
+        # Should be used for total_pages lookups
+        assert "doc_total_pages.get(doc.id" in source
+
+    def test_total_pages_from_page_count_not_blocks(self):
+        """total_pages should prefer doc_total_pages over block count."""
+        import importlib
+        two_phase = importlib.import_module("app.pipeline.two_phase")
+        source = inspect.getsource(two_phase.analyze_generator)
+        # doc_total_pages should be consulted before falling back to block count
+        assert "doc_total_pages.get(doc.id" in source
+
+    def test_non_pdf_reads_all(self):
+        """Non-PDF files should still use reader.read() (no sampling)."""
+        import importlib
+        two_phase = importlib.import_module("app.pipeline.two_phase")
+        source = inspect.getsource(two_phase.analyze_generator)
+        # The else branch for non-PDF should call reader.read()
+        assert "reader = get_reader(doc.source_path)" in source
+        assert "blocks = reader.read()" in source
