@@ -910,7 +910,7 @@ def analyze_generator(
                 from app.pipeline.vision_router import VisionRouter, VisionRoutingResult
                 from app.pipeline.field_map_builder import FieldMapBuilder
 
-                vision_client = OllamaClient(db_session=db)
+                vision_client = OllamaClient(db_session=db, timeout_s=300)
                 vision_model_override = None
                 vision_fallback_model = None
 
@@ -1063,16 +1063,36 @@ def analyze_generator(
                                 ): item
                                 for item in work_items
                             }
-                            for future in concurrent.futures.as_completed(future_to_item):
-                                item = future_to_item[future]
-                                try:
-                                    res = future.result(timeout=180)
-                                    vision_results[item["doc_id"]] = res
-                                except Exception as exc:
-                                    logger.warning(
-                                        "Vision routing worker failed for %s: %s",
-                                        item["file_name"], exc,
-                                    )
+                            routed_count = 0
+                            try:
+                                for future in concurrent.futures.as_completed(future_to_item, timeout=3600):
+                                    item = future_to_item[future]
+                                    try:
+                                        res = future.result(timeout=300)
+                                        vision_results[item["doc_id"]] = res
+                                        routed_count += 1
+                                        rec_path = (res.get("routing_dict") or {}).get("recommended_path", "unknown")
+                                        yield _sse(
+                                            "vision_routing", "running",
+                                            f"Routed {item['file_name']} → {rec_path} ({routed_count}/{len(work_items)})",
+                                            detail={
+                                                "total": total_docs, "current": schema_skip_count + routed_count,
+                                                "doc_name": item["file_name"],
+                                                "recommended_path": rec_path,
+                                                "cache_hit": res.get("cache_hit", False),
+                                            },
+                                        )
+                                    except Exception as exc:
+                                        routed_count += 1
+                                        logger.warning(
+                                            "Vision routing worker failed for %s: %s",
+                                            item["file_name"], exc,
+                                        )
+                            except TimeoutError:
+                                logger.warning(
+                                    "Parallel vision routing global timeout (3600s) — %d/%d completed",
+                                    routed_count, len(work_items),
+                                )
 
                         # --- Phase C: Write results to DB on main thread ---
                         for item in work_items:
@@ -2005,18 +2025,32 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
 
         for i, doc in enumerate(approved_docs, 1):
             if str(doc.id) in completed_set:
+                logger.info("[%d/%d] SKIP (already extracted): %s", i, len(approved_docs), doc.file_name)
                 continue  # already extracted (resume)
 
             if _is_cancelled():
                 return
 
+            _doc_start = time.time()
+            _doc_meta_pre = doc.metadata_json or {}
+            _vr = _doc_meta_pre.get("vision_routing", {})
+            logger.info(
+                "[%d/%d] START: %s | type=%s | pages=%s | routing=%s | path=%s",
+                i, len(approved_docs), doc.file_name,
+                doc.file_type or "?",
+                _doc_meta_pre.get("total_pages", "?"),
+                _vr.get("recommended_path", "none"),
+                _vr.get("structure_type", "?"),
+            )
+
             _update_extraction_progress(
                 db, run,
-                stage="detection", message=f"Scanning document {i}/{len(approved_docs)}...",
+                stage="detection", message=f"Scanning document {i}/{len(approved_docs)}: {doc.file_name}...",
                 completed_doc_ids=completed_doc_ids,
                 total_docs=len(approved_docs), current_doc=i,
                 records_found=len(all_records),
-                detail={"total": len(approved_docs), "current": i, "status": "running"},
+                detail={"total": len(approved_docs), "current": i, "status": "running",
+                        "doc_name": doc.file_name, "recommended_path": _vr.get("recommended_path", "none")},
             )
 
             try:
@@ -2389,17 +2423,28 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                 # --- Path 1: Vision direct (small docs or scanned) ---
                 # Respects vision routing: if recommended_path is "vision_direct",
                 # or if no records yet and vision is available.
+                # Skip vision for large docs with text blocks — Path 2 (text+LLM) is
+                # much faster (~5s vs ~60s per batch) for text-extractable content.
+                _has_text = len(blocks) > 0
+                _too_large_for_vision = _has_text and total_pg > 50
+                if _too_large_for_vision and (is_template or is_tabular):
+                    logger.info(
+                        "Skipping Path 1 (Vision) for %s: %d pages with text blocks, "
+                        "using text+LLM path instead",
+                        doc.file_name, total_pg,
+                    )
                 if (
                     not records
                     and settings.use_vision_extraction
                     and settings.llm_assist_enabled
                     and doc.source_path
                     and (doc.file_type or "").lower() in ("pdf", ".pdf", "application/pdf")
+                    and not _too_large_for_vision
                 ):
                     try:
                         from app.llm.client import OllamaClient
                         from app.structure.vision_extractor import VisionDocumentExtractor
-                        client = OllamaClient(db_session=db)
+                        client = OllamaClient(db_session=db, timeout_s=300)
                         if client.is_vision_available(model_override=vision_model):
                             vision_ext = VisionDocumentExtractor(
                                 client, batch_size=batch_size, dpi=vision_dpi, vision_model=vision_model,
@@ -2636,7 +2681,7 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                         verifier = ExtractionVerifier()
                         gap_pages = verifier.find_gap_pages(records)
                         if gap_pages:
-                            gap_client = OllamaClient(db_session=db, timeout_s=120)
+                            gap_client = OllamaClient(db_session=db, timeout_s=300)
                             if gap_client.is_vision_available(model_override=vision_model):
                                 _heartbeat_cb(0, 1, len(all_records) + len(records))
                                 records, gap_fill_result = verifier.vision_gap_fill(
@@ -2677,10 +2722,18 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                     audit_detail["gap_fill_fields"] = gap_fill_result.gap_fill_fields
 
                 completed_doc_ids.append(str(doc.id))
+                _doc_elapsed = time.time() - _doc_start
+                logger.info(
+                    "[%d/%d] DONE: %s | path=%s | records=%d | time=%.1fs | audit=%s",
+                    i, len(approved_docs), doc.file_name,
+                    extraction_path, len(records), _doc_elapsed,
+                    audit_result.audit_status if audit_result else "n/a",
+                )
+                audit_detail["elapsed_s"] = round(_doc_elapsed, 1)
                 _update_extraction_progress(
                     db, run,
                     stage="detection",
-                    message=f"Extracted {len(records)} record(s) from {doc.file_name} (Path {extraction_path})",
+                    message=f"Extracted {len(records)} record(s) from {doc.file_name} (Path {extraction_path}, {_doc_elapsed:.0f}s)",
                     completed_doc_ids=completed_doc_ids,
                     total_docs=len(approved_docs), current_doc=i,
                     records_found=len(all_records),
@@ -2688,7 +2741,12 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                 )
 
             except Exception as e:
-                logger.warning("Detection failed for doc %s: %s", doc.file_name, type(e).__name__, exc_info=True)
+                _doc_elapsed = time.time() - _doc_start
+                logger.warning(
+                    "[%d/%d] FAILED: %s | error=%s | time=%.1fs",
+                    i, len(approved_docs), doc.file_name,
+                    type(e).__name__, _doc_elapsed, exc_info=True,
+                )
 
         if _is_cancelled():
             return
