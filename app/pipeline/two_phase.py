@@ -1798,15 +1798,32 @@ def _check_extraction_quality(records: list, path_label: str) -> bool:
     return True
 
 
-def _validate_field_map(field_map: list, doc_path: str) -> bool:
-    """Validate field map quality by sampling up to 3 pages.
+def _count_valid_names(records: list) -> int:
+    """Count records with valid PERSON names (used by field map validation)."""
+    count = 0
+    for rec in records:
+        if rec.raw_name and _is_likely_name(rec.raw_name):
+            count += 1
+        elif rec.raw_name:
+            logger.debug(
+                "Field map validation: rejected name '%s' on page %s",
+                rec.raw_name, getattr(rec, "page_range", "?"),
+            )
+    return count
 
-    Extracts from pages [0, mid, near_end] and checks that at least
-    2 of 3 produce valid PERSON names.  Uses the full blocklist and
-    ``_is_likely_name()`` for robust validation.
 
-    Rejects field maps that produce garbage (header text, boilerplate,
-    single-word names, digits) before they're applied to the entire document.
+def _validate_field_map(field_map: list, doc_path: str, onset: int = 0) -> bool:
+    """Validate field map quality by onset-aware page sampling.
+
+    **Strategy 1**: Sample onset page + next 4 consecutive content pages
+    (onset, onset+1, ..., onset+4).  These are virtually guaranteed to
+    have data because onset detection already found PII there.
+    Require 2 out of 5 valid PERSON names.
+
+    **Strategy 2** (fallback): If strategy 1 fails, sample 3 random pages
+    from the middle third of the document as a second chance.
+
+    Only rejects the field map if BOTH strategies fail.
     """
     if not field_map:
         return False
@@ -1832,46 +1849,69 @@ def _validate_field_map(field_map: list, doc_path: str) -> bool:
         page_count = pdf_doc.page_count
         pdf_doc.close()
 
-        # Sample up to 3 pages: first, middle, near-end
-        sample_pages = [0]
-        if page_count > 2:
-            sample_pages.append(page_count // 2)
-        if page_count > 5:
-            sample_pages.append(page_count - 2)
+        if page_count == 0:
+            return False
+
+        # --- Strategy 1: onset + next 4 consecutive pages ---
+        strategy1_pages = [
+            p for p in range(onset, min(onset + 5, page_count))
+        ]
 
         extractor = CoordinateExtractor(field_map, doc_path, "validation")
-        records, _failed = extractor.extract_all_pages(page_range=sample_pages)
+        records, _failed = extractor.extract_all_pages(page_range=strategy1_pages)
 
-        if not records:
-            logger.warning("Field map validation: 0 records from %d sample pages", len(sample_pages))
-            return False
+        valid_count = _count_valid_names(records)
 
-        # Count how many sample pages produced valid names
-        valid_count = 0
-        for rec in records:
-            if rec.raw_name and _is_likely_name(rec.raw_name):
-                valid_count += 1
-            elif rec.raw_name:
-                logger.debug(
-                    "Field map validation: rejected name '%s' on page %s",
-                    rec.raw_name, rec.page_range,
-                )
-
-        # Need at least 2 valid names, or all if only 1-2 pages
-        min_required = min(2, len(sample_pages))
-        if valid_count < min_required:
-            logger.warning(
-                "Field map validation failed: only %d/%d sample pages produced valid names",
-                valid_count, len(sample_pages),
+        # Need at least 2 valid names (or 1 if only 1 page)
+        min_required = min(2, len(strategy1_pages))
+        if valid_count >= min_required:
+            # Strategy 1 passed — continue to drift check
+            pass
+        else:
+            logger.debug(
+                "Field map validation strategy 1 (onset pages): %d/%d valid — trying strategy 2",
+                valid_count, len(strategy1_pages),
             )
-            return False
+
+            # --- Strategy 2: 3 random pages from middle third ---
+            import random
+            mid_start = page_count // 3
+            mid_end = 2 * page_count // 3
+            if mid_end <= mid_start:
+                mid_start = 0
+                mid_end = page_count
+            pool = [p for p in range(mid_start, mid_end) if p not in set(strategy1_pages)]
+            strategy2_pages = random.sample(pool, min(3, len(pool))) if pool else []
+
+            if strategy2_pages:
+                records2, _ = extractor.extract_all_pages(page_range=strategy2_pages)
+                valid_count2 = _count_valid_names(records2)
+                if valid_count2 >= min(2, len(strategy2_pages)):
+                    logger.info(
+                        "Field map validation strategy 2 (random middle): %d/%d valid — accepted",
+                        valid_count2, len(strategy2_pages),
+                    )
+                    # Use strategy 2 records for drift check below
+                    records = records2
+                else:
+                    logger.warning(
+                        "Field map validation failed: strategy 1 (%d valid) + strategy 2 (%d valid) both insufficient",
+                        valid_count, valid_count2,
+                    )
+                    return False
+            else:
+                logger.warning(
+                    "Field map validation failed: strategy 1 (%d valid), no pages for strategy 2",
+                    valid_count,
+                )
+                return False
 
         # --- Anchor drift detection ---
         # Check if anchor positions are stable across sample pages.
         # If anchors move significantly, this is NOT a fixed-layout doc.
         DRIFT_THRESHOLD = 20.0  # points (~7mm)
         try:
-            drift_map = extractor.check_anchor_stability(sample_pages, DRIFT_THRESHOLD)
+            drift_map = extractor.check_anchor_stability(strategy1_pages, DRIFT_THRESHOLD)
             if drift_map:
                 drifted = {ft: d for ft, d in drift_map.items() if d > DRIFT_THRESHOLD}
                 if len(drifted) > len(drift_map) / 2:
@@ -2251,7 +2291,8 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
 
                 if is_coordinate_path:
                     # Validate field map quality before full extraction
-                    if not _validate_field_map(effective_field_map, doc.source_path):
+                    _onset = doc.sample_onset_page or 0
+                    if not _validate_field_map(effective_field_map, doc.source_path, onset=_onset):
                         logger.warning(
                             "Field map validation failed for %s, skipping coordinate path",
                             doc.file_name,
@@ -2507,6 +2548,8 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                     extraction_path = ""
 
                 # --- Path 2b: Text + LLM template ---
+                _MAX_LLM_BATCHES = 100  # Cap: 100 batches ≈ 10 minutes
+
                 if not records and settings.llm_assist_enabled and is_template and instances:
                     try:
                         from app.llm.client import OllamaClient
@@ -2519,20 +2562,84 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                             page_texts[pg] += b.text + "\n"
                         client = OllamaClient(db_session=db, timeout_s=120)
                         text_extractor = LLMTemplateExtractor(client, batch_size=batch_size)
-                        llm_records = text_extractor.extract_all_instances(
-                            schema, page_texts, str(doc.id), total_pg,
-                            active_anchors=dedup_anchors,
-                            progress_callback=_heartbeat_cb,
-                        )
-                        if llm_records:
-                            records = llm_records
-                            extraction_path = "2"
-                            logger.info("Path 2 (Text+LLM) for %s: %d records", doc.file_name, len(records))
+
+                        total_batches_est = (len(instances) + batch_size - 1) // batch_size
+
+                        if total_batches_est > _MAX_LLM_BATCHES:
+                            # Learn-then-extract: LLM for first N instances, code for rest
+                            logger.info(
+                                "Path 2b: %d batches exceeds budget (%d). Using learn-then-extract: "
+                                "LLM for first %d instances, code for remaining %d",
+                                total_batches_est, _MAX_LLM_BATCHES,
+                                _MAX_LLM_BATCHES * batch_size,
+                                len(instances) - _MAX_LLM_BATCHES * batch_size,
+                            )
+                            learn_instances = instances[:_MAX_LLM_BATCHES * batch_size]
+                            llm_records = text_extractor.extract_all_instances(
+                                schema, page_texts, str(doc.id), total_pg,
+                                active_anchors=dedup_anchors,
+                                progress_callback=_heartbeat_cb,
+                                instances=learn_instances,
+                            )
+
+                            # Phase 2: Learn name patterns from LLM results, extract remaining via regex
+                            code_records: list[PIIRecord] = []
+                            name_samples = [r.raw_name for r in llm_records if r.raw_name]
+                            if name_samples:
+                                try:
+                                    from app.pipeline.coordinate_extractor import _learn_name_regex
+                                    name_regex, _name_fmt = _learn_name_regex(name_samples)
+                                    if name_regex:
+                                        remaining_pages: set[int] = set()
+                                        for inst in instances[_MAX_LLM_BATCHES * batch_size:]:
+                                            remaining_pages.update(inst)
+                                        for pg in sorted(remaining_pages):
+                                            text = page_texts.get(pg, "")
+                                            for line in text.split("\n"):
+                                                line_s = line.strip()
+                                                if len(line_s) < 5 or len(line_s) > 60:
+                                                    continue
+                                                m = name_regex.search(line_s)
+                                                if m and _is_likely_name(m.group()):
+                                                    from uuid import uuid4
+                                                    rec = PIIRecord(
+                                                        record_id=str(uuid4()),
+                                                        document_id=str(doc.id),
+                                                        page_range=str(pg + 1),
+                                                        raw_name=m.group().strip(),
+                                                        entity_types_found=["PERSON"],
+                                                    )
+                                                    code_records.append(rec)
+                                                    break  # one name per page
+                                        logger.info(
+                                            "Learn-then-extract: %d LLM records + %d code records",
+                                            len(llm_records), len(code_records),
+                                        )
+                                except Exception:
+                                    logger.warning("Learn-then-extract code phase failed, using LLM records only", exc_info=True)
+
+                            llm_records.extend(code_records)
+                            if llm_records:
+                                records = llm_records
+                                extraction_path = "2-hybrid"
+                        else:
+                            # Normal Path 2b — LLM all instances (fits within budget)
+                            llm_records = text_extractor.extract_all_instances(
+                                schema, page_texts, str(doc.id), total_pg,
+                                active_anchors=dedup_anchors,
+                                progress_callback=_heartbeat_cb,
+                            )
+                            if llm_records:
+                                records = llm_records
+                                extraction_path = "2"
+
+                        if records:
+                            logger.info("Path 2b (%s) for %s: %d records", extraction_path, doc.file_name, len(records))
                     except Exception:
                         logger.warning("Path 2 (Text+LLM) failed for %s, falling back to Path 3", doc.file_name, exc_info=True)
 
                 # Quality gate: reject Path 2b if names are mostly garbage
-                if records and extraction_path == "2" and not _check_extraction_quality(records, "2-template"):
+                if records and extraction_path in ("2", "2-hybrid") and not _check_extraction_quality(records, "2-template"):
                     records = []
                     extraction_path = ""
 
@@ -2665,61 +2772,17 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                     except Exception:
                         logger.debug("Post-extraction audit failed for %s", doc.file_name, exc_info=True)
 
-                # --- Vision gap-fill: fill missing fields on records ---
-                gap_fill_result = None
-                if (
-                    records
-                    and settings.llm_assist_enabled
-                    and settings.use_vision_extraction
-                    and doc.source_path
-                    and (doc.file_type or "").lower() in ("pdf", ".pdf", "application/pdf")
-                ):
-                    try:
-                        from app.llm.client import OllamaClient
-                        from app.pipeline.extraction_verifier import ExtractionVerifier
+                # NOTE: Vision gap-fill moved to post-extraction stage (after
+                # all docs complete) to avoid blocking the extraction loop.
+                # See "Post-extraction gap analysis" below the for-loop.
 
-                        verifier = ExtractionVerifier()
-                        gap_pages = verifier.find_gap_pages(records)
-                        if gap_pages:
-                            gap_client = OllamaClient(db_session=db, timeout_s=300)
-                            if gap_client.is_vision_available(model_override=vision_model):
-                                _heartbeat_cb(0, 1, len(all_records) + len(records))
-                                records, gap_fill_result = verifier.vision_gap_fill(
-                                    records=records,
-                                    doc_path=doc.source_path,
-                                    doc_id=str(doc.id),
-                                    ollama_client=gap_client,
-                                    vision_model=vision_model,
-                                    max_pages=50,
-                                )
-                                # Update persisted records with gap-filled data
-                                meta_gf = dict(doc.metadata_json or {})
-                                meta_gf["extracted_records"] = [_serialize_pii_record(r) for r in records]
-                                doc.metadata_json = meta_gf
-                                flag_modified(doc, "metadata_json")
-                                # Update all_records with the gap-filled versions
-                                all_records[-len(records):] = records
-                                logger.info(
-                                    "Vision gap-fill for %s: %d/%d pages succeeded, fields: %s",
-                                    doc.file_name,
-                                    gap_fill_result.gap_fill_succeeded,
-                                    gap_fill_result.gap_fill_attempted,
-                                    gap_fill_result.gap_fill_fields,
-                                )
-                    except Exception:
-                        logger.debug("Vision gap-fill failed for %s", doc.file_name, exc_info=True)
-
-                # Store audit + gap-fill metrics
+                # Store audit metrics
                 audit_detail: dict = {"extraction_path": extraction_path, "records": len(records), "total": len(approved_docs), "current": i, "status": "running"}
                 if audit_result:
                     audit_detail["audit_status"] = audit_result.audit_status
                     audit_detail["audit_confidence"] = audit_result.audit_confidence
                     audit_detail["audit_consistency"] = audit_result.audit_consistency
                     audit_detail["pages_audited"] = audit_result.pages_audited
-                if gap_fill_result:
-                    audit_detail["gap_fill_attempted"] = gap_fill_result.gap_fill_attempted
-                    audit_detail["gap_fill_succeeded"] = gap_fill_result.gap_fill_succeeded
-                    audit_detail["gap_fill_fields"] = gap_fill_result.gap_fill_fields
 
                 completed_doc_ids.append(str(doc.id))
                 _doc_elapsed = time.time() - _doc_start
@@ -2760,6 +2823,87 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
             records_found=len(all_records),
             detail={"records_found": len(all_records), "status": "complete"},
         )
+
+        # --- Post-extraction gap analysis (deferred from per-doc loop) ---
+        # Runs AFTER all docs are extracted, with a hard budget cap.
+        _MAX_GAP_FILL_CALLS = 50  # 50 vision calls total ≈ 20 minutes
+
+        if settings.llm_assist_enabled and getattr(settings, "use_vision_extraction", False):
+            try:
+                from app.llm.client import OllamaClient
+                from app.pipeline.extraction_verifier import ExtractionVerifier
+
+                verifier = ExtractionVerifier()
+                gap_budget_remaining = _MAX_GAP_FILL_CALLS
+
+                # Collect gap analysis across all docs
+                gap_plan: list[tuple] = []  # (doc, gap_pages, critical_count)
+                for doc in approved_docs:
+                    if not doc.source_path:
+                        continue
+                    if (doc.file_type or "").lower() not in ("pdf", ".pdf", "application/pdf"):
+                        continue
+                    doc_records = [r for r in all_records if r.document_id == str(doc.id)]
+                    if not doc_records:
+                        continue
+                    try:
+                        gap_pages = verifier.find_gap_pages(doc_records)
+                    except Exception:
+                        continue
+                    if gap_pages:
+                        critical_count = sum(
+                            1 for pg in gap_pages
+                            if any(f in pg.get("missing", []) for f in ("US_SSN", "DATE_OF_BIRTH"))
+                        )
+                        gap_plan.append((doc, gap_pages, critical_count))
+
+                # Sort by priority (most critical gaps first)
+                gap_plan.sort(key=lambda x: -x[2])
+
+                for doc, gap_pages, _priority in gap_plan:
+                    if gap_budget_remaining <= 0:
+                        break
+                    pages_to_fill = min(len(gap_pages), gap_budget_remaining, 10)
+                    gap_budget_remaining -= pages_to_fill
+
+                    gap_client = OllamaClient(db_session=db, timeout_s=300)
+                    if gap_client.is_vision_available(model_override=vision_model):
+                        try:
+                            doc_records = [r for r in all_records if r.document_id == str(doc.id)]
+                            updated_records, gf_result = verifier.vision_gap_fill(
+                                records=doc_records,
+                                doc_path=doc.source_path,
+                                doc_id=str(doc.id),
+                                ollama_client=gap_client,
+                                vision_model=vision_model,
+                                max_pages=pages_to_fill,
+                            )
+                            # Replace records in all_records
+                            for j, r in enumerate(all_records):
+                                if r.document_id == str(doc.id):
+                                    for ur in updated_records:
+                                        if getattr(ur, "page_range", None) == getattr(r, "page_range", None) and ur.raw_name == r.raw_name:
+                                            all_records[j] = ur
+                                            break
+                            logger.info(
+                                "Post-extraction gap-fill for %s: %d/%d pages, budget remaining: %d",
+                                doc.file_name, gf_result.gap_fill_succeeded,
+                                pages_to_fill, gap_budget_remaining,
+                            )
+                        except Exception:
+                            logger.warning("Post-extraction gap-fill failed for %s", doc.file_name, exc_info=True)
+
+                gap_calls_used = _MAX_GAP_FILL_CALLS - gap_budget_remaining
+                _update_extraction_progress(
+                    db, run, stage="gap_fill",
+                    message=f"Gap-fill complete: {gap_calls_used} vision calls used",
+                    completed_doc_ids=completed_doc_ids,
+                    total_docs=len(approved_docs), current_doc=len(approved_docs),
+                    records_found=len(all_records),
+                    detail={"gap_fill_calls": gap_calls_used, "status": "complete"},
+                )
+            except Exception:
+                logger.warning("Post-extraction gap analysis failed", exc_info=True)
 
         # --- Stage 2: Entity Resolution ---
         _update_extraction_progress(

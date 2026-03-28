@@ -137,6 +137,21 @@ class VisionRouter:
         If all models fail at 200 DPI, retries at 150 DPI (helps with
         landscape/wide pages that cause OOM).
         """
+        # Fail loudly if no vision model configured at all
+        if self.vision_model is None and self.fallback_model is None:
+            logger.error(
+                "VisionRouter: both vision_model and fallback_model are None for %s "
+                "— routing will be meaningless. Check OLLAMA_VISION_MODEL setting "
+                "and PROTOCOL_LLM_CONFIG.",
+                doc_path,
+            )
+            return VisionRoutingResult(
+                structure_type="variable",
+                structure_confidence=0.0,
+                recommended_path="presidio",
+                raw_response="ERROR: no vision model configured",
+            )
+
         # Try at 200 DPI first, then 150 DPI on failure
         for dpi in [200, 150]:
             try:

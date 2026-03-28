@@ -594,6 +594,26 @@ def filter_static_values(page_records, threshold=0.5):
 **Status: COMPLETE.** Static filter + template cache wired into `two_phase.py`. File upload endpoint supports all 47 formats with archive/email extraction. Frontend shows coord audit results. 2787+ tests passing.
 
 ---
+
+### Step 24e — Extraction Performance Fixes (COMPLETE)
+
+**Context:** E2E test on 34 real documents (20,192 pages) revealed critical performance bottlenecks:
+- 3733050.pdf (3063 pages): 32.9 hours via Path 2b (515 LLM batches, no field map)
+- WashingtonCMD: 11.8 hours via Presidio + 50-page inline gap-fill
+- Vision routing with model=None silently produced garbage routing for all docs
+
+**4 fixes implemented:**
+
+| Fix | Problem | Solution | Impact |
+|---|---|---|---|
+| **FIX 1**: Onset-aware field map validation | `_validate_field_map()` sampled pages [0, mid, end]; mid-page of 3063-page doc hits boundary → 0 records → coordinate path blocked | Two-strategy: (1) onset + 4 consecutive pages, require 2/5 valid names; (2) fallback to 3 random middle-third pages. Both must fail to reject. | Coordinate path no longer blocked by unlucky page sampling |
+| **FIX 2**: Deferred gap-fill | Inline gap-fill ran 50 × 60s per doc DURING extraction loop | Moved to post-extraction stage with 50-call budget, priority-sorted (critical fields first), max 10 pages/doc | Extraction loop completes in minutes, gap-fill capped at ≈20 min total |
+| **FIX 3**: LLM batch budget | Path 2b: no cap → 515 batches = 33 hours | Capped at 100 batches. Over-budget: learn-then-extract hybrid (LLM first 300 instances → learn name regex → code-extract remainder) | 3063-page doc: ≈10 min LLM + seconds for code extraction |
+| **FIX 4**: VisionRouter no-model guard | Both models=None → silent garbage routing → all docs miss coordinate path | Early return with error log when no vision model configured | Prevents cascade failure across entire job |
+
+**Files modified:** `app/pipeline/two_phase.py`, `app/pipeline/vision_router.py`, `tests/test_two_phase.py`
+
+---
 ---
 
 ## Phase 6 — Production Readiness

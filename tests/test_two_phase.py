@@ -890,7 +890,7 @@ class TestCoordinatePipelineWiring:
         # After Path 0, Path 1 should check 'not records'
         path1_section = source[source.find("Path 1: Vision"):]
         # The condition should include 'not records' (may be in the if-block below the comment)
-        assert "not records" in path1_section[:500], \
+        assert "not records" in path1_section[:1000], \
             "Path 1 (Vision) must be guarded by 'not records' to skip when coordinate path succeeds"
 
     def test_coordinate_path_uses_reconciliation_on_failures(self):
@@ -1128,7 +1128,7 @@ class TestVisionRoutingPipelineWiring:
         source = inspect.getsource(two_phase.run_extraction_background)
         # Path 1 section still has "not records" guard
         path1_section = source[source.find("Path 1: Vision"):]
-        assert "not records" in path1_section[:300]
+        assert "not records" in path1_section[:1000]
 
     def test_llm_template_path_from_vision_routing(self):
         """Vision routing can recommend llm_template, which falls to Path 2b."""
@@ -1561,10 +1561,10 @@ class TestParallelVisionRouting:
     """Test parallel vision routing infrastructure."""
 
     def test_vision_routing_workers_setting(self):
-        """Settings includes vision_routing_workers with default 3."""
+        """Settings includes vision_routing_workers with default 1 (single GPU)."""
         from app.core.settings import Settings
         s = Settings(DATABASE_URL="sqlite:///test.db")
-        assert s.vision_routing_workers == 3
+        assert s.vision_routing_workers == 1
 
     def test_template_cache_thread_safety(self):
         """TemplateCache has a threading lock."""
@@ -1652,7 +1652,7 @@ class TestParallelVisionRouting:
         """Parallel routing uses timeout on future.result()."""
         from app.pipeline.two_phase import analyze_generator
         source = inspect.getsource(analyze_generator)
-        assert "timeout=180" in source
+        assert "timeout=300" in source
 
 
 # ---------------------------------------------------------------------------
