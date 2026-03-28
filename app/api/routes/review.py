@@ -139,3 +139,31 @@ def complete_task(
     result = _serialize_task(task)
     result["subject_review_status"] = subject_review_status
     return result
+
+
+# ---------------------------------------------------------------------------
+# Merge explanation (Step 27 — Critical #2)
+# ---------------------------------------------------------------------------
+
+@router.get("/subjects/{subject_id}/merge-explanation", summary="Get merge explanation for a subject")
+def get_merge_explanation(
+    subject_id: str,
+    db: Session = Depends(get_db),
+):
+    """Return the field-level merge signals explaining why records were merged.
+
+    The explanation includes per-pair details: which fields matched (SSN,
+    name, email, etc.), similarity scores, and masked field values.
+    """
+    subject = db.query(NotificationSubject).filter(
+        NotificationSubject.subject_id == subject_id
+    ).first()
+    if not subject:
+        raise HTTPException(status_code=404, detail="Subject not found")
+
+    return {
+        "subject_id": str(subject.subject_id),
+        "canonical_name": subject.canonical_name,
+        "merge_confidence": subject.merge_confidence,
+        "merge_explanation": subject.merge_explanation or {"pairs": []},
+    }

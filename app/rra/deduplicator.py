@@ -181,6 +181,31 @@ class Deduplicator:
                     source_document_name = r.source_document_id.rsplit("/", 1)[-1] if "/" in r.source_document_id else r.source_document_id
                     break
 
+        # --- Merge explanation (Step 27) ---
+        merge_explanation = None
+        if group.merge_explanations:
+            merge_explanation = {
+                "pairs": [
+                    {
+                        "record_a_label": ex.record_a_label,
+                        "record_b_label": ex.record_b_label,
+                        "overall_confidence": ex.overall_confidence,
+                        "signals": [
+                            {
+                                "anchor": s.anchor,
+                                "matched": s.matched,
+                                "score": s.score,
+                                "detail": s.detail,
+                                "field_a": s.field_a,
+                                "field_b": s.field_b,
+                            }
+                            for s in ex.signals
+                        ],
+                    }
+                    for ex in group.merge_explanations
+                ],
+            }
+
         return NotificationSubject(
             subject_id=uuid4(),
             canonical_name=canonical_name,
@@ -199,6 +224,7 @@ class Deduplicator:
             pii_types_list=pii_types_list_str,
             canonical_dob=canonical_dob,
             canonical_government_id=canonical_government_id,
+            merge_explanation=merge_explanation,
         )
 
     def _find_existing(self, ns: NotificationSubject) -> NotificationSubject | None:

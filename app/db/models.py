@@ -331,6 +331,8 @@ class NotificationSubject(Base):
     pii_types_list: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     canonical_dob: Mapped[str | None] = mapped_column(String(64), nullable=True)
     canonical_government_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    # Step 27: merge explanation for auditor review
+    merge_explanation: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

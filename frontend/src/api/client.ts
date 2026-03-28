@@ -1122,3 +1122,47 @@ export interface AppSettings {
 export function getAppSettings(): Promise<AppSettings> {
   return api("/settings")
 }
+
+// ---------------------------------------------------------------------------
+// Document Viewer (Step 27)
+// ---------------------------------------------------------------------------
+
+export interface DocumentInfo {
+  document_id: string
+  file_name: string
+  file_type: string
+  page_count: number | null
+  onset_page: number | null
+  is_pdf: boolean
+}
+
+export interface PageHighlight {
+  extraction_id: string
+  pii_type: string
+  bbox: number[] | null
+  masked_value: string | null
+}
+
+export interface DocumentPageResponse {
+  document_id: string
+  page_number: number
+  page_count: number
+  image_base64: string
+  highlighted_extractions: PageHighlight[]
+}
+
+export function getDocumentInfo(docId: string): Promise<DocumentInfo> {
+  return api(`/documents/${docId}/info`)
+}
+
+export function getDocumentPage(
+  docId: string,
+  pageNumber: number,
+  opts?: { highlight?: boolean; dpi?: number }
+): Promise<DocumentPageResponse> {
+  const params = new URLSearchParams()
+  if (opts?.highlight) params.set("highlight_extractions", "true")
+  if (opts?.dpi) params.set("dpi", String(opts.dpi))
+  const qs = params.toString()
+  return api(`/documents/${docId}/pages/${pageNumber}${qs ? `?${qs}` : ""}`)
+}

@@ -90,6 +90,28 @@ class PIIRecord:
 # Output dataclass
 # ---------------------------------------------------------------------------
 
+@dataclass(frozen=True)
+class MergeSignal:
+    """One signal contributing to a merge decision between two records."""
+
+    anchor: str        # e.g. "ssn", "email", "name_dob", "name"
+    matched: bool
+    score: float       # contribution to confidence (0.0 if not matched)
+    detail: str        # human-readable: "SSN exact match"
+    field_a: str       # masked value from record A
+    field_b: str       # masked value from record B
+
+
+@dataclass
+class MergeExplanation:
+    """Explains why two records were (or weren't) merged."""
+
+    record_a_label: str   # "J. Smith from doc_A.pdf p.5"
+    record_b_label: str   # "John Smith from doc_B.xlsx p.42"
+    overall_confidence: float
+    signals: list[MergeSignal] = field(default_factory=list)
+
+
 @dataclass
 class ResolvedGroup:
     """A group of ``PIIRecord`` objects resolved to one individual."""
@@ -98,6 +120,7 @@ class ResolvedGroup:
     records: list[PIIRecord] = field(default_factory=list)
     merge_confidence: float = 1.0
     needs_human_review: bool = False
+    merge_explanations: list[MergeExplanation] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -252,6 +275,136 @@ def build_confidence(
     return min(score, 1.0)
 
 
+def _mask_gov_id(val: str | None) -> str:
+    """Mask a government ID to last 4 chars."""
+    if not val:
+        return ""
+    v = val.strip()
+    return f"***{v[-4:]}" if len(v) >= 4 else "***"
+
+
+def _record_label(r: PIIRecord) -> str:
+    """Human-readable label for a record in merge explanations."""
+    name = r.raw_name or r.normalized_value or "?"
+    doc = r.source_document_id or "unknown"
+    if len(doc) > 30:
+        doc = doc.split("/")[-1] if "/" in doc else doc[:30]
+    page = r.page_or_sheet
+    return f"{name} from {doc} p.{page}"
+
+
+def build_confidence_explained(
+    r1: PIIRecord,
+    r2: PIIRecord,
+    *,
+    active_anchors: list[str] | frozenset[str] | None = None,
+) -> MergeExplanation:
+    """Like ``build_confidence`` but returns full reasoning.
+
+    The returned ``MergeExplanation`` includes per-anchor signals showing
+    what matched, what didn't, and the score contribution of each.
+    """
+    anchors = _resolve_anchors(active_anchors)
+    signals: list[MergeSignal] = []
+
+    # Cross-role / cross-instance checks (0.0 short-circuits)
+    roles = {r1.entity_role, r2.entity_role}
+    if ("primary_subject" in roles and "institutional" in roles) or \
+       ("primary_subject" in roles and "provider" in roles):
+        return MergeExplanation(
+            record_a_label=_record_label(r1),
+            record_b_label=_record_label(r2),
+            overall_confidence=0.0,
+            signals=[MergeSignal("role", False, 0.0, "Cross-role merge blocked", r1.entity_role or "", r2.entity_role or "")],
+        )
+
+    if (r1.source_document_id and r1.source_document_id == r2.source_document_id
+            and r1.page_range and r2.page_range and r1.page_range != r2.page_range):
+        return MergeExplanation(
+            record_a_label=_record_label(r1),
+            record_b_label=_record_label(r2),
+            overall_confidence=0.0,
+            signals=[MergeSignal("instance", False, 0.0, "Cross-instance merge blocked", r1.page_range, r2.page_range)],
+        )
+
+    score = 0.0
+
+    # Government ID
+    if "ssn" in anchors:
+        gov_matched = False
+        if r1.entity_type.upper() in _GOV_ID_TYPES and r2.entity_type.upper() in _GOV_ID_TYPES:
+            gov_matched, _ = government_ids_match(r1.entity_type, r1.normalized_value, r2.entity_type, r2.normalized_value)
+        if not gov_matched and r1.raw_government_id and r2.raw_government_id:
+            gov_matched = r1.raw_government_id.strip() == r2.raw_government_id.strip()
+        s = 0.50 if gov_matched else 0.0
+        score += s
+        signals.append(MergeSignal("ssn", gov_matched, s,
+            "Gov ID exact match" if gov_matched else "Gov IDs differ or absent",
+            _mask_gov_id(r1.raw_government_id or r1.normalized_value),
+            _mask_gov_id(r2.raw_government_id or r2.normalized_value)))
+
+    # Email
+    if "email" in anchors:
+        e1 = normalize_email(r1.raw_email) if r1.raw_email else None
+        e2 = normalize_email(r2.raw_email) if r2.raw_email else None
+        matched = bool(e1 and e2 and e1 == e2)
+        s = 0.40 if matched else 0.0
+        score += s
+        signals.append(MergeSignal("email", matched, s,
+            "Email exact match" if matched else "Emails differ or absent",
+            r1.raw_email or "", r2.raw_email or ""))
+
+    # Phone
+    if "phone" in anchors:
+        matched = bool(r1.raw_phone and r2.raw_phone and r1.raw_phone == r2.raw_phone)
+        s = 0.35 if matched else 0.0
+        score += s
+        signals.append(MergeSignal("phone", matched, s,
+            "Phone exact match" if matched else "Phones differ or absent",
+            r1.raw_phone or "", r2.raw_phone or ""))
+
+    # Name-dependent
+    has_name = anchors & {"name_dob", "name_address", "name"}
+    name_matched = False
+    if has_name and r1.raw_name and r2.raw_name:
+        name_matched, _ = names_match(r1.raw_name, r2.raw_name)
+
+    if "name_dob" in anchors:
+        dob_matched = False
+        if name_matched and r1.raw_dob and r2.raw_dob:
+            dob_matched, _ = dobs_match(r1.raw_dob, r1.country, r2.raw_dob, r2.country)
+        s = 0.35 if (name_matched and dob_matched) else 0.0
+        score += s
+        signals.append(MergeSignal("name_dob", name_matched and dob_matched, s,
+            "Name + DOB match" if (name_matched and dob_matched) else "Name/DOB differ or absent",
+            f"{r1.raw_name or ''} ({r1.raw_dob or ''})",
+            f"{r2.raw_name or ''} ({r2.raw_dob or ''})"))
+
+    if "name_address" in anchors:
+        addr_matched = False
+        if name_matched and r1.raw_address and r2.raw_address:
+            addr_matched, _ = addresses_match(r1.raw_address, r2.raw_address)
+        s = 0.25 if (name_matched and addr_matched) else 0.0
+        score += s
+        signals.append(MergeSignal("name_address", name_matched and addr_matched, s,
+            "Name + address match" if (name_matched and addr_matched) else "Name/address differ or absent",
+            r1.raw_name or "", r2.raw_name or ""))
+
+    if "name" in anchors:
+        s = 0.10 if name_matched else 0.0
+        score += s
+        signals.append(MergeSignal("name", name_matched, s,
+            "Name fuzzy match" if name_matched else "Names differ or absent",
+            r1.raw_name or "", r2.raw_name or ""))
+
+    return MergeExplanation(
+        record_a_label=_record_label(r1),
+        record_b_label=_record_label(r2),
+        overall_confidence=min(score, 1.0),
+        signals=signals,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Union-Find
 # ---------------------------------------------------------------------------
@@ -349,8 +502,9 @@ class EntityResolver:
                 ))
                 continue
 
-            # min pairwise confidence among all pairs in this group
+            # min pairwise confidence + explanations for merged pairs
             min_conf = 1.0
+            explanations: list[MergeExplanation] = []
             for a in indices:
                 for b in indices:
                     if a >= b:
@@ -358,6 +512,10 @@ class EntityResolver:
                     key = (min(a, b), max(a, b))
                     if key in pair_conf:
                         min_conf = min(min_conf, pair_conf[key])
+                        # Capture explanation for directly merged pairs
+                        explanations.append(build_confidence_explained(
+                            records[a], records[b], active_anchors=anchors,
+                        ))
                     else:
                         # Pair not directly merged but transitively linked
                         c = build_confidence(
@@ -370,6 +528,7 @@ class EntityResolver:
                 records=group_records,
                 merge_confidence=min_conf,
                 needs_human_review=min_conf < self.REVIEW_THRESHOLD,
+                merge_explanations=explanations,
             ))
 
         return result
