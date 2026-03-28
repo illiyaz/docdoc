@@ -89,7 +89,7 @@ project-root/
 │   └── api/                       # main.py, middleware/, routes/
 ├── frontend/src/                  # api/client.ts, pages/ (Dashboard, Projects, ProjectDetail,
 │                                  # QueueView, SubjectDetail, JobSubmit, Diagnostic), components/, App.tsx
-├── alembic/versions/              # 0001–0012
+├── alembic/versions/              # 0001–0013
 ├── tests/                         # test_schema, test_repositories, test_policies, test_extraction,
 │                                  # test_safety, test_api, test_two_phase, + many more
 ├── models/                        # pre-packaged spaCy and Presidio models
@@ -100,7 +100,7 @@ project-root/
 
 ## 4) Schema Contract
 
-Canonical DB schema (19 tables) defined by `app/db/models.py` + `alembic/versions/0001–0012` + `tests/test_schema.py`.
+Canonical DB schema (19 tables) defined by `app/db/models.py` + `alembic/versions/0001–0013` + `tests/test_schema.py`.
 
 - Do NOT introduce new tables/columns without updating models.py, migration, test_schema.py, and repository tests simultaneously
 - Migration/model mismatch must fail tests — never suppress
@@ -190,10 +190,14 @@ Phase 1 (Deterministic Core), Phase 2 (Normalization + RRA), Phase 3 (Protocols 
 | 23 | COMPLETE | Hybrid Pipeline — multi-format orchestration, name regex learning, archive extraction. 34 docs, 78K records, 33/34 success |
 | 24e | COMPLETE | Extraction Performance — onset-aware validation, deferred gap-fill, LLM budget cap, VisionRouter guard |
 | 26 | COMPLETE | LiteParse Spatial Text Routing — text PDFs route via spatial text + text LLM (11-28s vs 60+s vision), graceful fallback |
+| 26b | COMPLETE | Source Document Viewer — on-demand page rendering with PII-type colour-coded bbox overlays, 3 API endpoints, DocumentViewer component |
+| 26c | COMPLETE | Merge Explanation — build_confidence_explained() with per-anchor signals, migration 0013, MergeExplanation component |
+| 26d | COMPLETE | Auditor Workflow Polish — analysis filter tabs, dedup summary, extraction progress bar, plain-English config, export filtering, delivery dashboard |
+| 29a | COMPLETE | Notification Preview — email/letter preview with masked PII, NotificationPreview component |
 
 **Key metrics (March 2026):** 78,471 PII records, 34 docs (PDF/XLSX/XLS/MSG/HEIC/JPG), 30-45ms/page coordinate speed, dual-model fallback.
 
-**~2800 tests passing.**
+**~2850 tests passing.** (19 tables, migration 0013)
 
 **Standalone scripts (proven, awaiting integration):** `scripts/test_hybrid_pipeline.py` (PDF hybrid), `scripts/forentis_extract.py` (47 extensions).
 

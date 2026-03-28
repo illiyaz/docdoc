@@ -709,51 +709,55 @@ Steps 1-24 COMPLETE (2787+ tests). Phase 5 delivered the extraction engine. Phas
 
 ---
 
-### Step 26b — Source Document Viewer (PENDING)
+### Step 26b — Source Document Viewer ✅ COMPLETE
 
-**Goal:** An auditor can click on any extracted value and see the original source page with the extraction highlighted. Side-by-side: extracted data on the left, source page image on the right.
+**Goal:** Auditor sees original source page with extraction highlights alongside extracted data.
 
-**Why table-stakes:** The core audit workflow is "verify extraction against source." Without this, auditors must manually open PDFs and navigate to page numbers. That's not a product — it's a pipeline with a CSV output.
+**What was built:**
+
+| File | What |
+|---|---|
+| `app/pdf/renderer.py` | MODIFIED — `render_page_with_overlays()` with PII-type colour-coded bounding boxes (blue=PERSON, red=SSN, orange=DOB, green=LOCATION, etc.) |
+| `app/api/routes/documents.py` | NEW — 3 endpoints: `GET /documents/{id}/info`, `GET /documents/{id}/pages/{num}` (with highlight_extractions flag), `GET /subjects/{id}/source-pages` |
+| `frontend/src/components/DocumentViewer.tsx` | NEW — page navigation, bbox legend, loading/error states |
+| `frontend/src/api/client.ts` | DocumentInfo, PageHighlight, DocumentPageResponse types + API functions |
+| `tests/test_document_viewer.py` | 16 tests (metadata, 404, non-PDF 422, page range, base64 PNG, bbox overlay, null bbox, renderer) |
+
+**Security:** Images rendered on-demand via PyMuPDF, never cached to disk. Path traversal prevented (only DB-stored source_path used). No raw PII in JSON response (only masked values + base64 image).
 
 ---
 
-#### 26b-a. Page Rendering API
+### Step 26c — Merge Explanation ✅ COMPLETE
 
-**Serve individual PDF pages as images for the frontend viewer.**
+**Goal:** Auditor sees WHY records were merged — field-level match signals, not just a confidence number.
 
-| File | What to do |
+**What was built:**
+
+| File | What |
 |---|---|
-| `app/api/routes/documents.py` | NEW — `GET /documents/{doc_id}/pages/{page_num}` returns PNG image of the page. `GET /documents/{doc_id}/pages/{page_num}/text` returns page text with word bounding boxes. |
-| `app/pdf/renderer.py` | Already has `render_page_to_image()`. Expose via API. Add highlight overlay: given bounding boxes, draw semi-transparent rectangles on the rendered image. |
-| `app/core/settings.py` | Add `page_render_dpi` (default 150), `page_render_max_width` (default 1200) |
-| `tests/test_document_viewer.py` | Test page rendering, highlight overlay, page count, 404 for invalid pages |
-
-**Security:** Page images are served through auth middleware. No unauthenticated access to source documents. Images are generated on-demand, never cached to disk (breach data shouldn't persist as images).
+| `app/rra/entity_resolver.py` | NEW — `MergeSignal`, `MergeExplanation` dataclasses, `build_confidence_explained()` with per-anchor signals. `ResolvedGroup.merge_explanations` populated during resolve(). |
+| `app/rra/deduplicator.py` | MODIFIED — serializes merge explanations to `merge_explanation` JSON on NotificationSubject |
+| `app/db/models.py` | MODIFIED — `merge_explanation` JSON column on NotificationSubject |
+| `alembic/versions/0013_merge_explanation.py` | NEW — migration for merge_explanation column |
+| `app/api/routes/review.py` | MODIFIED — `GET /review/subjects/{id}/merge-explanation` endpoint |
+| `frontend/src/components/MergeExplanation.tsx` | NEW — signal table with match/mismatch indicators per pair |
+| `tests/test_merge_explanation.py` | 14 tests (signals, consistency, cross-role, cross-instance, masking, resolver, DB) |
 
 ---
 
-#### 26b-b. Frontend Document Viewer Component
+### Step 26d — Auditor Workflow Polish ✅ COMPLETE
 
-**React component that shows source page alongside extraction results.**
+**What was built (items 4-10 from workflow gap analysis):**
 
-| File | What to do |
-|---|---|
-| `frontend/src/components/DocumentViewer.tsx` | NEW — side-by-side panel. Left: extraction results (name, SSN, DOB with page/bbox references). Right: rendered page image with bounding box overlays. Page navigation (prev/next). Zoom controls. |
-| `frontend/src/api/client.ts` | Add `getPageImage(docId, pageNum, highlights?)` and `getPageText(docId, pageNum)` API functions |
-| `frontend/src/pages/ProjectDetail.tsx` | Add "View Source" button on each document card in AnalysisReviewPanel. Opens DocumentViewer in a slide-over panel. |
-| `frontend/src/pages/SubjectDetail.tsx` | Add "View Source" link on each extracted value — opens DocumentViewer at the relevant page with the field highlighted |
-
----
-
-#### 26b-c. Extraction-to-Source Linking
-
-**Every extracted value must link back to its source location.**
-
-| File | What to do |
-|---|---|
-| `app/api/routes/analysis_review.py` | Include page_range and bbox in extraction results returned to frontend |
-| `app/api/routes/documents.py` | `GET /documents/{doc_id}/extractions` — return all extractions for a document with page/bbox references, grouped by page |
-| `frontend/src/components/DocumentViewer.tsx` | Click an extraction → scroll to that page, highlight that bbox |
+| # | Feature | What changed |
+|---|---|---|
+| 4 | Analysis review filtering | Filter tabs (All/Pending/Approved/Rejected) in AnalysisReviewPanel |
+| 5 | Dedup summary | Completion screen: records/subjects/dupes/notifications + flagged-for-review banner |
+| 6 | Sub-progress | Progress bar with doc N/M, percentage, records counter during extraction |
+| 7 | Plain-English config | Dedup anchor labels ("Social Security Number" not "ssn") |
+| 8 | Two-phase default | Already complete (was already default) |
+| 9 | Export filtering | "Approved only" checkbox wired to existing backend filter |
+| 10 | Delivery dashboard | `GET /notifications/delivery-status/{project_id}` with summary + masked subject list |
 
 ---
 
@@ -831,27 +835,27 @@ Steps 1-24 COMPLETE (2787+ tests). Phase 5 delivered the extraction engine. Phas
 
 ### Step 29 — Notification Preview & Batch Approval
 
-**Goal:** Before sending 10,000 notification letters, the auditor previews exactly what recipients will receive. Merge fields rendered with real subject data. Batch approval with final sign-off.
+**Goal:** Before sending 10,000 notification letters, the auditor previews exactly what recipients will receive.
+
+#### 29a. Notification Preview API ✅ COMPLETE
+
+**What was built:**
+
+| File | What |
+|---|---|
+| `app/api/routes/notifications.py` | NEW — `GET /notifications/preview/email`, `GET /notifications/preview/letter` (masked PII rendering), `GET /notifications/delivery-status/{project_id}` |
+| `frontend/src/components/NotificationPreview.tsx` | NEW — email/letter toggle, sandboxed iframe preview |
+| `tests/test_notification_preview.py` | 13 tests (masking, template loading, 404, no raw PII) |
 
 ---
 
-#### 29a. Notification Preview API
+#### 29b. Batch Approval & Send (PENDING)
 
 | File | What to do |
 |---|---|
-| `app/api/routes/notifications.py` | NEW — `GET /notifications/{job_id}/preview/{subject_id}` renders the notification template with the subject's real data (masked for display). Returns HTML for email preview, PDF for letter preview. `GET /notifications/{job_id}/preview/sample` picks 3 random subjects and renders all 3. |
-| `app/notification/template_renderer.py` | NEW — takes template + subject data → rendered HTML/PDF. Reuse existing `print_renderer.py` for PDF path, existing templates for email. |
-| `tests/test_notification_preview.py` | Test template rendering with sample data, verify merge fields populated |
-
----
-
-#### 29b. Batch Approval & Send
-
-| File | What to do |
-|---|---|
-| `app/api/routes/notifications.py` | `POST /notifications/{job_id}/approve` — APPROVER role required. Sets notification list status to approved. `POST /notifications/{job_id}/send` — triggers email delivery + print generation for approved subjects. |
-| `frontend/src/pages/ProjectDetail.tsx` | Add notification section: preview samples, approve batch, trigger send. Show send progress (sent/failed/total). |
-| `app/audit/audit_log.py` | Log notification approval and send events with user identity |
+| `app/api/routes/notifications.py` | `POST /notifications/lists/{list_id}/approve` — APPROVER role required. `POST /notifications/lists/{list_id}/send` — triggers delivery. |
+| `frontend/src/pages/ProjectDetail.tsx` | Notification section: approve batch, trigger send, show progress. |
+| `app/audit/audit_log.py` | Log notification approval and send events |
 | `tests/test_notification_batch.py` | Test approval flow, send triggering, audit logging |
 
 ---
