@@ -341,16 +341,29 @@ export function JobSubmit() {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
-            <div className="grid grid-cols-2 gap-3 text-sm">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
               <div>
-                <p className="text-muted-foreground">Subjects found</p>
+                <p className="text-muted-foreground">Records extracted</p>
+                <p className="text-lg font-bold">{(result.total_records ?? 0).toLocaleString()}</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Unique subjects</p>
                 <p className="text-lg font-bold">{result.subjects_found}</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Duplicates removed</p>
+                <p className="text-lg font-bold">{(result.duplicates_removed ?? 0).toLocaleString()}</p>
               </div>
               <div>
                 <p className="text-muted-foreground">Notification required</p>
                 <p className="text-lg font-bold">{result.notification_required}</p>
               </div>
             </div>
+            {(result.flagged_for_review ?? 0) > 0 && (
+              <div className="rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-sm text-amber-800">
+                {result.flagged_for_review} subject(s) flagged for human review (low merge confidence)
+              </div>
+            )}
             {selectedProtocol && (
               <p className="text-sm text-muted-foreground">
                 Protocol applied: {selectedProtocol.name}

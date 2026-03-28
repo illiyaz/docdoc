@@ -3040,6 +3040,11 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                 "subjects_found": len(subjects),
                 "notification_required": notif_count,
                 "export_count": export_count,
+                # Dedup summary (#5)
+                "total_records": len(all_records),
+                "total_documents": len(approved_docs),
+                "duplicates_removed": max(0, len(all_records) - len(subjects)),
+                "flagged_for_review": review_count,
             },
         )
 

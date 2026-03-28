@@ -40,6 +40,12 @@ export interface JobResult {
   documents_found?: number
   auto_approved?: number
   pending_review?: number
+  // Dedup summary (present when status === "COMPLETE")
+  total_records?: number
+  total_documents?: number
+  duplicates_removed?: number
+  flagged_for_review?: number
+  export_count?: number
 }
 
 export interface JobStatus {

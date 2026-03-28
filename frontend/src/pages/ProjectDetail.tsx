@@ -346,6 +346,14 @@ const ENTITY_TYPE_GROUPS = [
 const DEDUP_ANCHORS = ["ssn", "email", "phone", "address", "name"] as const
 type DedupAnchor = (typeof DEDUP_ANCHORS)[number]
 
+const ANCHOR_LABELS: Record<DedupAnchor, string> = {
+  ssn: "Social Security Number / Government ID",
+  email: "Email Address",
+  phone: "Phone Number",
+  address: "Name + Address",
+  name: "Full Name (fuzzy match)",
+}
+
 const DEFAULT_EXPORT_FIELDS = [
   "subject_id",
   "canonical_name",
@@ -757,14 +765,14 @@ function ProtocolCreateForm({
             </p>
             <div className="flex flex-wrap gap-x-4 gap-y-1.5">
               {DEDUP_ANCHORS.map((anchor) => (
-                <label key={anchor} className="flex items-center gap-1.5 text-sm cursor-pointer capitalize">
+                <label key={anchor} className="flex items-center gap-1.5 text-sm cursor-pointer">
                   <input
                     type="checkbox"
                     checked={dedupAnchors.has(anchor)}
                     onChange={() => toggleAnchor(anchor)}
                     className="rounded border-gray-300 text-primary focus:ring-primary h-3.5 w-3.5"
                   />
-                  {anchor}
+                  {ANCHOR_LABELS[anchor]}
                 </label>
               ))}
             </div>
@@ -1466,6 +1474,7 @@ function AnalysisReviewPanel({ jobId, onExtractionComplete }: { jobId: string; o
   const protocolName = analysisData?.protocol_name
   const [isExtracting, setIsExtracting] = useState(false)
   const [extractStages, setExtractStages] = useState<Record<string, { status: string; message: string }>>({})
+  const [docFilter, setDocFilter] = useState<"all" | "pending_review" | "approved" | "rejected">("all")
   const [reviewError, setReviewError] = useState<string | null>(null)
   const [verificationResult, setVerificationResult] = useState<VerificationResult | null>(null)
 
@@ -1589,7 +1598,7 @@ function AnalysisReviewPanel({ jobId, onExtractionComplete }: { jobId: string; o
         if (event.stage && event.stage !== "complete") {
           setExtractStages(prev => ({
             ...prev,
-            [event.stage]: { status: event.status || "running", message: event.message },
+            [event.stage]: { status: event.status || "running", message: event.message, ...(event.detail ? { detail: event.detail } : {}) },
           }))
           // Capture verification result when it arrives
           if (event.stage === "verification" && event.result) {
@@ -1605,10 +1614,37 @@ function AnalysisReviewPanel({ jobId, onExtractionComplete }: { jobId: string; o
     }
   }
 
+  // Extract progress detail from latest stage
+  const latestDetail = Object.values(extractStages).reduce<Record<string, unknown>>((acc, info) => {
+    if ((info as Record<string, unknown>).detail) Object.assign(acc, (info as Record<string, unknown>).detail)
+    return acc
+  }, {})
+  const progressTotal = (latestDetail.total as number) || 0
+  const progressCurrent = (latestDetail.current as number) || 0
+  const progressRecords = (latestDetail.records_found as number) || 0
+  const progressPct = progressTotal > 0 ? Math.round((progressCurrent / progressTotal) * 100) : 0
+
   if (isExtracting) {
     return (
       <div className="space-y-2">
         <p className="text-sm font-medium">Extracting PII from approved documents...</p>
+
+        {/* Progress bar (#6) */}
+        {progressTotal > 0 && (
+          <div className="space-y-1">
+            <div className="flex justify-between text-xs text-muted-foreground">
+              <span>Document {progressCurrent} of {progressTotal}</span>
+              <span>{progressPct}%</span>
+            </div>
+            <div className="h-2 rounded-full bg-gray-200">
+              <div className="h-2 rounded-full bg-blue-500 transition-all" style={{ width: `${progressPct}%` }} />
+            </div>
+            {progressRecords > 0 && (
+              <p className="text-xs text-muted-foreground">{progressRecords.toLocaleString()} records extracted so far</p>
+            )}
+          </div>
+        )}
+
         {Object.entries(extractStages).map(([stage, info]) => (
           <div key={stage} className="flex items-center gap-2 text-xs">
             {stage === "reconnecting" ? (
@@ -1785,7 +1821,28 @@ function AnalysisReviewPanel({ jobId, onExtractionComplete }: { jobId: string; o
         )}
       </div>
 
-      {reviews.map((doc) => (
+      {/* Filter tabs (#4) */}
+      <div className="flex gap-1 rounded border p-0.5 text-xs w-fit">
+        {(["all", "pending_review", "approved", "rejected"] as const).map((f) => {
+          const count = f === "all" ? reviews.length
+            : reviews.filter(d => f === "approved" ? (d.review_status === "approved" || d.review_status === "auto_approved") : d.review_status === f).length
+          return (
+            <button
+              key={f}
+              onClick={() => setDocFilter(f)}
+              className={`rounded px-2 py-0.5 ${docFilter === f ? "bg-blue-100 text-blue-700" : "text-gray-500 hover:text-gray-700"}`}
+            >
+              {f === "all" ? "All" : f === "pending_review" ? "Pending" : f === "approved" ? "Approved" : "Rejected"} ({count})
+            </button>
+          )
+        })}
+      </div>
+
+      {reviews.filter(d => {
+        if (docFilter === "all") return true
+        if (docFilter === "approved") return d.review_status === "approved" || d.review_status === "auto_approved"
+        return d.review_status === docFilter
+      }).map((doc) => (
         <div key={doc.document_id} className="border rounded-md p-3 space-y-2">
           <div className="flex items-center justify-between">
             <div>
@@ -3803,6 +3860,7 @@ function ExportsTab({ projectId }: { projectId: string }) {
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [selectedSchema, setSelectedSchema] = useState<string>("auditor")
+  const [approvedOnly, setApprovedOnly] = useState(true)
 
   const { data: exports, isLoading } = useQuery({
     queryKey: ["exports", projectId],
@@ -3814,7 +3872,10 @@ function ExportsTab({ projectId }: { projectId: string }) {
     setCreating(true)
     setError(null)
     try {
-      await createExport(projectId, { export_schema: selectedSchema })
+      await createExport(projectId, {
+        export_schema: selectedSchema,
+        ...(approvedOnly ? { filters: { review_status: "APPROVED" } } : {}),
+      })
       queryClient.invalidateQueries({ queryKey: ["exports", projectId] })
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create export")
@@ -3828,6 +3889,15 @@ function ExportsTab({ projectId }: { projectId: string }) {
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold">CSV Exports</h3>
         <div className="flex items-center gap-2">
+          <label className="flex items-center gap-1.5 text-xs cursor-pointer">
+            <input
+              type="checkbox"
+              checked={approvedOnly}
+              onChange={(e) => setApprovedOnly(e.target.checked)}
+              className="rounded border-gray-300 h-3.5 w-3.5"
+            />
+            Approved only
+          </label>
           <select
             value={selectedSchema}
             onChange={(e) => setSelectedSchema(e.target.value)}

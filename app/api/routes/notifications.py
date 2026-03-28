@@ -1,4 +1,4 @@
-"""Notification preview and approval routes (Step 27 — Critical #3).
+"""Notification preview, approval, and delivery dashboard routes.
 
 Allows auditors to preview rendered email/letter notifications with masked
 subject data before approving batch delivery.  No notifications are sent
@@ -173,4 +173,63 @@ def preview_letter(
         "protocol_id": protocol_id,
         "format": "letter",
         "html": html,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Delivery dashboard (#10)
+# ---------------------------------------------------------------------------
+
+@router.get("/delivery-status/{project_id}")
+def get_delivery_status(
+    project_id: UUID,
+    db: Session = Depends(_get_db),
+):
+    """Return notification delivery summary for a project.
+
+    Uses the existing ``review_status`` field on NotificationSubject:
+    APPROVED = ready to send, NOTIFIED = sent, REJECTED = not sending.
+    """
+    from sqlalchemy import func as sa_func
+
+    subjects = (
+        db.query(NotificationSubject)
+        .filter(NotificationSubject.project_id == project_id)
+        .all()
+    )
+
+    total = len(subjects)
+    by_status: dict[str, int] = {}
+    for s in subjects:
+        by_status[s.review_status] = by_status.get(s.review_status, 0) + 1
+
+    notif_required = sum(1 for s in subjects if s.notification_required)
+    approved = by_status.get("APPROVED", 0)
+    notified = by_status.get("NOTIFIED", 0)
+    rejected = by_status.get("REJECTED", 0)
+    pending = by_status.get("AI_PENDING", 0) + by_status.get("HUMAN_REVIEW", 0) + by_status.get("LEGAL_REVIEW", 0)
+
+    # Subject-level detail (masked)
+    subject_list = [
+        {
+            "subject_id": str(s.subject_id),
+            "name": _mask_name(s.canonical_name),
+            "review_status": s.review_status,
+            "notification_required": s.notification_required,
+        }
+        for s in subjects
+        if s.notification_required
+    ]
+
+    return {
+        "project_id": str(project_id),
+        "total_subjects": total,
+        "notification_required": notif_required,
+        "summary": {
+            "approved_ready": approved,
+            "notified_sent": notified,
+            "rejected": rejected,
+            "pending_review": pending,
+        },
+        "subjects": subject_list,
     }
