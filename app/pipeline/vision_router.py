@@ -1,4 +1,4 @@
-"""Vision-based document routing (Step 22a).
+"""Vision-based document routing (Step 22a, extended Step 26).
 
 Reads ONE page with the vision model to determine:
 - What PII fields exist (names, SSN, address, DOB, etc.)
@@ -6,6 +6,10 @@ Reads ONE page with the vision model to determine:
 - Whether data spans multiple pages
 
 This is the FIRST step in extraction — it decides which path to use.
+
+Step 26 addition: For text PDFs (PyMuPDF word_count > 50), tries
+LiteParse spatial text → text LLM first (11-28s vs 60+s vision).
+Falls back to vision model if LiteParse unavailable or returns no fields.
 """
 from __future__ import annotations
 
@@ -120,6 +124,57 @@ class VisionRouter:
         self.vision_model = vision_model
         self.fallback_model = fallback_model
 
+    # ------------------------------------------------------------------
+    # Spatial text routing (Step 26)
+    # ------------------------------------------------------------------
+
+    def _route_via_spatial_text(
+        self,
+        doc_path: str,
+        onset_page: int,
+        total_pages: int,
+    ) -> VisionRoutingResult | None:
+        """Try routing via LiteParse spatial text + text LLM.
+
+        Only works for text PDFs (digital, not scanned). Returns None
+        if LiteParse is unavailable or spatial text extraction fails,
+        triggering fallback to vision model path.
+
+        This is 5-6x faster than vision routing (11-28s vs 60+s) because
+        it avoids rendering the page to an image entirely.
+        """
+        from app.readers.liteparse_adapter import get_spatial_text
+
+        spatial_text = get_spatial_text(doc_path, onset_page)
+        if not spatial_text or len(spatial_text.strip()) < 100:
+            return None  # Not enough text — fall back to vision
+
+        # Build a text-only prompt (same JSON schema as vision prompt)
+        prompt = self._build_routing_prompt(total_pages) + (
+            "\n\nHere is the document page content with spatial layout preserved:\n\n"
+            + spatial_text[:4000]  # Cap at 4000 chars to avoid context overflow
+        )
+
+        try:
+            # Use text generation (no image) — much faster than vision
+            response = self.client.generate(
+                prompt=prompt,
+                use_case="spatial_text_routing",
+            )
+        except Exception:
+            logger.debug("Spatial text routing LLM call failed, falling back to vision", exc_info=True)
+            return None
+
+        if not response:
+            return None
+
+        result = self._parse_routing_response(response, total_pages)
+        if not result.pii_fields:
+            return None  # Text LLM found no fields — fall back to vision
+        result.recommended_path = self._determine_path(result, total_pages, is_scanned=False)
+        result.model_used = f"{self.client.model}:spatial_text"
+        return result
+
     def analyze_document(
         self,
         doc_path: str,
@@ -152,7 +207,31 @@ class VisionRouter:
                 raw_response="ERROR: no vision model configured",
             )
 
-        # Try at 200 DPI first, then 150 DPI on failure
+        # Fast path: try spatial text routing for text PDFs (5-6x faster)
+        # Only attempt if not scanned and the PDF has embedded text
+        if not is_scanned:
+            try:
+                import fitz
+                doc = fitz.open(doc_path)
+                page_text = doc[onset_page].get_text() if onset_page < doc.page_count else ""
+                word_count = len(page_text.split())
+                doc.close()
+
+                if word_count > 50:  # Text PDF — try spatial text routing
+                    spatial_result = self._route_via_spatial_text(
+                        doc_path, onset_page, total_pages,
+                    )
+                    if spatial_result:
+                        logger.info(
+                            "Spatial text routing succeeded for %s (model=%s, %d fields)",
+                            doc_path, spatial_result.model_used, len(spatial_result.pii_fields),
+                        )
+                        return spatial_result
+                    logger.debug("Spatial text routing returned no fields, falling back to vision")
+            except Exception:
+                logger.debug("Spatial text pre-check failed, falling back to vision", exc_info=True)
+
+        # Vision model path: try at 200 DPI first, then 150 DPI on failure
         for dpi in [200, 150]:
             try:
                 image = render_page_to_image(doc_path, onset_page, dpi=dpi)
