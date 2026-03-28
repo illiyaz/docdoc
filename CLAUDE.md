@@ -4,125 +4,53 @@ Single source of truth for how this codebase is built and maintained. All contri
 
 See [docs/PLAN.md](docs/PLAN.md) for active implementation steps (Phase 5: Steps 21-24, Phase 6-8: Steps 25-35).
 See [docs/PLAN_COMPLETED.md](docs/PLAN_COMPLETED.md) for completed steps (Phases 1-4, Steps 1-20).
-See [docs/SCHEMA.md](docs/SCHEMA.md) for detailed technical architecture (PDF processing, PII detection, RRA, protocols, HITL, notifications).
+See [docs/SCHEMA.md](docs/SCHEMA.md) for detailed technical architecture.
+See [docs/CLAUDE_HISTORY.md](docs/CLAUDE_HISTORY.md) for detailed per-step implementation notes, bugfix narratives, and sub-run details.
 
 ---
 
 ## 0) Product Goal (non-negotiable)
 
-**Forentis AI** is an end-to-end breach notification platform. The pipeline has three outcomes:
+**Forentis AI** is an end-to-end breach notification platform: **Identify** PII/PHI/FERPA/SPI → **Resolve** (deduplicate, link to individuals) → **Notify** per regulatory protocol.
 
-1. **Identify** — extract PII/PHI/FERPA/SPI from every document in a breach dataset
-2. **Resolve** — deduplicate and link records to unique individuals (Rational Relationship Analysis)
-3. **Notify** — generate and deliver breach notifications per applicable regulatory protocol
-
-Build an **offline-capable, air-gap-safe** system that is:
-
-- **Evidence-backed** — every extracted value carries page number, character offsets, and bounding box
-- **Deterministic first** — rules and heuristics are primary; ML and LLM are additive and optional
-- **Scalable to 1000+ page PDFs** — page-streaming architecture, never load full document into memory
-- **Checkpointable** — every page processed is persisted; crashed jobs resume from last completed page
-- **Safe by default** — STRICT storage policy; no raw PII ever persisted or logged
-- **Governance-ready** — every extraction decision must be explainable and auditable
-- **Air-gap deployable** — zero runtime network dependencies
-- **Protocol-driven** — every job runs against a counsel-approved Protocol
-- **Notification-complete** — pipeline ends with email delivery or print-ready postal output
-- **Access-controlled** — every action requires authenticated identity with role-based authorization (Phase 6+)
-- **Source-verifiable** — auditors can view original document pages alongside extractions (Phase 6+)
-- **Deadline-aware** — regulatory notification deadlines are tracked and visible across all active matters (Phase 6+)
+Build an **offline-capable, air-gap-safe** system that is: evidence-backed (page/offset/bbox), deterministic-first (LLM additive only), scalable to 1000+ page PDFs (page-streaming), checkpointable (resume from last page), safe-by-default (STRICT storage, no raw PII logged), governance-ready (auditable), air-gap deployable, protocol-driven, notification-complete, access-controlled (Phase 6+), source-verifiable (Phase 6+), deadline-aware (Phase 6+).
 
 ---
 
 ## 1) Architecture: Deterministic Pipeline (NOT Agent-Based)
 
-A **Prefect DAG pipeline** of well-defined processing stages. Each stage has typed inputs, typed outputs, and deterministic behavior. No autonomous agents, no LLM orchestration frameworks, no cloud API dependencies.
+A **Prefect DAG pipeline** of well-defined processing stages. No autonomous agents, no LLM orchestration frameworks, no cloud API dependencies.
 
-### Pipeline stages
+| Stage | File | Purpose |
+|---|---|---|
+| Discovery | `tasks/discovery.py` | Filesystem/DB traversal, document cataloging |
+| Structure Analysis | `tasks/structure_analysis.py` | Doc type, section detection, entity role attribution |
+| Document Understanding | `structure/llm_document_understanding.py` | LLM semantic schema. Fallback: heuristic + deny-lists |
+| PII Detection | `tasks/detection.py` | Presidio + spaCy NER, confidence scoring |
+| PII Extraction | `tasks/extraction.py` | Pattern match + context window extraction |
+| Normalization | `tasks/normalization.py` | Phone/address/name/email normalization |
+| RRA | `tasks/rra.py` | Entity resolution, dedup, NotificationSubject building |
+| QA | `tasks/qa.py` | Validation rules, completeness checks |
+| Notification | `tasks/notification.py` | List building, email delivery, print rendering |
+| Error Handling | `tasks/error_handler.py` | Retry logic, failure categorization |
 
-| Design doc name | What it actually is |
-|---|---|
-| Discovery Agent | `tasks/discovery.py` — filesystem/DB traversal, document cataloging |
-| Structure Analysis Agent | `tasks/structure_analysis.py` — document type, section detection, entity role attribution |
-| Document Understanding | `structure/llm_document_understanding.py` — LLM semantic schema (field map, people, dates, suppression hints). Fallback: heuristic + deny-lists |
-| PII Detection Agent | `tasks/detection.py` — Presidio + spaCy NER, confidence scoring, post-filtered through DocumentSchema when available |
-| PII Extraction Agent | `tasks/extraction.py` — pattern match + context window extraction |
-| Normalization Agent | `tasks/normalization.py` — phone/address/name/email normalization |
-| RRA Agent | `tasks/rra.py` — entity resolution, deduplication, NotificationSubject building |
-| Quality Assurance Agent | `tasks/qa.py` — validation rule set, completeness checks |
-| Notification Agent | `tasks/notification.py` — list building, email delivery, print rendering |
-| Error Handling Agent | `tasks/error_handler.py` — retry logic, failure categorization, escalation routing |
-
-Each task is a plain Python class. Prefect handles orchestration, scheduling, retries, and observability.
-
-LLM-backed reasoning only in Phase 4+, gated behind `llm_assist_enabled: false`. Never replaces deterministic pipeline.
+Each task is a plain Python class. LLM-backed reasoning gated behind `llm_assist_enabled: false`.
 
 ---
 
 ## 2) Technology Stack (Locked — No Substitutions Without Explicit Approval)
 
-### Pipeline & orchestration
+**Pipeline:** Prefect (self-hosted), PyMuPDF (fitz), Tesseract + PaddleOCR, python-docx, Ollama (qwen2.5vl:32b primary, llama3.2-vision fallback)
 
-| Component | Choice | Rejected alternatives |
-|---|---|---|
-| Workflow orchestration | **Prefect (self-hosted)** | LangGraph, CrewAI, AutoGen, Airflow |
-| PDF engine | **PyMuPDF (fitz)** | pdfplumber, PyPDF2 |
-| OCR | **Tesseract** (proven) + **PaddleOCR** (original) | Cloud OCR |
-| Multi-format parsing | **Native readers** (proven) + **Apache Tika (self-hosted)** | Cloud-based parsers |
-| Word documents | **python-docx** | — |
-| Vision models | **Ollama** (qwen2.5vl:32b primary, llama3.2-vision fallback) | Cloud vision APIs |
+**Multi-format:** openpyxl, xlrd, pyxlsb, python-docx, antiword/libreoffice, extract-msg, pillow-heif+Pillow, pytesseract, dbfread, mdb-tools, sqlite3, readpst, py7zr
 
-### Multi-format dependencies (proven in Step 23)
+**PII/NLP:** Microsoft Presidio, spaCy, Regex (re), MLflow (self-hosted)
 
-| Format | Library |
-|---|---|
-| XLSX/XLSM | openpyxl |
-| XLS (legacy) | xlrd |
-| XLSB (binary) | pyxlsb |
-| DOCX | python-docx |
-| DOC (legacy) | antiword / libreoffice |
-| MSG | extract-msg |
-| HEIC/HEIF | pillow-heif + Pillow |
-| Images (OCR) | pytesseract + Pillow |
-| DBF | dbfread |
-| MDB/ACCDB | mdb-tools (system) |
-| SQLite | stdlib sqlite3 |
-| PST | readpst (system) |
-| 7z | py7zr |
+**Infrastructure:** PostgreSQL, Redis, MinIO, RabbitMQ, HashiCorp Vault, Prometheus + Grafana (all self-hosted)
 
-### PII detection & NLP
+**Application:** FastAPI, React + Tailwind + ShadCN, SQLAlchemy, Alembic, psycopg2, pymongo
 
-| Component | Choice |
-|---|---|
-| PII detection | **Microsoft Presidio** |
-| NER / context classification | **spaCy** |
-| Custom patterns | **Regex (re module)** |
-| Model training tracking | **MLflow (self-hosted)** |
-
-### Infrastructure
-
-| Component | Choice |
-|---|---|
-| Primary database | **PostgreSQL** |
-| Caching + task queuing | **Redis** |
-| Document/object storage | **MinIO (self-hosted S3-compatible)** |
-| Message queue | **RabbitMQ (self-hosted)** |
-| Secret / key management | **HashiCorp Vault (self-hosted)** |
-| Observability | **Prometheus + Grafana (self-hosted)** |
-
-### Application
-
-| Component | Choice |
-|---|---|
-| Backend API | **FastAPI** |
-| Frontend (human review UI) | **React + Tailwind + ShadCN** |
-| ORM | **SQLAlchemy** |
-| DB migrations | **Alembic** |
-| DB connector (Postgres) | **psycopg2** |
-| DB connector (Mongo) | **pymongo** |
-
-### Air-gap compliance rule
-
-Every library and model must be resolvable from a local artifact registry. No library may make outbound network calls at runtime. Telemetry/phone-home must be disabled.
+**Air-gap rule:** Every library/model resolvable from local artifact registry. No runtime network calls. Telemetry disabled.
 
 ---
 
@@ -131,514 +59,160 @@ Every library and model must be resolvable from a local artifact registry. No li
 ```
 project-root/
 ├── CLAUDE.md
-├── docs/
-│   ├── PLAN.md                    # active implementation steps (21+)
-│   ├── PLAN_COMPLETED.md          # completed steps archive (1-13)
-│   └── SCHEMA.md                  # detailed technical architecture
+├── docs/                          # PLAN.md, PLAN_COMPLETED.md, SCHEMA.md
 ├── config/
-│   ├── config.yaml                # all environment config, no secrets
+│   ├── config.yaml                # environment config, no secrets
 │   └── protocols/                 # 8 built-in YAML protocol files
 ├── app/
-│   ├── tasks/                     # pipeline stages (Prefect tasks)
-│   │   ├── discovery.py
-│   │   ├── structure_analysis.py  # Phase 5 Step 11 — DSA pipeline task
-│   │   ├── detection.py
-│   │   ├── extraction.py
-│   │   ├── cataloger.py           # Phase 5 Step 3
-│   │   ├── qa.py
-│   │   └── error_handler.py
-│   ├── pipeline/
-│   │   ├── dag.py                 # Prefect DAG wiring
-│   │   ├── two_phase.py           # Two-phase pipeline: analyze_generator + extract_generator
-│   │   ├── content_onset.py       # Generalized content onset detection (all file types)
-│   │   ├── instance_detector.py   # Step 20: Marker-based instance boundary detection
-│   │   └── auto_approve.py        # Auto-approve logic for document analysis review
-│   ├── pdf/
-│   │   ├── reader.py              # PyMuPDF streaming wrapper
-│   │   ├── renderer.py            # Step 20: PDF page-to-image for vision models
-│   │   ├── ocr.py                 # PaddleOCR integration
-│   │   ├── classifier.py          # digital/scanned/corrupted detection
-│   │   ├── onset.py               # content onset detection
-│   │   └── stitcher.py            # cross-page tail-buffer logic
-│   ├── pii/
-│   │   ├── presidio_engine.py     # Presidio wrapper + custom recognizers
-│   │   ├── spacy_classifier.py    # context window classification
-│   │   ├── layer1_patterns.py     # regex pattern library (85+ patterns)
-│   │   ├── layer2_context.py      # Layer 2 context window logic
-│   │   ├── layer3_positional.py   # Layer 3 header inference
-│   │   ├── context_deny_list.py   # Step 14a: common-word deny-list, reference labels, FP heuristic
-│   │   ├── schema_filter.py       # Step 14b: DocumentSchema post-filter for Presidio detections
-│   │   └── pattern_validator.py   # Step 20: Post-extraction pattern validation
+│   ├── tasks/                     # Pipeline stages (Prefect tasks)
+│   ├── pipeline/                  # dag.py, two_phase.py, content_onset.py, instance_detector.py,
+│   │                              # auto_approve.py, coordinate_extractor.py, reconciliation.py,
+│   │                              # vision_router.py, field_map_builder.py, extraction_verifier.py,
+│   │                              # record_mapper.py
+│   ├── pdf/                       # reader.py, renderer.py, ocr.py, classifier.py, onset.py, stitcher.py
+│   ├── pii/                       # presidio_engine.py, spacy_classifier.py, layer1_patterns.py,
+│   │                              # layer2_context.py, layer3_positional.py, context_deny_list.py,
+│   │                              # schema_filter.py, pattern_validator.py
 │   ├── normalization/             # phone, email, name, address normalizers
-│   ├── rra/                       # entity resolver, deduplicator, fuzzy matching
+│   ├── rra/                       # entity_resolver, deduplicator, fuzzy matching
 │   ├── protocols/                 # Protocol dataclass, loader, registry
-│   ├── notification/              # list builder, email sender, print renderer, templates
+│   ├── notification/              # list_builder, email_sender, print_renderer, templates
 │   ├── audit/                     # events, audit_log
 │   ├── review/                    # roles, queue_manager, workflow, sampling
-│   ├── structure/
-│   │   ├── models.py              # DSA dataclasses (DocumentStructureAnalysis, etc.)
-│   │   ├── heuristics.py          # Deterministic document type/section/role analyzer
-│   │   ├── protocol_relevance.py  # Protocol → entity role relevance mapping
-│   │   ├── masking.py             # PII masking for LLM prompts (respects pii_masking_enabled)
-│   │   ├── llm_analyzer.py        # LLM-assisted structure analysis (additive)
-│   │   ├── entity_groups.py       # EntityGroup, EntityRelationship dataclasses (Step 13)
-│   │   ├── llm_entity_analyzer.py # LLM entity relationship analysis (Step 13)
-│   │   ├── document_schema.py     # Step 14a: DocumentSchema, FieldContext, PersonContext, DateContext
-│   │   ├── llm_document_understanding.py  # Step 14b: LLM Document Understanding → DocumentSchema
-│   │   ├── llm_template_extractor.py # Step 19: LLM-driven PII extraction for templates
-│   │   └── vision_extractor.py    # Step 20: Vision-language model PII extraction
-│   ├── llm/
-│   │   ├── client.py              # OllamaClient — governance-gated LLM wrapper
-│   │   ├── prompts.py             # Prompt templates (classify, assess, suggest, DSA, entity relationships, document understanding)
-│   │   └── audit.py               # LLM call logging (log_llm_call, get_llm_calls)
-│   ├── core/
-│   │   ├── constants.py           # ENTITY_CATEGORY_MAP, DATA_CATEGORIES (8 categories)
-│   │   ├── policies.py            # STRICT / INVESTIGATION storage policy
-│   │   ├── security.py            # hashing, encryption, EncryptionProvider
-│   │   ├── logging.py             # PIISafeFilter
-│   │   └── settings.py            # pydantic-settings
-│   ├── db/
-│   │   ├── models.py              # SQLAlchemy ORM models (18 tables)
-│   │   └── repositories.py        # thin data access layer
-│   └── api/
-│       ├── main.py
-│       ├── middleware/
-│       └── routes/                # health, diagnostic, jobs, projects, protocols, analysis_review
-├── frontend/                      # React Forentis AI UI
-│   └── src/
-│       ├── api/client.ts          # API client (types + functions)
-│       ├── pages/
-│       │   ├── Dashboard.tsx      # Review dashboard
-│       │   ├── Projects.tsx       # Project list + create
-│       │   ├── ProjectDetail.tsx  # Project detail (6 tabs: Overview, Protocols, Catalog, Jobs, Density, Exports)
-│       │   ├── QueueView.tsx      # Review queue
-│       │   ├── SubjectDetail.tsx  # Subject detail
-│       │   ├── JobSubmit.tsx      # Job submission (requires project selection)
-│       │   └── Diagnostic.tsx     # Diagnostic scan
-│       ├── components/            # Shared components (ShadCN + custom)
-│       └── App.tsx                # Routes + sidebar + Forentis AI branding
-├── alembic/
-│   └── versions/                  # 0001–0010
-├── tests/
-│   ├── test_schema.py
-│   ├── test_repositories.py
-│   ├── test_policies.py
-│   ├── test_extraction.py
-│   ├── test_safety.py             # PII never appears in logs or exceptions
-│   ├── test_api.py
-│   ├── test_cataloger.py
-│   ├── test_constants.py            # entity category mapping coverage
-│   ├── test_density.py
-│   ├── test_llm.py
-│   ├── test_structure_analysis.py   # DSA: doc type, sections, roles, masking, RRA prevention
-│   └── test_two_phase.py            # Two-phase pipeline: content onset, auto-approve, review
+│   ├── structure/                 # models.py, heuristics.py, protocol_relevance.py, masking.py,
+│   │                              # llm_analyzer.py, entity_groups.py, llm_entity_analyzer.py,
+│   │                              # document_schema.py, llm_document_understanding.py,
+│   │                              # llm_template_extractor.py, vision_extractor.py
+│   ├── llm/                       # client.py (OllamaClient), prompts.py, audit.py
+│   ├── core/                      # constants.py, policies.py, security.py, logging.py, settings.py
+│   ├── db/                        # models.py (19 tables), repositories.py
+│   └── api/                       # main.py, middleware/, routes/
+├── frontend/src/                  # api/client.ts, pages/ (Dashboard, Projects, ProjectDetail,
+│                                  # QueueView, SubjectDetail, JobSubmit, Diagnostic), components/, App.tsx
+├── alembic/versions/              # 0001–0012
+├── tests/                         # test_schema, test_repositories, test_policies, test_extraction,
+│                                  # test_safety, test_api, test_two_phase, + many more
 ├── models/                        # pre-packaged spaCy and Presidio models
-└── scripts/
-    └── retrain.py                 # supervised retraining from human labels
+└── scripts/                       # retrain.py, run-with-metrics.sh, resume.sh, clean.sh
 ```
 
 ---
 
 ## 4) Schema Contract
 
-The canonical DB schema (18 tables) is defined by:
-- `app/db/models.py`
-- `alembic/versions/0001_initial.py` through `0008_entity_analysis.py`
-- `tests/test_schema.py` and `tests/test_repositories.py`
+Canonical DB schema (19 tables) defined by `app/db/models.py` + `alembic/versions/0001–0012` + `tests/test_schema.py`.
 
-### Rules
-
-- Do NOT introduce new tables or columns without updating models.py, migration, test_schema.py, and affected repository tests simultaneously
-- If a mismatch exists between models and migration, tests must fail — never suppress this
-- Early stage: migration rewrites are allowed. Once the system processes real data, all migrations must be additive only
-- All new `project_id` FKs are **nullable** for backward compatibility with pre-project data
+- Do NOT introduce new tables/columns without updating models.py, migration, test_schema.py, and repository tests simultaneously
+- Migration/model mismatch must fail tests — never suppress
+- All new `project_id` FKs are **nullable** for backward compatibility
 
 ---
 
 ## 5) Storage Policy & Security
 
-### STRICT mode (default)
+**STRICT (default):** No `raw_value` anywhere. `hashed_value` required. `raw_value_encrypted` = NULL.
+**INVESTIGATION:** `raw_value_encrypted` allowed (Fernet). `retention_until` required. Missing key = fail closed.
 
-- Never store `raw_value` anywhere — not in DB, not in logs, not in exceptions
-- `hashed_value` required for every extracted PII element
-- `raw_value_encrypted` must be NULL
-- Default storage policy: `hash`
-
-### INVESTIGATION mode
-
-- `raw_value_encrypted` allowed (encrypted via Fernet, minimum)
-- `retention_until` required and enforced — records auto-expire
-- If encryption key missing: fail closed, never fall back to plaintext
-
-### Security (`app/core/security.py`)
-
-- Hashing: `SHA256(tenant_salt + raw_value)` — deterministic, tenant-isolated
-- Encryption: Fernet for MVP; pluggable `EncryptionProvider` interface
-- No raw PII in any log statement, exception message, stack trace, or debug output — ever
-
-See [docs/SCHEMA.md](docs/SCHEMA.md) for full storage policy contract and security/governance details.
+**Security (`app/core/security.py`):** SHA256(tenant_salt + raw_value) hashing. Fernet encryption (pluggable `EncryptionProvider`). **No raw PII in logs, exceptions, stack traces, or debug output — ever.**
 
 ---
 
 ## 6) Key Architectural Decisions (Locked)
 
-These are detailed in [docs/SCHEMA.md](docs/SCHEMA.md). Summary:
+Detailed in [docs/SCHEMA.md](docs/SCHEMA.md). Summary:
 
-- **PDF processing:** PyMuPDF page-streaming + PaddleOCR for scanned pages. Dual-path (digital vs scanned). **PII-verified onset detection** (two-pass: heuristic keyword scan → Presidio verification on candidate pages to find true first PII page). Cross-page tail-buffer stitching. Checkpointing per page.
-- **PII detection:** Three layers (pattern match → context window → positional header). Presidio + spaCy. 85+ patterns covering PII/PHI/FERPA/SPI/PPRA. 8 data categories (PII, SPII, PHI, PFI, PCI, NPI, FTI, CREDENTIALS) with multi-category mapping per entity type. **Protocol-driven recognizer filtering** — only jurisdiction-relevant recognizers run per protocol (GDPR disables US types, DPDPA disables UK/EU types). **Context deny-lists** suppress common-word false positives (STUDENT_ID "Statement", VAT_EU "Description"). **DocumentSchema filter** (LLM-powered) suppresses/reclassifies detections based on semantic document understanding.
-- **LLM Document Understanding:** LLM reads onset page, produces a DocumentSchema (field map, people, dates, table schemas, suppression hints). Schema is a post-filter on Presidio — never modifies Presidio's engine. Table-aware filtering: non-PII table columns suppress all detections from table region, PII columns confirm detections. Reduces false positives from ~85% to ~10-15%. Without LLM, deny-lists + tighter patterns reduce to ~40-50%. One LLM call per document (not per detection).
-- **Document Structure Analysis:** Heuristic-first document type classification, section detection, entity role attribution. LLM-assisted analysis additive only (`llm_assist_enabled`). Cross-role merge prevention in RRA (primary_subject + institutional = never merge).
-- **LLM Entity Relationship Analysis:** LLM reads document content + sample PII detections, understands which PII belongs to which person, proposes entity groups with confidence + rationale. Presented to human reviewer for confirmation before full extraction. Additive to Presidio/spaCy detection. Graceful fallback when LLM unavailable.
-- **Pipeline stage order (analyze phase):** `discovery → cataloging → verified_onset → document_understanding (LLM) → sample_extraction (with schema filter) → entity_analysis → auto_approve`. Without LLM: `discovery → cataloging → verified_onset → structure_analysis (heuristic) → sample_extraction (with deny-lists) → auto_approve`.
-- **RRA:** Entity resolution via Union-Find. Confidence-weighted merge signals. Cross-role merge prevention. Threshold: 0.80 auto-accept, 0.60–0.79 human review, <0.60 separate.
-- **Protocols:** 8 built-in (HIPAA, GDPR, CCPA, HITECH, FERPA, state_breach_generic, BIPA, DPDPA). YAML-configurable. Selected once per job.
-- **HITL:** 4 roles (REVIEWER, LEGAL_REVIEWER, APPROVER, QC_SAMPLER). 4 review queues. State machine: AI_PENDING → HUMAN_REVIEW → LEGAL_REVIEW → APPROVED → NOTIFIED.
-- **Notification:** SMTP email + WeasyPrint postal letters. Template-driven. Delivery gated on APPROVED status only.
-- **Audit:** Every extraction decision traceable to a specific rule/pattern/classifier. Append-only audit trail.
-- **Coordinates:** Evidence-only — never used as search mechanism.
-- **Post-extraction gap-fill (Step 25):** Gap analysis runs AFTER all docs are extracted, with 50-call budget (≈20 min). No inline gap-fill during extraction loop. Priority: docs missing critical fields (SSN, DOB) first. Max 10 pages per doc.
-- **LLM budget (Step 25):** Path 2b capped at 100 batches (≈10 min). Over-budget docs use learn-then-extract hybrid: LLM extracts first 300 instances, learns name patterns, then regex-extracts remaining instances at code speed.
-- **Field map validation (Step 25):** Onset-aware sampling (onset + 4 consecutive pages), fallback to 3 random middle-third pages. Both strategies must fail before rejecting a field map.
-- **VisionRouter guard (Step 25):** Returns immediate presidio fallback with error log when both vision_model and fallback_model are None, preventing silent garbage routing.
-- **Authentication (Phase 6):** JWT + local user store. No OAuth, no external IdP. bcrypt password hashing. Token in `Authorization: Bearer` header. All routes require auth when `auth_enabled=true` (default). Air-gap safe — no external auth dependencies.
-- **RBAC (Phase 6):** Four roles enforced at API level via `require_role()` dependency. APPROVER is superuser. QC_SAMPLER is read-only. Role hierarchy: QC_SAMPLER < REVIEWER < LEGAL_REVIEWER < APPROVER.
-- **Access logging (Phase 6):** Append-only `access_logs` table. Every authenticated request logged with user, action, resource, timestamp. No DELETE/UPDATE on access logs — immutable by design.
-- **Document viewer (Phase 6):** Page images rendered on-demand via PyMuPDF, never cached to disk (breach data shouldn't persist as images). Bounding box overlays for extraction highlighting. Auth-gated — no unauthenticated access to source documents.
-- **Deadline tracking (Phase 6):** Breach discovery date drives protocol-specific deadline computation. Dashboard shows countdown across all active matters. Color coding: green (>14d), amber (3-14d), red (<3d), black (overdue).
-- **Evidence export (Phase 7):** One-click bundle: methodology PDF + notification XLSX + audit CSV + QC report → ZIP. Methodology report auto-generated from pipeline metrics — not manually authored.
-- **Notification preview (Phase 7):** Template rendering with real (masked) subject data before batch send. APPROVER sign-off required before any notifications are delivered.
-- **Re-extraction (Phase 7):** Per-document re-run without re-running entire job. Field map edits → re-extract → verify cycle. Old results replaced atomically.
-- **Manual merge/split (Phase 7):** Auditor can link/unlink notification subjects with rationale. Logged in audit trail with before/after state.
+- **PDF:** PyMuPDF page-streaming + PaddleOCR. PII-verified onset (heuristic → Presidio). Cross-page stitching. Per-page checkpointing.
+- **PII detection:** 3 layers (pattern → context → positional). 85+ patterns, 8 data categories. Protocol-driven recognizer filtering. Context deny-lists. DocumentSchema post-filter (LLM).
+- **LLM Document Understanding:** One LLM call per doc → DocumentSchema (field map, people, dates, tables, suppression hints). Post-filter on Presidio, never modifies engine. Reduces FP from ~85% to ~10-15%.
+- **Structure Analysis:** Heuristic-first (9 doc types, 13 sections, 5 roles). LLM additive. Cross-role merge prevention.
+- **Extraction paths (priority order):** Path 0 coordinate (fixed-layout, 30-45ms/page) → Path 1 vision → Path 2a LLM table → Path 2b LLM template → Path 3 Presidio fallback.
+- **Vision routing:** VisionRouter reads ONE page → determines structure type + extraction path. FieldMapBuilder bridges to coordinates. ExtractionVerifier validates completeness. **Step 26: spatial text fast-path** — text PDFs (word_count > 50) try LiteParse spatial text → text LLM first (11-28s vs 60+s vision). Falls back to vision if LiteParse unavailable or returns no fields.
+- **Coordinate extraction:** LLM analyzes layout once → field map (anchors + spatial relationships) → Python extracts all pages via PyMuPDF bounding boxes. Rotation-aware (0/90/180/270). Failed pages → LLM reconciliation.
+- **Analyze phase order:** discovery → cataloging → verified_onset → document_understanding → vision_routing → sample_extraction → entity_analysis → auto_approve
+- **RRA:** Union-Find. Thresholds: ≥0.80 auto-accept, 0.60-0.79 review, <0.60 separate. Cross-instance merge prevention (page_range key).
+- **Protocols:** 8 built-in (HIPAA, GDPR, CCPA, HITECH, FERPA, state_breach_generic, BIPA, DPDPA). YAML-configurable.
+- **HITL:** 4 roles (REVIEWER, LEGAL_REVIEWER, APPROVER, QC_SAMPLER). State: AI_PENDING → HUMAN_REVIEW → LEGAL_REVIEW → APPROVED → NOTIFIED.
+- **Notification:** SMTP email + WeasyPrint postal. Template-driven. Delivery gated on APPROVED.
+- **Background extraction:** Daemon thread, per-doc commit, heartbeat, resume, cancellation. SSE relay with auto-reconnect.
+- **Performance guards (Step 24e):** Onset-aware field map validation, deferred gap-fill (50-call budget), LLM batch cap (100, learn-then-extract hybrid), VisionRouter no-model guard.
+- **Future phases:** Auth (JWT, Phase 6), RBAC (4 roles, Phase 6), access logging (Phase 6), document viewer (Phase 6), deadline tracking (Phase 6), evidence export (Phase 7), notification preview (Phase 7), re-extraction (Phase 7), manual merge/split (Phase 7).
 
 ---
 
 ## 7) Ground Rules for Code Changes
 
-- Do not introduce new tables/columns without updating `models.py`, migration, `test_schema.py`, and affected repository tests simultaneously
-- Prefer small, reviewable diffs — one coherent behavior change per prompt
-- Add tests in the same change for every behavior modification
-- Never broaden scope beyond the current prompt
-- Run before marking any task done:
-  ```
-  python -m py_compile <changed files>
-  pytest tests/test_schema.py tests/test_repositories.py tests/test_safety.py
-  ```
-- Summarize every change as: files modified + what tests now verify
+- Schema changes: update models.py + migration + test_schema.py + repository tests simultaneously
+- Small, reviewable diffs — one behavior change per prompt
+- Tests in same change for every behavior modification
+- Never broaden scope beyond current prompt
+- Run before marking done: `python -m py_compile <files> && pytest tests/test_schema.py tests/test_repositories.py tests/test_safety.py`
+- Summarize: files modified + what tests verify
 
 ---
 
 ## 8) What NOT to Do
 
-- Do not use LangGraph, CrewAI, AutoGen, or any agent framework
-- Do not call any cloud LLM API (OpenAI, Anthropic, Cohere, etc.)
-- Do not use Tesseract (use PaddleOCR)
-- Do not use pdfplumber or PyPDF2 (use PyMuPDF)
-- Do not load entire PDFs into memory
-- Do not use fixed coordinates as the SOLE extraction mechanism (use anchor-relative with LLM-guided field maps — see Step 21)
-- Do not store or log raw PII values anywhere
-- Do not make LLM mandatory for correctness — the deterministic pipeline must work without it
-- Do not introduce runtime network dependencies
-- Do not broaden scope beyond the active phase
+- No LangGraph, CrewAI, AutoGen, or agent frameworks
+- No cloud LLM APIs (OpenAI, Anthropic, Cohere)
+- No Tesseract (use PaddleOCR), no pdfplumber/PyPDF2 (use PyMuPDF)
+- No loading entire PDFs into memory
+- No fixed coordinates as SOLE extraction (use anchor-relative field maps)
+- No storing/logging raw PII
+- No making LLM mandatory for correctness
+- No runtime network dependencies
+- No scope creep beyond active phase
 
 ---
 
 ## 9) Current Progress
 
-### Phase 1 — Deterministic Core: COMPLETE
-### Phase 2 — Normalization + RRA: COMPLETE
-### Phase 3 — Protocol Configuration + Notification Delivery: COMPLETE
-### Phase 4 — Enhanced HITL + Comprehensive Audit Trail: COMPLETE
+### Phases 1-4: COMPLETE (demo-ready)
 
-**Product is demo-ready. All pitch deck promises are backed by tested code.**
+Phase 1 (Deterministic Core), Phase 2 (Normalization + RRA), Phase 3 (Protocols + Notification), Phase 4 (HITL + Audit Trail).
 
 ### Phase 5 — Forentis AI Evolution: IN PROGRESS
 
 | Step | Status | Summary |
 |---|---|---|
-| 1. Schema + Migration | COMPLETE | 5 new tables, 4 extended tables, migration 0005, 17 total tables |
-| 2. Project + Protocol API | COMPLETE | CRUD for projects + protocol configs, catalog-summary + density endpoints |
-| 3. Cataloger Task | COMPLETE | File structure classifier (structured/semi-structured/unstructured/non-extractable) |
-| 4. Density Scoring | COMPLETE | Entity categorization (8 categories: PII/SPII/PHI/PFI/PCI/NPI/FTI/CREDENTIALS), multi-category mapping, confidence aggregation, per-doc + project summaries |
-| 5. Configurable dedup anchors | COMPLETE | `active_anchors` param on `build_confidence` + `EntityResolver.resolve`, 6 anchor types, validated input |
-| 6. CSV export | COMPLETE | `app/export/csv_exporter.py`, `app/api/routes/exports.py`, masked PII, configurable columns |
-| 7. LLM integration | COMPLETE | `app/llm/client.py`, `app/llm/prompts.py`, `app/llm/audit.py` — governance-gated Ollama client, 3 prompt templates, full audit logging, 55 tests |
-| 8. Frontend + rename | COMPLETE | Projects list + detail pages, App.tsx routes, rename Cyber NotifAI to Forentis AI across frontend + backend |
-| 8b. Job Workflow | COMPLETE | Backend: 5 new endpoints (project jobs, job status, run job, recent jobs, link job). Frontend: Jobs tab in ProjectDetail (table + pipeline progress + run/link), 8-stage pipeline stepper, JobSubmit requires project selection, auto-refresh Catalog/Density on job completion. |
-| 9. Guided Protocol Form | COMPLETE | Replaced raw JSON textarea with guided form: base protocol dropdown (6 presets), entity type checkboxes (Identity/Financial/Health), confidence slider, dedup anchor multi-select, sampling config, storage policy radios, reorderable export fields, raw JSON toggle for power users |
-| 10. Catalog Tab + Base Protocols | COMPLETE | Catalog tab with file upload (drag-and-drop), server path linking (air-gap), Run New Job, Link Existing Job; GET /protocols/base endpoint; base protocol dropdown populated from API (8 YAML protocols); placeholder YAML for bipa, dpdpa |
-| 11. Document Structure Analysis | COMPLETE | Heuristic doc type classification (9 types), section detection (13 section types), entity role attribution (5 roles), protocol relevance mapping (8 protocols), LLM-assisted analysis (additive, governance-gated), cross-role merge prevention in RRA, migration 0006, 64 new tests |
-| 12. Two-Phase Pipeline | COMPLETE | Analyze → Review → Extract workflow. Content onset detection (all file types), sample PII extraction from first content page, document-level analysis review (approve/reject/approve-all), auto-approve (confidence-based + protocol-configurable), Phase 2 full extraction on approved docs, migration 0007, `DocumentAnalysisReview` table (18 total), frontend pipeline mode toggle + analysis review panel, 28 new tests |
-| 13. LLM Entity Relationship Analysis | COMPLETE | PII-verified onset detection (two-pass: heuristic candidates → Presidio verification). LLM entity relationship analysis: reads onset page + PII detections, proposes entity groups with confidence + rationale. New analyze stages: `verified_onset` + `entity_analysis`. `EntityRelationshipAnalysis` dataclass, `LLMEntityAnalyzer`, `ANALYZE_ENTITY_RELATIONSHIPS` prompt. API returns entity groups/relationships/guidance. Frontend entity group cards with role badges, relationship display, extraction guidance. Migration 0008 (`documents.entity_analysis` JSON column). 20 new tests. |
-| 14. LLM Document Understanding & Detection Quality | COMPLETE | Context deny-lists, tighter Presidio patterns, protocol-driven recognizer filtering, LLM Document Understanding (DocumentSchema + SchemaFilter + TableSchema), detection tuning, Catalog tab UX. |
-| 15. Field-Level Review + Protocol Mapping | COMPLETE | Two-tier detection toggle, protocol field mapping, `detection_review_decisions` table (migration 0009, 19 tables). |
-| 16. UX Consolidation: Dashboard, Jobs, Sidebar, Density | COMPLETE | Dashboard command center, Jobs tab (cancel/archive/filter/pagination), Sidebar 8→5 items, Density state-driven display. |
-| 17. Cross-Page Template Linking + FP Cleanup + Auto-Export | COMPLETE | DocumentTemplate, PageRole, multi-page LLM reading, build_composite_record, financial term deny-list, cross-type suppression, auto-CSV-export. |
-| 18. Auditor-Ready CSV Export with Lineage | COMPLETE | Schema-driven CSV (auditor/minimal/full), +5 lineage columns on NotificationSubject (migration 0010), gov ID masking, preview endpoint. |
-| 19. Schema-Driven LLM Extraction for Templates | COMPLETE | LLMTemplateExtractor, ENTITY_EXTRACTION_GUIDE (17 types), ALWAYS_EXTRACT_IF_PRESENT, 3-path extraction (exclusive), cross-batch dedup, marker-based instance boundaries, 24 tests. |
-| 20. Vision-First Extraction Architecture | COMPLETE | Vision-language model as primary extractor. VisionDocumentExtractor, PDF page renderer, instance boundary detector, OllamaClient.generate_with_images. 4 extraction strategies: template, table, vision page, Presidio fallback. Pattern validation. Per-protocol model config. Table extraction. Background extraction (SSE decoupling). Configurable dedup anchors. Batch reliability with retry/backoff. 79 new tests. |
-| 21. Coordinate-Based Extraction for Structured Documents | COMPLETE | For fixed-layout documents (accounting statements, payslips), LLM analyzes layout once → builds field map (anchor text + spatial relationships + coordinates) → Python extracts ALL pages using coordinate-based text extraction in seconds. Auditor reviews/edits field map before extraction. Reconciliation: failed pages sent to LLM fallback. ADDITIVE — existing LLM template/table/page paths unchanged. |
-| 22. Vision-Based Document Routing | COMPLETE | VisionRouter reads ONE page with vision model → determines structure type, PII fields, extraction path. FieldMapBuilder bridges vision PII to PyMuPDF coordinates. ExtractionVerifier validates post-extraction completeness. Frontend auditor panel shows vision routing results with field map editor. |
-| 23. Hybrid Pipeline & Multi-Format Orchestration | **COMPLETE** | Gap analysis + 2 fixes. Static value filtering, name format learning, consistency scoring all in UI pipeline. **Gap 1 fix:** `_learn_name_regex()` in `coordinate_extractor.py` — mixed-case name fallback (last_first, titled, first_last, all_caps, generic) with Unicode support. Person samples persisted to `metadata_json` during vision routing, loaded for extraction. **Gap 2 fix:** Archive pre-extraction in `discovery.py` — two-pass `list_documents()` extracts .zip/.7z contents via `upload_helpers.extract_archive()`, idempotent. Original testing: 34 real documents, 78,471 records, 33/34 working. |
-| 24e. Extraction Performance Fixes | **COMPLETE** | 4 fixes from E2E test (34 docs, 20K pages): (1) onset-aware field map validation (2-strategy), (2) deferred post-extraction gap-fill with 50-call budget, (3) LLM batch budget cap at 100 (learn-then-extract hybrid for over-budget docs), (4) VisionRouter no-model guard. |
+| 1-10 | COMPLETE | Schema, Projects API, Cataloger, Density, Dedup anchors, CSV export, LLM integration, Frontend, Job Workflow, Protocol Form, Catalog Tab |
+| 11 | COMPLETE | Document Structure Analysis — 9 doc types, 13 sections, 5 roles, protocol relevance, migration 0006 |
+| 12 | COMPLETE | Two-Phase Pipeline — analyze → review → extract, content onset, auto-approve, migration 0007 |
+| 13 | COMPLETE | LLM Entity Relationship Analysis — PII-verified onset, entity groups, migration 0008 |
+| 14 | COMPLETE | LLM Document Understanding — context deny-lists, DocumentSchema + SchemaFilter, detection tuning |
+| 15 | COMPLETE | Field-Level Review + Protocol Mapping — detection_review_decisions table, migration 0009 |
+| 16 | COMPLETE | UX Consolidation — Dashboard, Jobs tab, Sidebar, Density, record_mapper fix |
+| 17 | COMPLETE | Cross-Page Templates — DocumentTemplate, multi-page LLM, composite records, FP cleanup, auto-export |
+| 18 | COMPLETE | Auditor CSV Export — schema-driven (auditor/minimal/full), +5 lineage columns, migration 0010 |
+| 19 | COMPLETE | LLM Template Extraction — LLMTemplateExtractor, 3-path exclusive extraction, marker boundaries, preview, defensive parsing |
+| 20 | COMPLETE | Vision-First Extraction — VisionDocumentExtractor, 4 strategies, pattern validation, batch reliability, background extraction (SSE), configurable dedup |
+| 21 | COMPLETE | Coordinate Extraction — field maps, CoordinateExtractor (rotation-aware), reconciliation, schema persistence, field map validation, frontend editor |
+| 22 | COMPLETE | Vision Routing — VisionRouter, FieldMapBuilder, ExtractionVerifier, pipeline wiring, frontend auditor panel |
+| 23 | COMPLETE | Hybrid Pipeline — multi-format orchestration, name regex learning, archive extraction. 34 docs, 78K records, 33/34 success |
+| 24e | COMPLETE | Extraction Performance — onset-aware validation, deferred gap-fill, LLM budget cap, VisionRouter guard |
+| 26 | COMPLETE | LiteParse Spatial Text Routing — text PDFs route via spatial text + text LLM (11-28s vs 60+s vision), graceful fallback |
 
-**Step 23 — Standalone Scripts (proven, awaiting integration):**
+**Key metrics (March 2026):** 78,471 PII records, 34 docs (PDF/XLSX/XLS/MSG/HEIC/JPG), 30-45ms/page coordinate speed, dual-model fallback.
 
-| Script | Purpose | Formats |
-|---|---|---|
-| `scripts/test_hybrid_pipeline.py` | PDF-specific hybrid extraction engine | Text + scanned PDFs |
-| `scripts/forentis_extract.py` | Unified orchestrator for all formats | 47 file extensions |
+**~2800 tests passing.**
 
-**Key proven metrics (March 2026, 34 real breach documents):**
-- 78,471 PII records extracted across PDF, XLSX, XLS, MSG, HEIC, JPG
-- 33/34 files successful (1 genuinely empty)
-- Coordinate-based audit: 17/17 PASS on text PDFs
-- Speed: 30-45ms per page (vs 5+ seconds/page for LLM-per-page)
-- Dual-model fallback: qwen2.5vl primary → llama3.2-vision catches 500 errors
-- Scanned PDFs: vision OCR reads ID cards, receipts, dental statements
-- MSG emails: body text PII extraction (not just attachments)
-- HEIC photos: 2x upscale OCR for phone camera images
-
-**End-to-end workflow (see PLAN.md Step 23c):**
-```
-Folder → Discover → Route → Extract → Audit → Normalize → Dedup → Sample → Review → Notify
-```
-
-**Bugfix: Extraction preview multi-page read** — Preview now reads ALL pages of instance 0 (not just identity page). `build_preview_extraction_prompt()` asks LLM for per-field page numbers (`{value, page}` format). `_parse_preview_response()` parses LLM output with canonical field mapping. Instance count uses `find_instance_boundaries()` when marker set. 11 net new tests.
-
-**CRITICAL Bugfix: Cross-instance dedup over-merging** — 149 unique individuals were being collapsed to 28 rows. Root cause: `_deduplicate_records()` keyed on name only, merging people from DIFFERENT template instances (e.g., "P Davie" on pages 1-3 merged with "P Davies" on pages 4-6). Fix: (1) `_deduplicate_records()` now keys on `(name, page_range)` for template docs (`instance_aware=True`), keeping `name`-only for tables (`instance_aware=False`). (2) `EntityResolver.build_confidence()` returns 0.0 for same-document records with different `page_range` (cross-instance merge prevention). Each template instance = one unique person. 7 net new tests.
-
-**Batch Reliability + Configurable Dedup + Dedup UI** (production fixes):
-  - Retry: MAX_RETRIES=3, backoff 2s/4s/8s, split-to-individual on batch failure, unload_unused_models(), timeout_override=120s
-  - Configurable dedup: _build_anchor_key() with 5 anchors (ssn, name_dob, email, phone, name_address), wired from protocol config
-  - Analysis API returns {documents, dedup_anchors, protocol_name}, frontend shows read-only anchor checkboxes
-  - `tests/test_batch_reliability.py`: 30 new tests
-
-**Background Extraction (SSE Decoupling)**:
-  - `run_extraction_background()` runs extraction in a daemon thread with its own DB session
-  - Per-doc commit: PIIRecords serialized to `Document.metadata_json["extracted_records"]` after each doc
-  - Progress written to `IngestionRun.metrics["extraction_progress"]` with heartbeat
-  - Resume support: completed_doc_ids tracked, skipped on re-launch; records reloaded from metadata_json
-  - Cancellation: background thread checks `run.status == "cancelled"` between docs
-  - `extract_generator()` rewritten as thin SSE relay polling metrics every 2s
-  - Accepts both `analyzed` (start) and `extracting` (reconnect) status
-  - Stale heartbeat detection (>60s) re-launches extraction thread with resume
-  - Frontend: `startExtractStreaming()` auto-reconnects on disconnect (max 60 retries, 2s delay)
-  - Frontend: "Reconnecting to extraction..." amber status indicator
-  - 8 new tests in `test_two_phase.py` (serialize/deserialize, progress, relay, reconnect)
-
-**Step 21a (Run 1): Layout Assessment + FieldMapping Model** ✅
-  - `FieldMapping` dataclass in `app/structure/document_schema.py`: field_type, anchor_text, spatial_relationship, value_pattern, sample_bbox, line_count, skip_pattern
-  - `DocumentSchema` extended: +layout_type ("fixed"|"template_with_drift"|"variable"), +layout_field_map (list[FieldMapping]|None), +layout_confidence
-  - to_dict()/from_dict() roundtrip support, _parse_layout_field_map() defensive parser
-  - LLM prompts (UNDERSTAND_DOCUMENT + UNDERSTAND_MULTI_PAGE_DOCUMENT) updated with layout analysis instructions
-  - `_parse_response()` parses layout_type/layout_field_map/layout_confidence; safety downgrade if fixed without field_map
-  - `tests/test_layout_assessment.py`: 25 tests (FieldMapping defaults, schema layout fields, to_dict/from_dict roundtrip, parse fixed/variable/drift, safety downgrade, bad data handling, prompt content)
-
-**2210 tests passing after Step 21a (Run 1). (1 pre-existing failure in test_template_detection unrelated.)**
-
-**Step 21b (Run 2): Coordinate Extractor + Reconciliation** ✅
-  - `app/pipeline/coordinate_extractor.py` NEW: `CoordinateExtractor` class — fast extraction for fixed-layout docs using PyMuPDF word-level bounding boxes
-    - `extract_all_pages(page_range?)` → `(list[PIIRecord], list[int])` (records + failed page numbers)
-    - Anchor-based: `_find_anchor()` handles single/multi-word anchors (case-insensitive)
-    - Region computation: `same_line_right`, `line_below`, `lines_below_N`, `region_right` + unknown fallback
-    - Skip pattern + value pattern filtering per field
-    - PERSON field mandatory — missing → page added to `failed_pages`
-    - Page streaming: `doc._forget_page()` for memory efficiency
-  - `app/pipeline/reconciliation.py` NEW: `ExtractionReconciler` class — LLM fallback for failed pages
-    - `reconcile(failed_pages, doc_path, doc_id, field_map, ollama_client)` → `list[PIIRecord]`
-    - Builds reconciliation prompt from field map (field types + anchor labels + patterns)
-    - Parses LLM JSON response (handles code fences, embedded JSON, partial responses)
-    - Graceful failure: LLM errors → page silently dropped (logged as warning)
-  - `tests/test_coordinate_extraction.py`: 51 tests (anchor finding, region computation, words-to-text, field extraction with skip/value patterns, in-region check, merge bboxes, full PDF integration with PyMuPDF, reconciliation prompt building, JSON response parsing, LLM integration, error handling, field mapping coverage)
-
-**2262 tests passing after Step 21b (Run 2). (1 pre-existing failure in test_template_detection unrelated.)**
-
-**Step 21c (Run 3): Pipeline Wiring** ✅
-  - `app/pipeline/two_phase.py`: `run_extraction_background()` — Coordinate extraction as **Path 0** (before Vision/LLM/Presidio)
-    - If `schema.layout_type == "fixed"` and `schema.layout_field_map` populated: use `CoordinateExtractor`
-    - Failed pages sent to `ExtractionReconciler` (LLM fallback) when `llm_assist_enabled`
-    - `extraction_path = "0-coord"` for tracking
-    - Existing paths (Vision=1, LLM table=2a, LLM template=2b, Presidio=3) unchanged; Path 1 now guarded by `not records`
-  - `app/pipeline/two_phase.py`: `analyze_generator()` — Coordinate extraction preview for fixed-layout docs
-    - Identifies docs with `layout_type == "fixed"` + `layout_field_map`
-    - Runs sample coordinate extraction on onset page
-    - Builds preview dict with `extraction_method: "coordinate"`, `layout_type`, `layout_confidence`, `field_map_count`
-    - Preview stored on `DocumentAnalysisReview.extraction_preview` (same as template/table previews)
-    - Runs before template and table previews (docs with coordinate preview skip later preview stages)
-  - `app/api/routes/analysis_review.py`: GET `/jobs/{id}/analysis` response extended
-    - New fields: `layout_type`, `layout_field_map`, `layout_confidence` (extracted from preview or document_schema)
-  - `tests/test_two_phase.py`: 8 new tests (TestCoordinatePipelineWiring)
-    - Schema eligibility checks (requires both layout_type=="fixed" and field_map)
-    - Preview dict structure validation
-    - Path ordering verification (Path 0 < Path 1 < Path 2 < Path 3)
-    - Path 1 guard check (`not records` after coordinate path)
-    - Reconciliation wiring check
-    - Path label verification ("0-coord")
-    - Analyze generator coordinate preview check
-    - Analysis API layout fields check
-
-**2271 tests passing after Step 21c (Run 3). (1 pre-existing failure in test_template_detection unrelated.)**
-
-**Step 21d (Run 4): Frontend Field Map Editor** ✅
-  - `app/api/routes/analysis_review.py`: PUT `/jobs/{id}/field-map` endpoint
-    - `UpdateFieldMapBody` + `FieldMappingBody` pydantic models
-    - Validates spatial_relationship values (same_line_right, line_below, region_right, lines_below_N)
-    - Stores auditor-edited field map on `Document.metadata_json["auditor_layout_field_map"]`
-    - Stores extraction method preference (`"coordinate"` or `"ai"`) on `metadata_json["auditor_extraction_method"]`
-    - Updates extraction_preview on DocumentAnalysisReview record
-  - `app/pipeline/two_phase.py`: `run_extraction_background()` — Auditor field map override
-    - Checks `metadata_json["auditor_layout_field_map"]` before `schema.layout_field_map`
-    - If auditor selected `"ai"` method, coordinate path is skipped (falls through to Vision/LLM paths)
-    - `effective_field_map` used for both CoordinateExtractor and ExtractionReconciler
-  - `frontend/src/api/client.ts`:
-    - `LayoutFieldMapping` interface (field_type, anchor_text, spatial_relationship, value_pattern, sample_bbox, line_count, skip_pattern)
-    - `UpdateFieldMapBody` interface
-    - `updateFieldMap()` API function (PUT /jobs/{id}/field-map)
-    - `AnalysisReviewDetail` extended with layout_type, layout_field_map, layout_confidence, document_schema
-  - `frontend/src/pages/ProjectDetail.tsx`:
-    - `FieldMapEditor` component — full CRUD for field mappings when layout_type is "fixed" or "template_with_drift"
-    - Radio: Coordinate extraction vs AI-assisted extraction with estimated time display
-    - Per-mapping display: field type, anchor text, spatial relationship, line count, pattern
-    - Edit mode: dropdowns for field type + spatial relationship, inputs for anchor/pattern/skip/lines
-    - Add/Remove/Edit buttons per mapping
-    - Save button calls `updateFieldMap()` API
-    - Integrated into AnalysisReviewPanel per-document card (shown for pending_review docs with fixed layout)
-  - `tests/test_two_phase.py`: 7 new tests (TestCoordinatePipelineWiring, now 15 total)
-    - PUT endpoint existence, body validation, defaults, spatial validation, metadata_json storage
-    - Extraction uses auditor field map, AI method skips coordinate path
-
-**2279 tests collected after Step 21d (Run 4). (1 pre-existing failure in test_template_detection unrelated.)**
-
-**Step 21e (Run 5): Rotation Awareness + Schema Persistence + PERSON Pattern Fix** ✅
-  - `app/pipeline/coordinate_extractor.py`: Rotation-aware coordinate extraction
-    - `_compute_region()` now accepts `page` object + `rotation` parameter; handles 0°/90°/180°/270° layouts
-    - For rotation=270 (e.g., Boosey & Hawkes PDF): "same_line_right" → +y at same x band, "line_below" → +x shift
-    - For rotation=90: mirror of 270 (visual "right" = decreasing y)
-    - For rotation=180: visual "right" = decreasing x, "below" = decreasing y
-    - `_find_anchor()` uses x-axis proximity for same-line detection on 90°/270° pages (not y-axis)
-    - `_words_to_text()` groups by x on rotated pages, sorts within line by y
-    - `_extract_field()` skips `value_pattern` validation for PERSON fields — names too variable for regex
-  - `app/pipeline/two_phase.py`: Schema persistence between analysis and extraction phases
-    - `analyze_generator()`: persists `DocumentSchema` to `Document.metadata_json["document_schema"]` via `schema.to_dict()` + `flag_modified()`
-    - `run_extraction_background()`: loads schema from `metadata_json["document_schema"]` via `DocumentSchema.from_dict()` before falling back to LLM re-computation
-  - `tests/test_coordinate_extraction.py`: 14 new tests (TestRotationAwareness: 11 tests for 0°/90°/180°/270° regions, anchor finding, word grouping; TestPersonValuePatternSkip: 2 tests for PERSON skip + GOV_ID enforcement)
-  - `tests/test_two_phase.py`: 4 new tests (schema persistence to metadata_json, schema loading during extraction, schema roundtrip, load-before-LLM ordering)
-
-**2293 tests passing after Step 21e (Run 5). (1 pre-existing failure in test_template_detection unrelated.)**
-
-**Bugfix: Scanned/image-only PDF support (0 extraction rows)** ✅
-  - **Bug A fix**: `run_extraction_background()` + `analyze_generator()` in `app/pipeline/two_phase.py` — when `reader.read()` returns empty blocks for a PDF, detect scanned PDF via `fitz.open()` page count. Populate `doc_pages` from PDF page count so Vision path (Path 1) gets actual page numbers to process.
-  - **Bug B fix**: `ocr_pdf_to_blocks()` added to `app/readers/ocr.py` — opens PDF with PyMuPDF, renders each page to image at 200 DPI, runs PaddleOCR, returns `list[ExtractedBlock]` compatible with all pipeline paths. Memory-safe (page streaming + `_forget_page()`).
-  - **Pipeline integration**: Both `analyze_generator()` (structure analysis + onset stages) and `run_extraction_background()` call OCR fallback when blocks are empty for PDF files. Falls back gracefully to Vision-only path if PaddleOCR unavailable.
-  - `tests/test_scanned_pdf.py`: 18 tests (doc_pages fallback, OCR block generation, page number correctness, pipeline integration, block compatibility)
-
-**Bugfix: Extraction validation — DOB context, email URLs, entity_types_found** ✅
-  - **Issue 1 fix**: `validate_dob()` in `app/pii/pattern_validator.py` — rejects transaction/service/statement dates misclassified as DOB. Checks context keywords ("Fee Slip Dated", "Statement Date", "Service Date", etc.), DOB labels ("Date of Birth", "DOB", "Born"), and date recency (within last 5 years = not a DOB).
-  - **Issue 4 fix**: `validate_email()` in `app/pii/pattern_validator.py` — rejects URLs (www.*, http://, https://) and strings without @ misclassified as email addresses.
-  - **Issue 5 fix**: `_build_entity_types_found()` in `app/pii/pattern_validator.py` — rebuilds entity_types_found from actually-populated PIIRecord fields only. Prevents phantom types (NI_NUMBER, EMAIL_ADDRESS, PHONE_NUMBER) appearing when those fields are null.
-  - **Wired into all extraction paths**: `VisionDocumentExtractor._data_to_record()` and `LLMTemplateExtractor._data_to_record()` both validate DOB/email at record construction time and build entity_types_found from populated fields only.
-  - `validate_extracted_records()` enhanced: strips invalid DOB and email during post-validation, rebuilds entity_types_found.
-  - `tests/test_extraction_validation.py`: 40 new tests (DOB context validation: fee slip/statement/service/invoice/due dates rejected, real DOB labels accepted, recency check, DOB label override; email validation: URLs rejected, valid emails pass; entity_types_found accuracy: only populated fields; integration: vision + LLM template extractors)
-
-**Bugfix: Organization/business name detection in PERSON validation** ✅
-  - **Enhanced validation**: `validate_person_name()` in `app/pii/pattern_validator.py` — two-layer approach to detect organization/business names misclassified as PERSON.
-  - **Layer 1 (heuristic)**: `_looks_like_business()` checks business suffixes (INC, LLC, LTD, CORP, etc.), business keywords (TECHNOLOGIES, HOSPITAL, SUPPLY, SERVICES, MANUFACTURING, BANK, UNIVERSITY, etc.), multi-word patterns ("credit union", "comfort technologies"), store/branch numbers (#576), and firm patterns (& in name).
-  - **Layer 2 (spaCy NER)**: `_spacy_says_org()` runs spaCy NER for ambiguous cases (4+ word names or ALL-CAPS multi-word names). Cached model load. Graceful fallback when spaCy unavailable.
-  - **Edge cases**: "Estate of John Doe" and "In the Matter of" patterns preserved as PERSON. "ALFRED A. KNOPF, INC." correctly identified as ORG.
-  - **Wired into pipeline**: `validate_extracted_records()` now calls `validate_person_name()` instead of `is_likely_organization()` for broader coverage.
-  - `tests/test_extraction_validation.py`: 43 new tests (TestLooksLikeBusiness: 22 tests for suffixes/keywords/store numbers/persons/edge cases; TestValidatePersonName: 11 tests including estate-of passthrough; TestValidateExtractedRecordsOrgSuppression: 5 integration tests)
-
-**Bugfix: Path 0 coordinate extraction field map quality validation** ✅
-  - **Problem**: Removing `layout_type` gate from Path 0 caused garbage extraction (1,354 rows of "Summary") when LLM non-deterministically produced a bad field map. The bad field map extracted from page header "Summary Statement" instead of "Client:" anchor.
-  - **Fix A — Restored layout_type gate**: Path 0 again requires `layout_type in ("fixed", "template_with_drift")`.
-  - **Fix B — Field map quality validation**: `_validate_field_map()` in `app/pipeline/two_phase.py` — extracts page 0 with the field map, rejects if PERSON produces known-bad names (header text like "Summary", "Statement", "Page") or single-word names. Called before full coordinate extraction.
-  - **Fix C — Schema downgrade prevention**: If persisted schema has `layout_type="fixed"` and new LLM response says `"variable"`, keeps the existing fixed schema. Prevents LLM non-determinism from breaking coordinate extraction path.
-  - **Fix D — Preview validation**: Coordinate preview in `analyze_generator()` validates extracted names against `_FIELD_MAP_BAD_NAMES`, warns if field map produces garbage.
-  - `tests/test_coordinate_extraction.py`: 8 new tests (good field map passes, header text rejected, empty/no-PERSON/nonexistent rejected, single-word rejected, bad names set completeness)
-
-**2787 tests passing. (Pre-existing failures in test_pattern_validator, test_vision_extraction, test_vision_router, test_step23_hybrid unrelated.)**
-
-**Step 22a (Run 1): VisionRouter — Vision-Based Document Routing** ✅
-  - `app/pipeline/vision_router.py` NEW: `VisionRouter` class + `VisionRoutingResult` dataclass
-    - `analyze_document(doc_path, onset_page, total_pages, is_scanned)` → `VisionRoutingResult`
-    - Renders onset page at 200 DPI via `render_page_to_image()`, sends to vision model
-    - `_build_routing_prompt()` asks vision model for: pii_fields, structure_type, records_per_page, cross_page_data, pages_per_instance
-    - `_parse_routing_response()` defensive JSON parsing (code fences, leading text, malformed → safe defaults)
-    - `_determine_path()` routing rules: ≤5 pages → vision_direct, scanned → vision_direct, fixed_single_page+PII → coordinate, multi_page_template → llm_template, table → llm_table, variable → presidio
-    - Graceful fallback on render/model failure → variable/presidio
-  - `tests/test_vision_router.py`: 44 tests (dataclass, _determine_path 9 scenarios, prompt content 5, response parsing 10, mock integration 6, helpers 8)
-
-**Step 22b (Run 2): FieldMapBuilder — Vision-to-Coordinate Field Map** ✅
-  - `app/pipeline/field_map_builder.py` NEW: `FieldMapBuilder` class
-    - `build_field_map(vision_result, doc_path, page_num)` → `list[FieldMapping]`
-    - Bridges VisionRoutingResult.pii_fields → FieldMapping list for CoordinateExtractor
-    - `_find_text_in_words()` — fuzzy word matching (single/multi-word, case-insensitive, compound words, partial match)
-    - `_compute_spatial_relationship()` — deterministic from actual coordinates (same_line_right, line_below, lines_below_N)
-    - `_infer_skip_pattern()` — detects noise between label and value (client codes, colons)
-    - `_infer_value_pattern()` — regex patterns for SSN, phone, email, DOB, NI_NUMBER, GOVERNMENT_ID
-    - No label = no field map entry (coordinate extraction needs anchors)
-  - `tests/test_field_map_builder.py`: 40 tests (word search 10, spatial 4, skip pattern 3, value pattern 5, line count 3, bbox merge 2, build_one_field 10, integration 3)
-
-**Step 22c (Run 3): Pipeline Wiring — Vision Routing Integration** ✅
-  - `app/pipeline/two_phase.py`: Vision routing wired into both `analyze_generator()` and `run_extraction_background()`
-    - `analyze_generator()`: New "vision_routing" stage before coordinate preview. VisionRouter analyzes each doc, FieldMapBuilder builds field map for coordinate-recommended docs, validates with sample extraction, persists `vision_routing` + `vision_field_map` to `Document.metadata_json`
-    - `run_extraction_background()`: Path 0 now loads vision routing from metadata. Priority: auditor override > vision field map > LLM schema field map. `recommended_path == "coordinate"` triggers coordinate extraction. Legacy LLM layout_type check preserved as fallback.
-    - Existing coordinate preview preserved for non-vision-routed docs (legacy path)
-  - `app/api/routes/analysis_review.py`: GET `/jobs/{id}/analysis` response extended with `vision_routing` and `vision_field_map` per document
-  - Routing priority: auditor override → vision field map → LLM schema → vision recommended_path → existing path logic
-  - `tests/test_two_phase.py`: 11 new tests (TestVisionRoutingPipelineWiring: metadata persistence, field map loading, auditor override, coordinate/vision_direct/llm_template routing, legacy fallback, small doc handling, validation downgrade, API exposure)
-
-**Step 22d (Run 4): ExtractionVerifier + Frontend Auditor Vision Panel** ✅
-  - `app/pipeline/extraction_verifier.py` NEW: `ExtractionVerifier` class + `ExtractionVerification` dataclass
-    - `verify(records, failed_pages, reconciled_records, total_pages, field_map)` → `ExtractionVerification`
-    - Per-field success rates (PERSON, US_SSN, LOCATION, etc. mapped to PIIRecord attributes)
-    - Quality assessment: `ACCEPTABLE_RATE = 0.90`, `is_acceptable` flag
-    - `_build_summary()` — human-readable summary for auditor (page counts, field rates, quality)
-  - `app/pipeline/two_phase.py`: Post-extraction verification wired into coordinate Path 0
-    - After coordinate extraction + reconciliation, `ExtractionVerifier.verify()` runs
-    - Verification summary logged, result stored in `run.metrics` via `_update_extraction_progress(stage="verification")`
-    - Result includes: success_rate, successful, reconciled, failed, field_rates, is_acceptable
-  - `frontend/src/api/client.ts`: `VisionRoutingInfo` interface, `AnalysisReviewDetail` extended with `vision_routing` + `vision_field_map`
-  - `frontend/src/pages/ProjectDetail.tsx`: Vision routing panel in AnalysisReviewPanel
-    - Structure type badge, recommended path with color coding, PII field count, cross-page indicator
-    - Estimated extraction time display per path
-    - Vision field map → reuses existing `FieldMapEditor` component (no duplication with legacy LLM field map)
-  - `tests/test_extraction_verifier.py`: 13 tests (all pass, empty, below threshold, reconciliation, per-field rates, summary, edge cases)
-  - `tests/test_two_phase.py`: 7 new tests (TestExtractionVerificationWiring: import, metrics storage, logging, module exists, method signature, stage name, result fields)
-
-See [docs/PLAN.md](docs/PLAN.md) for active steps and [docs/PLAN_COMPLETED.md](docs/PLAN_COMPLETED.md) for completed reference.
+**Standalone scripts (proven, awaiting integration):** `scripts/test_hybrid_pipeline.py` (PDF hybrid), `scripts/forentis_extract.py` (47 extensions).
 
 ---
 
 ## 10) Testing Expectations
 
-- Prefer unit tests + minimal integration tests using SQLite in-memory
-- `tests/test_safety.py` runs on every test invocation — not optional
-- Tests must validate:
-  - **Behavior:** what is stored and what is returned
-  - **Schema:** columns exist, defaults are correct, constraints hold
-  - **Safety:** no raw PII appears in logs, exceptions, or API responses
-  - **Extraction accuracy:** known PII patterns are found; known non-PII is not flagged
-- Avoid snapshot tests — assert explicit, named conditions
-- STRICT mode tests: assert `raw_value_encrypted IS NULL` on every write
-- INVESTIGATION mode tests: assert `retention_until IS NOT NULL` on every write
-- Cross-page tests: assert `spans_pages` is set correctly for stitched extractions
+- Unit tests + minimal integration tests using SQLite in-memory
+- `tests/test_safety.py` runs on every invocation — not optional
+- Validate: behavior, schema, safety (no raw PII), extraction accuracy
+- Avoid snapshot tests — assert explicit conditions
+- STRICT: assert `raw_value_encrypted IS NULL`
+- INVESTIGATION: assert `retention_until IS NOT NULL`
 
+---
 
 ## 11) Persistent Working Memory
 
-Claude Code sub-agents use `docs/WORKSTATE.md` as external memory for tasks modifying more than 2 files.
+Sub-agents use `docs/WORKSTATE.md` as external memory for tasks modifying >2 files.
 
-### Rules
-- **Read first:** Before any work, read `docs/WORKSTATE.md` if it exists
-- **Write often:** After every file modification or finding, update WORKSTATE.md
-- **Trust the file:** After compaction, WORKSTATE.md is the source of truth
-- **Don't redo:** If WORKSTATE.md says a file is modified ✓, skip it
-
-### Scripts
-```
-./scripts/run-with-metrics.sh 'task description'   # New task with memory + metrics
-./scripts/resume.sh                                  # Continue interrupted task
-./scripts/clean.sh                                   # Archive and reset
-./scripts/metrics-dashboard.sh                       # View aggregate stats
-```
+- **Read first**, **write often**, **trust the file**, **don't redo** completed items
+- Scripts: `./scripts/run-with-metrics.sh`, `./scripts/resume.sh`, `./scripts/clean.sh`, `./scripts/metrics-dashboard.sh`

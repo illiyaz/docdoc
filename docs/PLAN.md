@@ -687,7 +687,29 @@ Steps 1-24 COMPLETE (2787+ tests). Phase 5 delivered the extraction engine. Phas
 
 ---
 
-### Step 26 — Source Document Viewer
+### Step 26 — LiteParse Spatial Text Routing ✅ COMPLETE
+
+**Goal:** For text PDFs (PyMuPDF word_count > 50), route via LiteParse spatial text + text LLM instead of rendering the page and using the vision model. This is 5-6x faster (11-28s vs 60+s). Scanned PDFs still use the vision model path.
+
+**What was built:**
+
+| File | What |
+|---|---|
+| `app/readers/liteparse_adapter.py` | NEW — thin wrapper: `get_spatial_text(doc_path, page_num)`, `is_available()`. Optional dependency — returns None if not installed. |
+| `app/pipeline/vision_router.py` | MODIFIED — `_route_via_spatial_text()` method + fast-path in `analyze_document()`. Text PDFs try spatial text first, fall back to vision if no fields found. |
+| `tests/test_liteparse_routing.py` | NEW — 13 tests: adapter fallback, routing success, 4000-char cap, LLM error, empty fields, scanned skip, text PDF fast-path, low word count skip. |
+
+**Key decisions:**
+- Uses `OllamaClient.generate()` (text model, no images) — not `generate_with_images()`
+- Spatial text capped at 4000 chars to avoid context overflow
+- Falls back to vision on: LiteParse unavailable, spatial text < 100 chars, LLM error, no PII fields returned
+- `model_used` tagged as `"{model}:spatial_text"` for audit trail distinction
+
+**Based on:** LiteParse evaluation (13 PDFs, 4 scanned) — see `output/liteparse_eval/EVALUATION_SUMMARY.md`
+
+---
+
+### Step 26b — Source Document Viewer (PENDING)
 
 **Goal:** An auditor can click on any extracted value and see the original source page with the extraction highlighted. Side-by-side: extracted data on the left, source page image on the right.
 
@@ -695,7 +717,7 @@ Steps 1-24 COMPLETE (2787+ tests). Phase 5 delivered the extraction engine. Phas
 
 ---
 
-#### 26a. Page Rendering API
+#### 26b-a. Page Rendering API
 
 **Serve individual PDF pages as images for the frontend viewer.**
 
@@ -710,7 +732,7 @@ Steps 1-24 COMPLETE (2787+ tests). Phase 5 delivered the extraction engine. Phas
 
 ---
 
-#### 26b. Frontend Document Viewer Component
+#### 26b-b. Frontend Document Viewer Component
 
 **React component that shows source page alongside extraction results.**
 
@@ -723,7 +745,7 @@ Steps 1-24 COMPLETE (2787+ tests). Phase 5 delivered the extraction engine. Phas
 
 ---
 
-#### 26c. Extraction-to-Source Linking
+#### 26b-c. Extraction-to-Source Linking
 
 **Every extracted value must link back to its source location.**
 
