@@ -2298,6 +2298,14 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                             doc.file_name,
                         )
                         is_coordinate_path = False
+                        # Re-classify as tabular if it has multiple records per page
+                        # (the LLM said "fixed" but coordinate extraction disagrees)
+                        if not is_tabular and total_pg > 5:
+                            is_tabular = True
+                            logger.info(
+                                "Re-routing %s to table extraction (coord validation failed, %d pages)",
+                                doc.file_name, total_pg,
+                            )
 
                 if is_coordinate_path:
                     try:
@@ -2467,7 +2475,10 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                 # Skip vision for large docs with text blocks — Path 2 (text+LLM) is
                 # much faster (~5s vs ~60s per batch) for text-extractable content.
                 _has_text = len(blocks) > 0
-                _too_large_for_vision = _has_text and total_pg > 50
+                # Skip vision for docs with text blocks that are large OR where
+                # coordinate extraction already failed (vision likely won't help either)
+                _coord_failed = not is_coordinate_path and effective_field_map
+                _too_large_for_vision = (_has_text and total_pg > 20) or _coord_failed
                 if _too_large_for_vision and (is_template or is_tabular):
                     logger.info(
                         "Skipping Path 1 (Vision) for %s: %d pages with text blocks, "
