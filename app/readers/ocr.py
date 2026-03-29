@@ -62,11 +62,17 @@ class OCREngine:
         """
         self._lang = lang
         kwargs: dict[str, object] = {
-            "use_angle_cls": False,  # angle classifier not needed; avoids loading a third model
             "lang": lang,
-            "show_log": False,       # suppress PaddleOCR stdout chatter
-            "use_gpu": False,        # CPU inference; GPU support is opt-in at deploy time
         }
+        # PaddleOCR v3 removed show_log and use_angle_cls — only add if supported
+        import inspect
+        _paddle_params = inspect.signature(PaddleOCR.__init__).parameters
+        if "show_log" in _paddle_params:
+            kwargs["show_log"] = False
+        if "use_angle_cls" in _paddle_params:
+            kwargs["use_angle_cls"] = False
+        if "use_gpu" in _paddle_params:
+            kwargs["use_gpu"] = False
         if det_model_dir is not None:
             kwargs["det_model_dir"] = det_model_dir
         if rec_model_dir is not None:

@@ -677,7 +677,7 @@ def _pipeline_generator(
         })
 
     except Exception as exc:
-        logger.error("Job %s failed at streaming pipeline: %s", str(job_uuid), type(exc).__name__)
+        logger.error("Job %s failed at streaming pipeline: %s", str(job_uuid), type(exc).__name__, exc_info=True)
         if run is not None:
             run.status = "failed"
             run.error_summary = str(type(exc).__name__)
