@@ -134,7 +134,8 @@ class ImageReader(BaseReader):
                     blocks.append(ExtractedBlock(
                         text=line,
                         page_or_sheet=0,
-                        block_index=len(blocks),
+                        source_path=self.file_path,
+                        file_type=self.file_type,
                     ))
             
             if blocks:
@@ -176,7 +177,8 @@ class ImageReader(BaseReader):
                     blocks.append(ExtractedBlock(
                         text=line.strip(),
                         page_or_sheet=0,
-                        block_index=i,
+                        source_path=self.file_path,
+                        file_type=self.file_type,
                     ))
             
             logger.info("OCR extracted %d text blocks from image %s", len(blocks), self.file_path)
