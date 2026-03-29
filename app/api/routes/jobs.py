@@ -36,6 +36,7 @@ from app.notification.list_builder import build_notification_list, get_notificat
 from app.protocols.registry import ProtocolRegistry
 from app.rra.deduplicator import Deduplicator
 from app.pipeline.record_mapper import (
+    build_composite_record,
     detection_to_pii_record,
     extract_with_template,
 )
@@ -332,6 +333,35 @@ def _sse(data: dict) -> str:
     return f"data: {json.dumps(data)}\n\n"
 
 
+def build_composite_record_from_dict(data: dict, doc_id: str):
+    """Build a PIIRecord from an LLM JSON dict (spatial text extraction)."""
+    from uuid import uuid4
+    from app.rra.entity_resolver import PIIRecord
+
+    raw_name = data.get("PERSON") or data.get("NAME") or data.get("name") or data.get("person")
+    raw_gov_id = data.get("US_SSN") or data.get("SSN") or data.get("NI_NUMBER") or data.get("GOVERNMENT_ID")
+    raw_dob = data.get("DATE_OF_BIRTH") or data.get("DOB") or data.get("dob")
+    raw_email = data.get("EMAIL_ADDRESS") or data.get("EMAIL") or data.get("email")
+    raw_phone = data.get("PHONE_NUMBER") or data.get("PHONE") or data.get("phone")
+    raw_addr = data.get("LOCATION") or data.get("ADDRESS") or data.get("address")
+
+    if not raw_name and not raw_gov_id:
+        return None
+
+    return PIIRecord(
+        record_id=str(uuid4()),
+        entity_type="PERSON" if raw_name else "GOVERNMENT_ID",
+        normalized_value=raw_name or raw_gov_id or "",
+        raw_name=raw_name,
+        raw_government_id=raw_gov_id,
+        raw_dob=raw_dob,
+        raw_email=raw_email,
+        raw_phone=raw_phone,
+        raw_address={"raw": raw_addr} if raw_addr else None,
+        source_document_id=doc_id,
+    )
+
+
 def _pipeline_generator(
     body: CreateJobBody,
     db: Session | None,
@@ -475,98 +505,171 @@ def _pipeline_generator(
             pass
 
         for i, doc_info in enumerate(docs, 1):
+            doc_name = doc_info.get("file_name", "?")
             yield _sse({
                 "stage": "detection", "status": "running",
-                "message": f"Scanning document {i}/{len(docs)}...",
-                "detail": {"total": len(docs), "current": i},
+                "message": f"Processing {doc_name} ({i}/{len(docs)})...",
+                "detail": {"total": len(docs), "current": i, "doc_name": doc_name},
             })
+
             try:
-                reader = get_reader(doc_info["source_path"])
-                blocks = reader.read()
-            except Exception as read_err:
-                logger.warning(
-                    "Reader failed for %s: %s — skipping document",
-                    doc_info.get("file_name", "?"), type(read_err).__name__,
-                )
-                blocks = []
-
-            # Get DocumentSchema via LLM understanding (if available)
-            schema = None
-            if doc_understanding_cls is not None and schema_filter_cls is not None:
+                # --- Read document ---
                 try:
-                    doc_pages = set(b.page_or_sheet for b in blocks)
-                    du = doc_understanding_cls(db_session=db)
-                    schema = du.understand(
-                        blocks,
-                        file_name=doc_info.get("file_name", ""),
-                        file_type=doc_info.get("file_type", ""),
-                        total_pages=len(doc_pages),
-                    )
-                except Exception:
-                    pass
+                    reader = get_reader(doc_info["source_path"])
+                    blocks = reader.read()
+                except Exception as read_err:
+                    logger.warning("Reader failed for %s: %s — skipping", doc_name, type(read_err).__name__)
+                    continue
 
-            # 3-path extraction (Step 19 — exclusive, no dual records)
-            is_template = (
-                schema is not None
-                and schema.template
-                and schema.template.pages_per_instance >= 2
-            )
+                if not blocks:
+                    logger.info("No blocks from %s — skipping", doc_name)
+                    continue
 
-            if is_template:
-                doc_pages = set(b.page_or_sheet for b in blocks)
-                total_pg = len(doc_pages)
-
-                records = []
-                # Path A: LLM extraction — skip Presidio entirely
-                if schema_filter_cls is not None:
+                # --- LiteParse spatial text (better than flat PyMuPDF for LLM) ---
+                spatial_text: str | None = None
+                if (doc_info.get("file_type", "").lower() in ("pdf", "application/pdf")
+                        and doc_info.get("source_path")):
                     try:
-                        from app.llm.client import OllamaClient
-                        from app.structure.llm_template_extractor import LLMTemplateExtractor
-                        from app.core.constants import DEFAULT_EXTRACTION_BATCH_SIZE
+                        from app.readers.liteparse_adapter import get_spatial_text
+                        spatial_text = get_spatial_text(doc_info["source_path"], 0)
+                    except Exception:
+                        pass
 
-                        page_texts: dict[int, str] = {}
-                        for b in blocks:
-                            pg = b.page_or_sheet
-                            if pg not in page_texts:
-                                page_texts[pg] = ""
-                            page_texts[pg] += b.text + "\n"
-
-                        client = OllamaClient(db_session=db)
-                        extractor = LLMTemplateExtractor(client, batch_size=DEFAULT_EXTRACTION_BATCH_SIZE)
-                        llm_records = extractor.extract_all_instances(
-                            schema, page_texts, doc_info["source_path"], total_pg,
+                # --- Document understanding ---
+                schema = None
+                if doc_understanding_cls is not None and schema_filter_cls is not None:
+                    try:
+                        doc_pages = set(b.page_or_sheet for b in blocks)
+                        du = doc_understanding_cls(db_session=db)
+                        schema = du.understand(
+                            blocks,
+                            file_name=doc_name,
+                            file_type=doc_info.get("file_type", ""),
+                            total_pages=len(doc_pages),
                         )
-                        if llm_records:
-                            records = llm_records
                     except Exception:
                         pass
 
-                # Path B fallback: need Presidio for composite
-                if not records:
-                    detections = engine.analyze(blocks)
-                    if schema is not None and schema_filter_cls is not None:
+                # --- 3-path extraction (Step 19 — exclusive) ---
+                is_template = (
+                    schema is not None
+                    and schema.template
+                    and schema.template.pages_per_instance >= 2
+                )
+                doc_records: list = []
+
+                if is_template:
+                    doc_pages = set(b.page_or_sheet for b in blocks)
+                    total_pg = len(doc_pages)
+
+                    # Path A: LLM extraction
+                    if schema_filter_cls is not None:
                         try:
-                            sf = schema_filter_cls(schema)
-                            result = sf.filter_detections(detections)
-                            detections = result.kept
-                        except Exception:
-                            pass
-                    records = extract_with_template(detections, schema, doc_info["source_path"], total_pg)
+                            from app.llm.client import OllamaClient
+                            from app.structure.llm_template_extractor import LLMTemplateExtractor
+                            from app.core.constants import DEFAULT_EXTRACTION_BATCH_SIZE
 
-                all_records.extend(records)
-            else:
-                # Path C: non-template — run Presidio per-detection
-                detections = engine.analyze(blocks)
-                if schema is not None and schema_filter_cls is not None:
-                    try:
-                        sf = schema_filter_cls(schema)
-                        result = sf.filter_detections(detections)
-                        detections = result.kept
-                    except Exception:
-                        pass
-                for det in detections:
-                    rec = detection_to_pii_record(det, doc_info["source_path"])
-                    all_records.append(rec)
+                            # Use LiteParse spatial text if available (better layout)
+                            page_texts: dict[int, str] = {}
+                            for b in blocks:
+                                pg = b.page_or_sheet
+                                if pg not in page_texts:
+                                    page_texts[pg] = ""
+                                page_texts[pg] += b.text + "\n"
+
+                            client = OllamaClient(db_session=db)
+                            extractor = LLMTemplateExtractor(client, batch_size=DEFAULT_EXTRACTION_BATCH_SIZE)
+                            llm_records = extractor.extract_all_instances(
+                                schema, page_texts, doc_info["source_path"], total_pg,
+                            )
+                            if llm_records:
+                                doc_records = llm_records
+                        except Exception:
+                            logger.warning("Path A (LLM template) failed for %s", doc_name, exc_info=True)
+
+                    # Path B fallback: Presidio composite
+                    if not doc_records:
+                        try:
+                            detections = engine.analyze(blocks)
+                            if schema is not None and schema_filter_cls is not None:
+                                try:
+                                    sf = schema_filter_cls(schema)
+                                    result = sf.filter_detections(detections)
+                                    detections = result.kept
+                                except Exception:
+                                    pass
+                            doc_records = extract_with_template(detections, schema, doc_info["source_path"], total_pg)
+                        except Exception:
+                            logger.warning("Path B (Presidio template) failed for %s", doc_name, exc_info=True)
+
+                else:
+                    # Path C: non-template
+                    # Try LLM with spatial text first (if PDF with enough text)
+                    if spatial_text and len(spatial_text) > 200:
+                        try:
+                            from app.llm.client import OllamaClient
+                            client = OllamaClient(db_session=db)
+                            prompt = (
+                                "Extract ALL personally identifiable information from this document page.\n"
+                                "For each person found, return a JSON object with fields: "
+                                "PERSON, US_SSN, DATE_OF_BIRTH, EMAIL_ADDRESS, PHONE_NUMBER, LOCATION.\n"
+                                "Return a JSON array of objects. Only include fields that are present.\n\n"
+                                f"Document content:\n{spatial_text[:4000]}"
+                            )
+                            response = client.generate(prompt, use_case="spatial_text_extraction")
+                            if response:
+                                import json as _json
+                                try:
+                                    data = _json.loads(response)
+                                    if isinstance(data, dict):
+                                        data = [data]
+                                    if isinstance(data, list):
+                                        for item in data:
+                                            if isinstance(item, dict):
+                                                rec = build_composite_record_from_dict(item, doc_info["source_path"])
+                                                if rec and rec.raw_name:
+                                                    doc_records.append(rec)
+                                except (_json.JSONDecodeError, ValueError):
+                                    pass
+                            if doc_records:
+                                logger.info("LiteParse+LLM extraction for %s: %d records", doc_name, len(doc_records))
+                        except Exception:
+                            pass  # Fall through to Presidio
+
+                    # Presidio fallback with composite grouping
+                    if not doc_records:
+                        try:
+                            detections = engine.analyze(blocks)
+                            if schema is not None and schema_filter_cls is not None:
+                                try:
+                                    sf = schema_filter_cls(schema)
+                                    result = sf.filter_detections(detections)
+                                    detections = result.kept
+                                except Exception:
+                                    pass
+
+                            # Group by page, build composite records
+                            from collections import defaultdict as _ddict
+                            page_groups: dict = _ddict(list)
+                            for det in detections:
+                                pg = det.block.page_or_sheet if hasattr(det, "block") and det.block else 0
+                                page_groups[pg].append(det)
+
+                            for pg_dets in page_groups.values():
+                                has_person = any(d.entity_type in ("PERSON", "PERSON_NAME") for d in pg_dets)
+                                if has_person:
+                                    doc_records.append(build_composite_record(pg_dets, doc_info["source_path"]))
+                                else:
+                                    doc_records.extend(detection_to_pii_record(d, doc_info["source_path"]) for d in pg_dets)
+                        except Exception:
+                            logger.warning("Path C (Presidio) failed for %s", doc_name, exc_info=True)
+
+                if doc_records:
+                    logger.info("Extracted %d records from %s", len(doc_records), doc_name)
+                all_records.extend(doc_records)
+
+            except Exception:
+                logger.error("Document %s failed completely — skipping", doc_name, exc_info=True)
 
         # --- Pattern validation (Step 20) ---
         if all_records:
