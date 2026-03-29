@@ -35,8 +35,10 @@ from app.db.models import Document, DocumentAnalysisReview, IngestionRun, Notifi
 from app.db.repositories import ExtractionRepository
 from app.pipeline.auto_approve import should_auto_approve
 from app.pipeline.record_mapper import (
+    build_composite_record,
     detection_to_pii_record,
     extract_with_template,
+    _PERSON_TYPES as _PERSON_TYPES_SET,
 )
 from app.core.constants import DEFAULT_EXTRACTION_BATCH_SIZE, PROTOCOL_LLM_CONFIG
 from app.pipeline.content_onset import (
@@ -2667,9 +2669,26 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                     if is_template and instances:
                         records = extract_with_template(detections, schema, str(doc.id), total_pg)
                     else:
-                        records = [detection_to_pii_record(det, str(doc.id)) for det in detections]
+                        # Group detections by page and build composite records
+                        # so that PERSON + SSN + PHONE on the same page become
+                        # one multi-field PIIRecord instead of 3 single-field records.
+                        from collections import defaultdict as _defaultdict
+                        page_groups: dict[int | str, list] = _defaultdict(list)
+                        for det in detections:
+                            pg = det.block.page_or_sheet if hasattr(det, "block") and det.block else 0
+                            page_groups[pg].append(det)
+
+                        records = []
+                        for pg, pg_dets in page_groups.items():
+                            # If page has a PERSON detection, build composite
+                            has_person = any(d.entity_type in _PERSON_TYPES_SET for d in pg_dets)
+                            if has_person:
+                                records.append(build_composite_record(pg_dets, str(doc.id)))
+                            else:
+                                # No person — keep individual records for PII inventory
+                                records.extend(detection_to_pii_record(d, str(doc.id)) for d in pg_dets)
                     extraction_path = "3"
-                    logger.info("Path 3 (Presidio) for %s: %d records", doc.file_name, len(records))
+                    logger.info("Path 3 (Presidio) for %s: %d records (from %d detections)", doc.file_name, len(records), len(detections))
 
                 # --- Static filter for non-coordinate paths ---
                 # Path 0 has its own static filter; apply to Paths 1/2/3 here.
