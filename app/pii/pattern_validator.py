@@ -432,7 +432,18 @@ def validate_extracted_records(records: list[PIIRecord]) -> list[PIIRecord]:
                     raw_name = None
 
         # Build updated record with cleaned fields
-        if raw_name is not None:
+        # Keep records that have ANY PII field — not just those with names.
+        # Path 3 (Presidio) produces single-field records (SSN-only, phone-only)
+        # that are valuable even without a name attached.
+        has_any_pii = (
+            raw_name is not None
+            or rec.raw_government_id
+            or rec.raw_phone
+            or raw_email
+            or raw_dob
+            or rec.raw_address
+        )
+        if has_any_pii:
             # Rebuild entity_types_found based on actually-present fields
             actual_types = _build_entity_types_found(
                 raw_name=raw_name,

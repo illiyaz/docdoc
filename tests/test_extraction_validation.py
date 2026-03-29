@@ -605,8 +605,8 @@ class TestValidateExtractedRecordsOrgSuppression:
         result = validate_extracted_records([rec])
         assert len(result) == 0
 
-    def test_business_with_other_fields_still_dropped(self):
-        """Business name with address/phone → still dropped (no person name)."""
+    def test_business_name_nulled_but_record_kept(self):
+        """Business name is nulled, but record kept because it has phone + address."""
         rec = self._make_record(
             raw_name="JOHNSTONE SUPPLY #576",
             normalized_value="JOHNSTONE SUPPLY #576",
@@ -614,7 +614,8 @@ class TestValidateExtractedRecordsOrgSuppression:
             raw_phone="555-1234",
         )
         result = validate_extracted_records([rec])
-        assert len(result) == 0
+        assert len(result) == 1  # Kept — has phone + address
+        assert result[0].raw_name is None  # Business name removed
 
     def test_real_person_preserved(self):
         """Real person name → preserved."""
