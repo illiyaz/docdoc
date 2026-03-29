@@ -51,7 +51,9 @@ class ImageReader(BaseReader):
         ollama_client: "OllamaClient | None" = None,
         vision_model: str | None = None,
     ) -> None:
-        self.file_path = file_path
+        self.file_path = str(file_path)
+        self.file_type = Path(self.file_path).suffix.lstrip(".").lower() or "image"
+        self.path = Path(self.file_path)
         self.client = ollama_client
         self.vision_model = vision_model
 

@@ -480,8 +480,15 @@ def _pipeline_generator(
                 "message": f"Scanning document {i}/{len(docs)}...",
                 "detail": {"total": len(docs), "current": i},
             })
-            reader = get_reader(doc_info["source_path"])
-            blocks = reader.read()
+            try:
+                reader = get_reader(doc_info["source_path"])
+                blocks = reader.read()
+            except Exception as read_err:
+                logger.warning(
+                    "Reader failed for %s: %s — skipping document",
+                    doc_info.get("file_name", "?"), type(read_err).__name__,
+                )
+                blocks = []
 
             # Get DocumentSchema via LLM understanding (if available)
             schema = None
