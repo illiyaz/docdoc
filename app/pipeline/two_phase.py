@@ -1072,16 +1072,16 @@ def analyze_generator(
                                         vision_results[item["doc_id"]] = res
                                         routed_count += 1
                                         rec_path = (res.get("routing_dict") or {}).get("recommended_path", "unknown")
-                                        yield _sse(
-                                            "vision_routing", "running",
-                                            f"Routed {item['file_name']} → {rec_path} ({routed_count}/{len(work_items)})",
-                                            detail={
-                                                "total": total_docs, "current": schema_skip_count + routed_count,
+                                        yield _sse({
+                                            "stage": "vision_routing", "status": "running",
+                                            "message": f"Routed {item['file_name']} → {rec_path} ({routed_count}/{len(work_items)})",
+                                            "detail": {
+                                                "total": len(work_items), "current": routed_count,
                                                 "doc_name": item["file_name"],
                                                 "recommended_path": rec_path,
                                                 "cache_hit": res.get("cache_hit", False),
                                             },
-                                        )
+                                        })
                                     except Exception as exc:
                                         routed_count += 1
                                         logger.warning(
