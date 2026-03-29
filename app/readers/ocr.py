@@ -111,19 +111,37 @@ class OCREngine:
         img_array = np.frombuffer(image.samples, dtype=np.uint8).reshape(
             image.height, image.width, image.n
         )
-        # cls=False: do not run angle classifier (model not loaded at init)
-        result = self._ocr.ocr(img_array, cls=False)
+        # PaddleOCR v3 renamed ocr() to predict() and removed cls param
+        _ocr_fn = getattr(self._ocr, "predict", None) or self._ocr.ocr
+        try:
+            result = _ocr_fn(img_array)
+        except TypeError:
+            # Fallback for older PaddleOCR versions that accept cls
+            result = self._ocr.ocr(img_array, cls=False)
 
         if not result or not result[0]:
             return []
 
         blocks: list[ExtractedBlock] = []
         for line in result[0]:
-            box, (text, _confidence) = line
+            # PaddleOCR v2: line = (box, (text, confidence))
+            # PaddleOCR v3: line may be dict or different structure
+            try:
+                if isinstance(line, dict):
+                    text = str(line.get("rec_text", line.get("text", "")))
+                    box = line.get("dt_polys", line.get("box", [[0, 0], [0, 0], [0, 0], [0, 0]]))
+                elif isinstance(line, (list, tuple)) and len(line) >= 2:
+                    box = line[0]
+                    text_data = line[1]
+                    text = text_data[0] if isinstance(text_data, (list, tuple)) else str(text_data)
+                else:
+                    continue
+            except (IndexError, TypeError, ValueError):
+                continue
             if not text.strip():
                 continue
-            xs = [p[0] for p in box]
-            ys = [p[1] for p in box]
+            xs = [p[0] if isinstance(p, (list, tuple)) else 0 for p in box]
+            ys = [p[1] if isinstance(p, (list, tuple)) else 0 for p in box]
             bbox = (float(min(xs)), float(min(ys)), float(max(xs)), float(max(ys)))
             blocks.append(ExtractedBlock(
                 text=text,
