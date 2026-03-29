@@ -92,6 +92,13 @@ def log_llm_call(
             use_case,
         )
 
+    # Coerce empty string to None — Postgres UUID column rejects ""
+    if document_id is not None and not isinstance(document_id, UUID):
+        try:
+            document_id = UUID(str(document_id)) if str(document_id).strip() else None
+        except (ValueError, AttributeError):
+            document_id = None
+
     row = LLMCallLog(
         document_id=document_id,
         use_case=use_case,

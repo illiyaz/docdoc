@@ -9,7 +9,7 @@ export default defineConfig({
     port: 3847,
     proxy: {
       "/api": {
-        target: "http://localhost:3848",
+        target: "http://localhost:8000",
         // Disable response buffering so SSE (text/event-stream) works
         configure: (proxy) => {
           proxy.on("proxyRes", (proxyRes) => {
