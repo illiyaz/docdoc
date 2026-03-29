@@ -105,9 +105,11 @@ class ExcelReader(BaseReader):
         # Map 1-based column index → header text for use on data cells
         headers: dict[int, str] = {}
         header_blocks: list[ExtractedBlock] = []
-        for cell in header_row:
+        for col_idx, cell in enumerate(header_row, 1):
+            col_num = getattr(cell, "column", col_idx)
+            row_num = getattr(cell, "row", 1)
             header_text = str(cell.value) if cell.value is not None else ""
-            headers[cell.column] = header_text
+            headers[col_num] = header_text
             header_blocks.append(ExtractedBlock(
                 text=header_text,
                 page_or_sheet=sheet_name,
@@ -115,8 +117,8 @@ class ExcelReader(BaseReader):
                 file_type=file_type,
                 block_type="table_header",
                 bbox=None,
-                row=cell.row,
-                column=cell.column,
+                row=row_num,
+                column=col_num,
                 table_id=table_id,
                 col_header=header_text,
                 row_index=0,
@@ -124,10 +126,12 @@ class ExcelReader(BaseReader):
 
         # ---- Rows 2+: data cells ------------------------------------------
         data_blocks: list[ExtractedBlock] = []
-        for row in rows[1:]:
-            for cell in row:
+        for row_offset, row in enumerate(rows[1:], 2):
+            for col_idx, cell in enumerate(row, 1):
+                col_num = getattr(cell, "column", col_idx)
+                row_num = getattr(cell, "row", row_offset)
                 text = str(cell.value) if cell.value is not None else ""
-                col_header = headers.get(cell.column, "")
+                col_header = headers.get(col_num, "")
                 data_blocks.append(ExtractedBlock(
                     text=text,
                     page_or_sheet=sheet_name,
@@ -135,11 +139,11 @@ class ExcelReader(BaseReader):
                     file_type=file_type,
                     block_type="table_cell",
                     bbox=None,
-                    row=cell.row,
-                    column=cell.column,
+                    row=row_num,
+                    column=col_num,
                     table_id=table_id,
                     col_header=col_header,
-                    row_index=cell.row - 1,  # 0-based: header is 0, first data row is 1
+                    row_index=row_num - 1,
                 ))
 
         # ---- False-positive guard -----------------------------------------

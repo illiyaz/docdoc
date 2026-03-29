@@ -105,14 +105,20 @@ class EmailReader(BaseReader):
                 rtf = rtf.decode("utf-8", "replace")
             text = re.sub(r"\\[a-z]+\d*\s?|[{}]", "", rtf)
 
+        # Grab subject before closing (msg.subject reads from the OLE stream)
+        subject = None
+        try:
+            subject = msg.subject
+        except Exception:
+            pass
         msg.close()
 
         if not text:
             return []
 
-        # Also include subject line as a block (may contain names)
-        if msg.subject:
-            subject = msg.subject.replace("\x00", "").strip()
+        # Include subject line as a block (may contain names)
+        if subject:
+            subject = subject.replace("\x00", "").strip()
             if subject:
                 blocks.append(ExtractedBlock(
                     text=f"Subject: {subject}",
@@ -124,7 +130,7 @@ class EmailReader(BaseReader):
                 ))
 
         lines = [line.strip() for line in text.splitlines() if line.strip()]
-        for i, line in enumerate(lines):
+        for line in lines:
             blocks.append(ExtractedBlock(
                 text=line,
                 page_or_sheet=0,
@@ -132,7 +138,6 @@ class EmailReader(BaseReader):
                 file_type=file_type,
                 block_type="prose",
                 bbox=None,
-                block_index=i,
             ))
 
         return blocks
