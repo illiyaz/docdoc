@@ -34,22 +34,52 @@ from app.core.settings import get_settings
 
 logger = logging.getLogger(__name__)
 
-UPLOAD_TTL_SECONDS = 60 * 60  # 1 hour
-UPLOAD_SWEEP_INTERVAL = 60 * 5  # 5 minutes
+UPLOAD_TTL_SECONDS = 60 * 60 * 24  # 24 hours (analysis + review + extraction can take hours)
+UPLOAD_SWEEP_INTERVAL = 60 * 30  # 30 minutes
 
 
 async def _sweep_expired_uploads() -> None:
-    """Periodically delete upload directories older than TTL."""
+    """Periodically delete upload directories older than TTL.
+
+    Skips directories referenced by active (non-terminal) ingestion runs
+    to prevent deleting files mid-pipeline.
+    """
     settings = get_settings()
     upload_root = Path(settings.upload_dir)
     while True:
         await asyncio.sleep(UPLOAD_SWEEP_INTERVAL)
         if not upload_root.is_dir():
             continue
+
+        # Build set of upload dirs used by active jobs
+        active_upload_dirs: set[str] = set()
+        try:
+            from app.api.deps import _get_session_factory
+            factory = _get_session_factory()
+            db = factory()
+            try:
+                from app.db.models import IngestionRun
+                active_runs = db.query(IngestionRun).filter(
+                    IngestionRun.status.in_(["pending", "running", "analyzing", "analyzed", "extracting"])
+                ).all()
+                for run in active_runs:
+                    if run.source_path and "uploads/" in run.source_path:
+                        # Extract the upload UUID dir name
+                        parts = run.source_path.split("uploads/")
+                        if len(parts) > 1:
+                            upload_id = parts[1].split("/")[0]
+                            active_upload_dirs.add(upload_id)
+            finally:
+                db.close()
+        except Exception:
+            pass  # If DB unavailable, fall back to TTL-only
+
         now = time.time()
         for child in upload_root.iterdir():
             if not child.is_dir():
                 continue
+            if child.name in active_upload_dirs:
+                continue  # Skip — active job is using this directory
             age = now - child.stat().st_mtime
             if age > UPLOAD_TTL_SECONDS:
                 logger.info("Sweeping expired upload directory: %s", child.name)
