@@ -2639,11 +2639,23 @@ function JobsTab({
                                 {job.id.slice(0, 8)}...
                               </span>
                               <span className="px-4 py-2.5 text-xs text-muted-foreground truncate" title={job.first_file_name ?? undefined}>
-                                {job.first_file_name
-                                  ? job.first_file_name.length > 30
-                                    ? job.first_file_name.slice(0, 30) + "..."
-                                    : job.first_file_name
-                                  : "--"}
+                                {["running", "analyzing", "extracting"].includes(job.status) ? (
+                                  <span className="flex items-center gap-1">
+                                    <Loader2 className="h-3 w-3 animate-spin text-blue-500" />
+                                    <span>{job.document_count} files</span>
+                                  </span>
+                                ) : (
+                                  <>
+                                    {job.first_file_name
+                                      ? job.first_file_name.length > 25
+                                        ? job.first_file_name.slice(0, 25) + "..."
+                                        : job.first_file_name
+                                      : "--"}
+                                    {job.document_count > 1 && (
+                                      <span className="text-muted-foreground"> +{job.document_count - 1}</span>
+                                    )}
+                                  </>
+                                )}
                               </span>
                               <span className="px-4 py-2.5">
                                 <Badge
