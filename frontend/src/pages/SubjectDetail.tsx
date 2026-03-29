@@ -7,6 +7,8 @@ import { MaskedField } from "@/components/MaskedField"
 import { PIIBadge } from "@/components/PIIBadge"
 import { StatusBadge } from "@/components/StatusBadge"
 import { AuditTimeline } from "@/components/AuditTimeline"
+import { MergeExplanation } from "@/components/MergeExplanation"
+import { NotificationPreview } from "@/components/NotificationPreview"
 import { getJobResults, getAuditHistory } from "@/api/client"
 import type { MaskedSubject } from "@/api/client"
 import { JobIdContext } from "@/App"
@@ -113,7 +115,31 @@ export function SubjectDetail() {
         </>
       )}
 
-      {/* Card 3 — Audit Trail (always shown if subjectId exists) */}
+      {/* Card 3 — Merge Explanation (Step 26c) */}
+      {subject && subject.merge_confidence != null && subject.merge_confidence < 1.0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Merge History</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <MergeExplanation subjectId={subjectId} />
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Card 4 — Notification Preview (Step 29a) */}
+      {subject && subject.notification_required && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Notification Preview</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <NotificationPreview subjectId={subjectId} />
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Card 5 — Audit Trail (always shown if subjectId exists) */}
       <Card>
         <CardHeader>
           <CardTitle>Review History</CardTitle>

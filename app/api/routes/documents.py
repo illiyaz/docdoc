@@ -16,22 +16,12 @@ import fitz  # PyMuPDF
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
+from app.api.deps import get_db
 from app.db.models import Document, Extraction
 from app.pdf.renderer import render_page_with_overlays, render_page_to_image
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["documents"])
-
-
-def _get_db():
-    """Placeholder DB dependency — overridden in tests."""
-    from app.db.repositories import get_session
-
-    db = get_session()
-    try:
-        yield db
-    finally:
-        db.close()
 
 
 # ------------------------------------------------------------------
@@ -40,7 +30,7 @@ def _get_db():
 @router.get("/documents/{document_id}/info")
 def get_document_info(
     document_id: UUID,
-    db: Session = Depends(_get_db),
+    db: Session = Depends(get_db),
 ):
     """Return document metadata needed for the viewer (page count, file type, onset page)."""
     doc = db.query(Document).filter(Document.id == document_id).first()
@@ -76,7 +66,7 @@ def get_document_info(
 def get_document_page(
     document_id: UUID,
     page_number: int,
-    db: Session = Depends(_get_db),
+    db: Session = Depends(get_db),
     dpi: int = 150,
     highlight_extractions: bool = False,
 ):
@@ -157,7 +147,7 @@ def get_document_page(
 @router.get("/subjects/{subject_id}/source-pages")
 def get_subject_source_pages(
     subject_id: UUID,
-    db: Session = Depends(_get_db),
+    db: Session = Depends(get_db),
 ):
     """Return source documents and pages relevant to a notification subject.
 

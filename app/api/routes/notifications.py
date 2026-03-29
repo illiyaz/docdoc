@@ -18,6 +18,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from app.api.deps import get_db
 from app.db.models import NotificationSubject
 
 logger = logging.getLogger(__name__)
@@ -25,17 +26,6 @@ router = APIRouter(prefix="/notifications", tags=["notifications"])
 
 # Default template directory
 _DEFAULT_TEMPLATE_DIR = Path(__file__).resolve().parent.parent.parent / "notification" / "templates"
-
-
-def _get_db():
-    """Placeholder DB dependency — overridden in tests."""
-    from app.db.repositories import get_session
-
-    db = get_session()
-    try:
-        yield db
-    finally:
-        db.close()
 
 
 def _mask_name(name: str | None) -> str:
@@ -130,7 +120,7 @@ def _render_letter_preview(
 def preview_email(
     subject_id: UUID,
     protocol_id: str = "default",
-    db: Session = Depends(_get_db),
+    db: Session = Depends(get_db),
 ):
     """Render a notification email with masked subject data for preview."""
     subject = db.query(NotificationSubject).filter(
@@ -157,7 +147,7 @@ def preview_email(
 def preview_letter(
     subject_id: str,
     protocol_id: str = "default",
-    db: Session = Depends(_get_db),
+    db: Session = Depends(get_db),
 ):
     """Render a notification letter with masked subject data for preview."""
     subject = db.query(NotificationSubject).filter(
@@ -183,7 +173,7 @@ def preview_letter(
 @router.get("/delivery-status/{project_id}")
 def get_delivery_status(
     project_id: UUID,
-    db: Session = Depends(_get_db),
+    db: Session = Depends(get_db),
 ):
     """Return notification delivery summary for a project.
 

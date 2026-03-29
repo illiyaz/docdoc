@@ -64,6 +64,7 @@ export interface MaskedSubject {
   pii_types_found: string[]
   notification_required: boolean
   review_status: string
+  merge_confidence: number | null
 }
 
 export interface AuditEvent {

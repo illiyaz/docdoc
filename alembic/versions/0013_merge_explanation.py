@@ -9,8 +9,8 @@ Revises: 0012
 from alembic import op
 import sqlalchemy as sa
 
-revision = "0013"
-down_revision = "0012"
+revision = "0013_merge_explanation"
+down_revision = "0012_subject_dob_gov_id"
 branch_labels = None
 depends_on = None
 

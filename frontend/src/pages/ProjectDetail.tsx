@@ -62,6 +62,7 @@ import {
   cancelJob,
   archiveJob,
 } from "@/api/client"
+import { DocumentViewer } from "@/components/DocumentViewer"
 import type {
   ProjectDetail as ProjectDetailType,
   ProtocolConfigSummary,
@@ -1475,6 +1476,7 @@ function AnalysisReviewPanel({ jobId, onExtractionComplete }: { jobId: string; o
   const [isExtracting, setIsExtracting] = useState(false)
   const [extractStages, setExtractStages] = useState<Record<string, { status: string; message: string }>>({})
   const [docFilter, setDocFilter] = useState<"all" | "pending_review" | "approved" | "rejected">("all")
+  const [viewingDocId, setViewingDocId] = useState<string | null>(null)
   const [reviewError, setReviewError] = useState<string | null>(null)
   const [verificationResult, setVerificationResult] = useState<VerificationResult | null>(null)
 
@@ -1872,7 +1874,29 @@ function AnalysisReviewPanel({ jobId, onExtractionComplete }: { jobId: string; o
           </div>
 
           {doc.onset_page !== null && (
-            <p className="text-xs text-muted-foreground">Content starts at page {doc.onset_page + 1}</p>
+            <div className="flex items-center gap-2">
+              <p className="text-xs text-muted-foreground">Content starts at page {doc.onset_page + 1}</p>
+              {doc.file_type === "pdf" && (
+                <button
+                  onClick={() => setViewingDocId(viewingDocId === doc.document_id ? null : doc.document_id)}
+                  className="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-0.5"
+                >
+                  <Eye className="h-3 w-3" />
+                  {viewingDocId === doc.document_id ? "Hide Source" : "View Source"}
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Source Document Viewer (Step 26b) */}
+          {viewingDocId === doc.document_id && (
+            <DocumentViewer
+              documentId={doc.document_id}
+              initialPage={doc.onset_page ?? 0}
+              highlightExtractions
+              compact
+              onClose={() => setViewingDocId(null)}
+            />
           )}
 
           {/* Document Understanding (Phase 14b) */}
