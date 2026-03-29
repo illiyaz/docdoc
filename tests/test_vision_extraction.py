@@ -42,7 +42,7 @@ class TestVisionSettings:
     def test_default_vision_model(self):
         get_settings.cache_clear()
         s = get_settings()
-        assert s.ollama_vision_model == "llama3.2-vision:latest"
+        assert s.ollama_vision_model == "qwen2.5vl:32b"
         assert s.use_vision_extraction is True
         assert s.vision_page_dpi == 150
 
@@ -113,7 +113,7 @@ class TestOllamaClientVision:
         mock_resp.json.return_value = {
             "models": [
                 {"name": "qwen2.5:7b"},
-                {"name": "llama3.2-vision:latest"},
+                {"name": "qwen2.5vl:32b"},
             ]
         }
         mock_get.return_value = mock_resp
@@ -537,9 +537,9 @@ class TestVisionExtractorIntegration:
             mock_client = MagicMock()
             # One image per call → one record per response
             mock_client.generate_with_images.side_effect = [
-                json.dumps([{"PERSON": "Person 1", "NI_NUMBER": "AB000000C",
+                json.dumps([{"PERSON": "Alice Smith", "NI_NUMBER": "AB000000C",
                              "DATE_OF_BIRTH": "01-Jan-1960"}]),
-                json.dumps([{"PERSON": "Person 2", "NI_NUMBER": "AB000003C",
+                json.dumps([{"PERSON": "Bob Jones", "NI_NUMBER": "AB000003C",
                              "DATE_OF_BIRTH": "15-Jun-1975"}]),
             ]
 
@@ -565,9 +565,9 @@ class TestVisionExtractorIntegration:
             )
 
             assert len(records) == 2
-            assert records[0].raw_name == "Person 1"
+            assert records[0].raw_name == "Alice Smith"
             assert records[0].raw_government_id == "AB000000C"
-            assert records[1].raw_name == "Person 2"
+            assert records[1].raw_name == "Bob Jones"
 
             # Each instance = one call with one image
             assert mock_client.generate_with_images.call_count == 2

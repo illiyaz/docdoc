@@ -400,8 +400,16 @@ class TestAnalyzeDocument:
             "pii_fields": [],
             "structure_type": "variable",
         })
-        router = VisionRouter(client)
-        with patch("app.pipeline.vision_router.render_page_to_image", return_value="base64img") as mock_render:
+        router = VisionRouter(client, vision_model="qwen2.5vl:32b")
+        with patch("app.pipeline.vision_router.render_page_to_image", return_value="base64img") as mock_render, \
+             patch("fitz.open") as mock_fitz:
+            # Mock fitz to avoid spatial text path trying to open the file
+            mock_page = MagicMock()
+            mock_page.get_text.return_value = ""  # No text → skip spatial, go to vision
+            mock_doc = MagicMock()
+            mock_doc.__getitem__ = MagicMock(return_value=mock_page)
+            mock_doc.page_count = 10
+            mock_fitz.return_value = mock_doc
             router.analyze_document("/tmp/test.pdf", total_pages=10)
 
         mock_render.assert_called_once_with("/tmp/test.pdf", 0, dpi=200)
@@ -430,9 +438,10 @@ class TestParseJson:
     def test_empty(self):
         assert _parse_json("") is None
 
-    def test_array_returns_none(self):
-        """_parse_json only returns dicts, not arrays."""
-        assert _parse_json('[1, 2, 3]') is None
+    def test_array_returns_list(self):
+        """_parse_json returns lists (for batch responses) and dicts."""
+        assert _parse_json('[1, 2, 3]') == [1, 2, 3]
+        assert _parse_json('[{"a": 1}]') == [{"a": 1}]
 
 
 class TestSafeInt:

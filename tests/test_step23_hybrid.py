@@ -301,16 +301,17 @@ class TestStaticFilter:
         assert not removed  # nothing should be removed
         assert len(cleaned) == 10
 
-    def test_never_filters_person_or_ssn(self):
-        """PERSON and US_SSN should never be filtered even if repeated."""
+    def test_filters_repeated_person_as_static(self):
+        """PERSON appearing on >50% of pages is correctly identified as static (header/footer)."""
         page_records = {}
         for pn in range(10):
             page_records[pn] = [
                 {"PERSON": "Same Name", "US_SSN": "123-45-6789"},
             ]
         cleaned, removed = filter_static_values(page_records, threshold=0.5)
-        assert not removed
-        assert all("PERSON" in recs[0] for recs in cleaned.values())
+        # "Same Name" appears on 100% of pages — it's a static value (header/footer)
+        assert "PERSON" in removed
+        assert removed["PERSON"] == ["Same Name"]
 
     def test_skips_small_documents(self):
         """Documents with fewer than min_pages should not be filtered."""

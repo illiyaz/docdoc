@@ -236,11 +236,11 @@ class TestProtocolModelConfig:
 
     def test_hipaa_vision_model(self):
         from app.core.constants import PROTOCOL_LLM_CONFIG
-        assert PROTOCOL_LLM_CONFIG["hipaa"]["vision_model"] == "llama3.2-vision:latest"
+        assert PROTOCOL_LLM_CONFIG["hipaa"]["vision_model"] == "qwen2.5vl:32b"
 
     def test_gdpr_vision_model(self):
         from app.core.constants import PROTOCOL_LLM_CONFIG
-        assert PROTOCOL_LLM_CONFIG["gdpr"]["vision_model"] == "llama3.2-vision:latest"
+        assert PROTOCOL_LLM_CONFIG["gdpr"]["vision_model"] == "qwen2.5vl:32b"
 
     def test_vision_dpi_defaults(self):
         from app.core.constants import PROTOCOL_LLM_CONFIG
