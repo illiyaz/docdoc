@@ -215,13 +215,22 @@ def build_composite_record(
     ))
     page = pages[0] if pages else 0
 
-    # Build 1-indexed page range string
+    # Build page range string (handles both int pages and string sheet names)
     if pages:
-        pages_1 = sorted(set(int(p) + 1 for p in pages))
-        if len(pages_1) == 1:
-            page_range_str = str(pages_1[0])
+        int_pages = []
+        str_pages = []
+        for p in pages:
+            try:
+                int_pages.append(int(p))
+            except (ValueError, TypeError):
+                str_pages.append(str(p))
+        if int_pages:
+            pages_1 = sorted(set(p + 1 for p in int_pages))
+            page_range_str = str(pages_1[0]) if len(pages_1) == 1 else f"{pages_1[0]}-{pages_1[-1]}"
+        elif str_pages:
+            page_range_str = str_pages[0]
         else:
-            page_range_str = f"{pages_1[0]}-{pages_1[-1]}"
+            page_range_str = "1"
     else:
         page_range_str = "1"
 

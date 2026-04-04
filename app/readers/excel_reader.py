@@ -58,7 +58,13 @@ class ExcelReader(BaseReader):
         Sheets are processed in workbook order.  Hidden and veryHidden sheets
         are skipped without touching the stitcher.  PageStitcher.reset() is
         called before each visible sheet to prevent cross-tab context bleed.
+
+        Falls back to xlrd for legacy .xls files that openpyxl can't read.
         """
+        ext = self.path.suffix.lower()
+        if ext == ".xls":
+            return self._read_xls()
+
         stitcher = PageStitcher()
         all_blocks: list[ExtractedBlock] = []
 
@@ -74,6 +80,64 @@ class ExcelReader(BaseReader):
                 all_blocks.extend(sheet_blocks)
         finally:
             wb.close()
+
+        return all_blocks
+
+    def _read_xls(self) -> list[ExtractedBlock]:
+        """Read legacy .xls files using xlrd."""
+        import xlrd
+
+        source = str(self.path)
+        file_type = "xls"
+        all_blocks: list[ExtractedBlock] = []
+
+        wb = xlrd.open_workbook(source)
+        for sheet_idx in range(wb.nsheets):
+            ws = wb.sheet_by_index(sheet_idx)
+            if ws.nrows == 0:
+                continue
+
+            sheet_name = ws.name
+            table_id = str(uuid.uuid4())
+
+            # Row 0 = headers
+            headers: dict[int, str] = {}
+            for col in range(ws.ncols):
+                val = ws.cell_value(0, col)
+                header_text = str(val) if val else ""
+                headers[col] = header_text
+                all_blocks.append(ExtractedBlock(
+                    text=header_text,
+                    page_or_sheet=sheet_name,
+                    source_path=source,
+                    file_type=file_type,
+                    block_type="table_header",
+                    bbox=None,
+                    row=1,
+                    column=col + 1,
+                    table_id=table_id,
+                    col_header=header_text,
+                    row_index=0,
+                ))
+
+            # Rows 1+ = data
+            for row_idx in range(1, ws.nrows):
+                for col in range(ws.ncols):
+                    val = ws.cell_value(row_idx, col)
+                    text = str(val) if val else ""
+                    all_blocks.append(ExtractedBlock(
+                        text=text,
+                        page_or_sheet=sheet_name,
+                        source_path=source,
+                        file_type=file_type,
+                        block_type="table_cell",
+                        bbox=None,
+                        row=row_idx + 1,
+                        column=col + 1,
+                        table_id=table_id,
+                        col_header=headers.get(col, ""),
+                        row_index=row_idx,
+                    ))
 
         return all_blocks
 
