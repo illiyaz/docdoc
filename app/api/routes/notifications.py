@@ -170,6 +170,35 @@ def preview_letter(
 # Delivery dashboard (#10)
 # ---------------------------------------------------------------------------
 
+@router.get("/subjects/{project_id}")
+def get_project_subjects(
+    project_id: UUID,
+    db: Session = Depends(get_db),
+):
+    """Return all notification subjects for a project with masked PII."""
+    subjects = (
+        db.query(NotificationSubject)
+        .filter(NotificationSubject.project_id == project_id)
+        .order_by(NotificationSubject.canonical_name)
+        .all()
+    )
+
+    return [
+        {
+            "subject_id": str(s.subject_id),
+            "name": _mask_name(s.canonical_name),
+            "email": _mask_email(s.canonical_email),
+            "phone": s.canonical_phone[:3] + "***" if s.canonical_phone and len(s.canonical_phone) > 3 else None,
+            "review_status": s.review_status,
+            "notification_required": s.notification_required,
+            "merge_confidence": s.merge_confidence,
+            "pii_types": s.pii_types_found or [],
+            "source_document": s.source_document_name,
+        }
+        for s in subjects
+    ]
+
+
 @router.get("/delivery-status/{project_id}")
 def get_delivery_status(
     project_id: UUID,

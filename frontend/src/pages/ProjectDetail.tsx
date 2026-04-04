@@ -81,13 +81,14 @@ import type {
 // Tab type
 // ---------------------------------------------------------------------------
 
-type TabId = "overview" | "protocols" | "catalog" | "jobs" | "density" | "exports"
+type TabId = "overview" | "protocols" | "catalog" | "jobs" | "subjects" | "density" | "exports"
 
 const TABS: { id: TabId; label: string; icon: typeof FileText }[] = [
   { id: "overview", label: "Overview", icon: FileText },
   { id: "protocols", label: "Protocols", icon: Shield },
   { id: "catalog", label: "Catalog", icon: BarChart3 },
   { id: "jobs", label: "Jobs", icon: Briefcase },
+  { id: "subjects", label: "Subjects", icon: Search },
   { id: "density", label: "Density", icon: BarChart3 },
   { id: "exports", label: "Exports", icon: Download },
 ]
@@ -3888,6 +3889,160 @@ function DensityTab({ projectId }: { projectId: string }) {
 }
 
 // ---------------------------------------------------------------------------
+// Subjects tab
+// ---------------------------------------------------------------------------
+
+const STATUS_COLORS: Record<string, string> = {
+  AI_PENDING: "bg-gray-100 text-gray-700",
+  HUMAN_REVIEW: "bg-amber-100 text-amber-700",
+  LEGAL_REVIEW: "bg-purple-100 text-purple-700",
+  APPROVED: "bg-green-100 text-green-700",
+  REJECTED: "bg-red-100 text-red-700",
+  NOTIFIED: "bg-blue-100 text-blue-700",
+}
+
+function SubjectsTab({ projectId }: { projectId: string }) {
+  const BASE = import.meta.env.VITE_API_URL ?? "/api"
+  const [filter, setFilter] = useState<string>("all")
+
+  const { data: subjects, isLoading } = useQuery({
+    queryKey: ["project-subjects", projectId],
+    queryFn: async () => {
+      const res = await fetch(`${BASE}/notifications/subjects/${projectId}`)
+      if (!res.ok) return []
+      return res.json()
+    },
+    refetchInterval: 30_000,
+  })
+
+  const { data: delivery } = useQuery({
+    queryKey: ["delivery-status", projectId],
+    queryFn: async () => {
+      const res = await fetch(`${BASE}/notifications/delivery-status/${projectId}`)
+      if (!res.ok) return null
+      return res.json()
+    },
+  })
+
+  const filtered = (subjects ?? []).filter((s: Record<string, unknown>) => {
+    if (filter === "all") return true
+    if (filter === "needs_review") return s.review_status === "AI_PENDING" || s.review_status === "HUMAN_REVIEW"
+    if (filter === "notif_required") return s.notification_required
+    return s.review_status === filter
+  })
+
+  return (
+    <div className="space-y-4">
+      {/* Summary cards */}
+      {delivery && (
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+          <Card><CardContent className="pt-4 text-center">
+            <p className="text-2xl font-bold">{delivery.total_subjects}</p>
+            <p className="text-xs text-muted-foreground">Total Subjects</p>
+          </CardContent></Card>
+          <Card><CardContent className="pt-4 text-center">
+            <p className="text-2xl font-bold text-amber-600">{delivery.summary.pending_review}</p>
+            <p className="text-xs text-muted-foreground">Pending Review</p>
+          </CardContent></Card>
+          <Card><CardContent className="pt-4 text-center">
+            <p className="text-2xl font-bold text-green-600">{delivery.summary.approved_ready}</p>
+            <p className="text-xs text-muted-foreground">Approved</p>
+          </CardContent></Card>
+          <Card><CardContent className="pt-4 text-center">
+            <p className="text-2xl font-bold text-blue-600">{delivery.summary.notified_sent}</p>
+            <p className="text-xs text-muted-foreground">Notified</p>
+          </CardContent></Card>
+          <Card><CardContent className="pt-4 text-center">
+            <p className="text-2xl font-bold">{delivery.notification_required}</p>
+            <p className="text-xs text-muted-foreground">Notification Required</p>
+          </CardContent></Card>
+        </div>
+      )}
+
+      {/* Filter bar */}
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-semibold">Notification Subjects</h3>
+        <div className="flex gap-1 rounded border p-0.5 text-xs">
+          {[
+            { key: "all", label: "All" },
+            { key: "needs_review", label: "Needs Review" },
+            { key: "APPROVED", label: "Approved" },
+            { key: "notif_required", label: "Notif Required" },
+          ].map(({ key, label }) => (
+            <button
+              key={key}
+              onClick={() => setFilter(key)}
+              className={`rounded px-2 py-0.5 ${filter === key ? "bg-blue-100 text-blue-700" : "text-gray-500"}`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {isLoading ? (
+        <div className="text-sm text-muted-foreground">Loading subjects...</div>
+      ) : filtered.length === 0 ? (
+        <div className="text-sm text-muted-foreground">
+          {(subjects ?? []).length === 0
+            ? "No subjects extracted yet. Run a pipeline first."
+            : "No subjects match the current filter."}
+        </div>
+      ) : (
+        <div className="border rounded-md overflow-hidden">
+          <table className="w-full text-xs">
+            <thead className="bg-muted/50">
+              <tr>
+                <th className="px-3 py-2 text-left font-medium">Name</th>
+                <th className="px-3 py-2 text-left font-medium">Email</th>
+                <th className="px-3 py-2 text-left font-medium">Status</th>
+                <th className="px-3 py-2 text-left font-medium">PII Types</th>
+                <th className="px-3 py-2 text-left font-medium">Source</th>
+                <th className="px-3 py-2 text-right font-medium">Confidence</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.slice(0, 100).map((s: Record<string, unknown>) => (
+                <tr key={s.subject_id as string} className="border-t hover:bg-muted/30">
+                  <td className="px-3 py-2 font-medium">{(s.name as string) || "-"}</td>
+                  <td className="px-3 py-2 text-muted-foreground">{(s.email as string) || "-"}</td>
+                  <td className="px-3 py-2">
+                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${STATUS_COLORS[s.review_status as string] ?? "bg-gray-100"}`}>
+                      {s.review_status as string}
+                    </span>
+                    {s.notification_required && (
+                      <span className="ml-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-orange-100 text-orange-700">NOTIFY</span>
+                    )}
+                  </td>
+                  <td className="px-3 py-2">
+                    <div className="flex flex-wrap gap-0.5">
+                      {((s.pii_types as string[]) || []).map((t: string) => (
+                        <span key={t} className="px-1 py-0.5 rounded bg-blue-50 text-blue-700 text-[9px]">{t}</span>
+                      ))}
+                    </div>
+                  </td>
+                  <td className="px-3 py-2 text-muted-foreground truncate max-w-[150px]" title={s.source_document as string}>
+                    {s.source_document ? (s.source_document as string).slice(0, 20) : "-"}
+                  </td>
+                  <td className="px-3 py-2 text-right">
+                    {s.merge_confidence != null ? `${((s.merge_confidence as number) * 100).toFixed(0)}%` : "-"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {filtered.length > 100 && (
+            <p className="px-3 py-2 text-xs text-muted-foreground border-t">
+              Showing 100 of {filtered.length} subjects
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Exports tab
 // ---------------------------------------------------------------------------
 
@@ -4210,6 +4365,7 @@ export function ProjectDetail() {
           onJobCompleted={handleJobCompleted}
         />
       )}
+      {activeTab === "subjects" && <SubjectsTab projectId={projectId} />}
       {activeTab === "density" && <DensityTab projectId={projectId} />}
       {activeTab === "exports" && <ExportsTab projectId={projectId} />}
     </div>
