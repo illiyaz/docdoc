@@ -679,24 +679,38 @@ def _pipeline_generator(
                         except Exception:
                             pass  # Fall through to Presidio
 
-                    # Presidio fallback with composite grouping
-                    if not doc_records:
-                        try:
-                            detections = engine.analyze(blocks)
-                            if schema is not None and schema_filter_cls is not None:
-                                try:
-                                    sf = schema_filter_cls(schema)
-                                    result = sf.filter_detections(detections)
-                                    detections = result.kept
-                                except Exception:
-                                    pass
+                    # ALWAYS run Presidio with smart_grouping for complete coverage
+                    # LLM may return partial results (3 out of 8 people on a page)
+                    # Presidio fills the gaps
+                    try:
+                        detections = engine.analyze(blocks)
+                        if schema is not None and schema_filter_cls is not None:
+                            try:
+                                sf = schema_filter_cls(schema)
+                                result = sf.filter_detections(detections)
+                                detections = result.kept
+                            except Exception:
+                                pass
 
-                            doc_records = group_detections_to_records(
-                                detections, doc_info["source_path"],
-                                schema=schema, doc_path=doc_info.get("source_path"),
-                            )
-                        except Exception:
-                            logger.warning("Path C (Presidio) failed for %s", doc_name, exc_info=True)
+                        presidio_records = group_detections_to_records(
+                            detections, doc_info["source_path"],
+                            schema=schema, doc_path=doc_info.get("source_path"),
+                        )
+
+                        if doc_records and presidio_records:
+                            # Merge: LLM records are primary, Presidio fills gaps
+                            # Deduplicate by name — LLM records win on conflict
+                            llm_names = {r.raw_name.lower().strip() for r in doc_records if r.raw_name}
+                            for pr in presidio_records:
+                                if pr.raw_name and pr.raw_name.lower().strip() not in llm_names:
+                                    doc_records.append(pr)
+                                elif not pr.raw_name and (pr.raw_government_id or pr.raw_phone or pr.raw_email):
+                                    doc_records.append(pr)  # Nameless PII records from Presidio
+                            logger.info("Merged LLM+Presidio for %s: %d total records", doc_name, len(doc_records))
+                        elif not doc_records:
+                            doc_records = presidio_records
+                    except Exception:
+                        logger.warning("Presidio failed for %s", doc_name, exc_info=True)
 
                 if doc_records:
                     logger.info("Extracted %d records from %s", len(doc_records), doc_name)
