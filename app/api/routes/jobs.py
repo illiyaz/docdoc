@@ -348,6 +348,21 @@ def build_composite_record_from_dict(data: dict, doc_id: str):
     if not raw_name and not raw_gov_id:
         return None
 
+    # Build entity_types_found from populated fields
+    types_found: list[str] = []
+    if raw_name:
+        types_found.append("PERSON")
+    if raw_gov_id:
+        types_found.append("US_SSN")
+    if raw_dob:
+        types_found.append("DATE_OF_BIRTH")
+    if raw_email:
+        types_found.append("EMAIL_ADDRESS")
+    if raw_phone:
+        types_found.append("PHONE_NUMBER")
+    if raw_addr:
+        types_found.append("LOCATION")
+
     return PIIRecord(
         record_id=str(uuid4()),
         entity_type="PERSON" if raw_name else "GOVERNMENT_ID",
@@ -359,6 +374,7 @@ def build_composite_record_from_dict(data: dict, doc_id: str):
         raw_phone=raw_phone,
         raw_address={"raw": raw_addr} if raw_addr else None,
         source_document_id=doc_id,
+        entity_types_found=tuple(types_found),
     )
 
 
