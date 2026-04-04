@@ -691,7 +691,7 @@ def _pipeline_generator(
                                 except Exception:
                                     pass
 
-                            doc_records = group_detections_to_records(detections, doc_info["source_path"])
+                            doc_records = group_detections_to_records(detections, doc_info["source_path"], schema=schema)
                         except Exception:
                             logger.warning("Path C (Presidio) failed for %s", doc_name, exc_info=True)
 

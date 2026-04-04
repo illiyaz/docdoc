@@ -2670,7 +2670,7 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                         records = extract_with_template(detections, schema, str(doc.id), total_pg)
                     else:
                         from app.pipeline.smart_grouping import group_detections_to_records as _smart_group
-                        records = _smart_group(detections, str(doc.id))
+                        records = _smart_group(detections, str(doc.id), schema=schema)
                     extraction_path = "3"
                     logger.info("Path 3 (Presidio) for %s: %d records (from %d detections)", doc.file_name, len(records), len(detections))
 
