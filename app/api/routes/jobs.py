@@ -40,6 +40,7 @@ from app.pipeline.record_mapper import (
     detection_to_pii_record,
     extract_with_template,
 )
+from app.pipeline.smart_grouping import group_detections_to_records
 from app.rra.entity_resolver import EntityResolver
 from app.tasks.discovery import DiscoveryTask, FilesystemConnector
 
@@ -690,23 +691,7 @@ def _pipeline_generator(
                                 except Exception:
                                     pass
 
-                            # Group by (page, row) for table data, or by page for prose
-                            # This ensures each TABLE ROW becomes one person, not each page
-                            from collections import defaultdict as _ddict
-                            row_groups: dict = _ddict(list)
-                            for det in detections:
-                                pg = det.block.page_or_sheet if hasattr(det, "block") and det.block else 0
-                                row = getattr(det.block, "row", None) if hasattr(det, "block") and det.block else None
-                                # Use (page, row) key for table cells, page-only for prose
-                                key = (pg, row) if row is not None else (pg, None)
-                                row_groups[key].append(det)
-
-                            for group_dets in row_groups.values():
-                                has_person = any(d.entity_type in ("PERSON", "PERSON_NAME") for d in group_dets)
-                                if has_person:
-                                    doc_records.append(build_composite_record(group_dets, doc_info["source_path"]))
-                                else:
-                                    doc_records.extend(detection_to_pii_record(d, doc_info["source_path"]) for d in group_dets)
+                            doc_records = group_detections_to_records(detections, doc_info["source_path"])
                         except Exception:
                             logger.warning("Path C (Presidio) failed for %s", doc_name, exc_info=True)
 

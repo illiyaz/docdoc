@@ -2669,24 +2669,8 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                     if is_template and instances:
                         records = extract_with_template(detections, schema, str(doc.id), total_pg)
                     else:
-                        # Group by (page, row) for table data, page-only for prose
-                        # Each TABLE ROW becomes one person, not each page
-                        from collections import defaultdict as _defaultdict
-                        row_groups: dict = _defaultdict(list)
-                        for det in detections:
-                            pg = det.block.page_or_sheet if hasattr(det, "block") and det.block else 0
-                            row = getattr(det.block, "row", None) if hasattr(det, "block") and det.block else None
-                            key = (pg, row) if row is not None else (pg, None)
-                            row_groups[key].append(det)
-
-                        records = []
-                        for _key, pg_dets in row_groups.items():
-                            has_person = any(d.entity_type in _PERSON_TYPES_SET for d in pg_dets)
-                            if has_person:
-                                records.append(build_composite_record(pg_dets, str(doc.id)))
-                            else:
-                                # No person — keep individual records for PII inventory
-                                records.extend(detection_to_pii_record(d, str(doc.id)) for d in pg_dets)
+                        from app.pipeline.smart_grouping import group_detections_to_records as _smart_group
+                        records = _smart_group(detections, str(doc.id))
                     extraction_path = "3"
                     logger.info("Path 3 (Presidio) for %s: %d records (from %d detections)", doc.file_name, len(records), len(detections))
 
