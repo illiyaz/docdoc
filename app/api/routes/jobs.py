@@ -526,12 +526,17 @@ def _pipeline_generator(
                     continue
 
                 # --- LiteParse spatial text (better than flat PyMuPDF for LLM) ---
-                spatial_text: str | None = None
-                if (doc_info.get("file_type", "").lower() in ("pdf", "application/pdf")
-                        and doc_info.get("source_path")):
+                spatial_pages: dict[int, str] = {}
+                is_pdf = doc_info.get("file_type", "").lower() in ("pdf", "application/pdf")
+                if is_pdf and doc_info.get("source_path"):
                     try:
-                        from app.readers.liteparse_adapter import get_spatial_text
-                        spatial_text = get_spatial_text(doc_info["source_path"], 0)
+                        from app.readers.liteparse_adapter import get_spatial_text_pages
+                        doc_page_nums = sorted(set(b.page_or_sheet for b in blocks if isinstance(b.page_or_sheet, int)))
+                        spatial_pages = get_spatial_text_pages(
+                            doc_info["source_path"],
+                            page_numbers=doc_page_nums[:50] if doc_page_nums else None,
+                            max_pages=50,
+                        )
                     except Exception:
                         pass
 
@@ -604,35 +609,55 @@ def _pipeline_generator(
 
                 else:
                     # Path C: non-template
-                    # Try LLM with spatial text first (if PDF with enough text)
-                    if spatial_text and len(spatial_text) > 200:
+                    # Try LLM with spatial text first — batch 3 pages per LLM call
+                    if spatial_pages and len(spatial_pages) > 0:
                         try:
+                            import json as _json
                             from app.llm.client import OllamaClient
                             client = OllamaClient(db_session=db)
-                            prompt = (
-                                "Extract ALL personally identifiable information from this document page.\n"
-                                "For each person found, return a JSON object with fields: "
-                                "PERSON, US_SSN, DATE_OF_BIRTH, EMAIL_ADDRESS, PHONE_NUMBER, LOCATION.\n"
-                                "Return a JSON array of objects. Only include fields that are present.\n\n"
-                                f"Document content:\n{spatial_text[:4000]}"
-                            )
-                            response = client.generate(prompt, use_case="spatial_text_extraction")
-                            if response:
-                                import json as _json
+
+                            sorted_pages = sorted(spatial_pages.keys())
+                            BATCH_SIZE = 3
+                            MAX_BATCHES = 30  # Cap at ~90 pages to avoid runaway LLM costs
+
+                            for batch_idx in range(0, min(len(sorted_pages), MAX_BATCHES * BATCH_SIZE), BATCH_SIZE):
+                                batch_page_nums = sorted_pages[batch_idx:batch_idx + BATCH_SIZE]
+                                batch_text = ""
+                                for pn in batch_page_nums:
+                                    pt = spatial_pages.get(pn, "")
+                                    if pt.strip():
+                                        batch_text += f"\n--- PAGE {pn + 1} ---\n{pt}"
+
+                                if len(batch_text.strip()) < 100:
+                                    continue
+
+                                prompt = (
+                                    "Extract ALL personally identifiable information from these document pages.\n"
+                                    "For each person found, return a JSON object with fields: "
+                                    "PERSON, US_SSN, DATE_OF_BIRTH, EMAIL_ADDRESS, PHONE_NUMBER, LOCATION.\n"
+                                    "Return a JSON array of objects. Only include fields that are present.\n\n"
+                                    f"Document content:\n{batch_text[:6000]}"
+                                )
                                 try:
-                                    data = _json.loads(response)
-                                    if isinstance(data, dict):
-                                        data = [data]
-                                    if isinstance(data, list):
-                                        for item in data:
-                                            if isinstance(item, dict):
-                                                rec = build_composite_record_from_dict(item, doc_info["source_path"])
-                                                if rec and rec.raw_name:
-                                                    doc_records.append(rec)
+                                    response = client.generate(prompt, use_case="spatial_text_extraction")
+                                    if response:
+                                        data = _json.loads(response)
+                                        if isinstance(data, dict):
+                                            data = [data]
+                                        if isinstance(data, list):
+                                            for item in data:
+                                                if isinstance(item, dict):
+                                                    rec = build_composite_record_from_dict(item, doc_info["source_path"])
+                                                    if rec and (rec.raw_name or rec.raw_government_id):
+                                                        doc_records.append(rec)
                                 except (_json.JSONDecodeError, ValueError):
                                     pass
+                                except Exception:
+                                    break  # LLM error — stop batching, fall to Presidio
+
                             if doc_records:
-                                logger.info("LiteParse+LLM extraction for %s: %d records", doc_name, len(doc_records))
+                                logger.info("LiteParse+LLM extraction for %s: %d records from %d pages",
+                                            doc_name, len(doc_records), len(sorted_pages))
                         except Exception:
                             pass  # Fall through to Presidio
 

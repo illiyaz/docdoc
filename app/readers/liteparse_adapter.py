@@ -28,6 +28,41 @@ def get_spatial_text(doc_path: str, page_num: int = 0) -> str | None:
         return None
 
 
+def get_spatial_text_pages(
+    doc_path: str,
+    page_numbers: list[int] | None = None,
+    max_pages: int = 50,
+) -> dict[int, str]:
+    """Extract spatial text from multiple PDF pages.
+
+    Returns a dict mapping page number → spatial text string.
+    If *page_numbers* is None, extracts first *max_pages* pages.
+    """
+    try:
+        from liteparse import LiteParse
+        parser = LiteParse()
+
+        if page_numbers:
+            target = ",".join(str(p + 1) for p in page_numbers[:max_pages])
+        else:
+            target = f"1-{max_pages}"
+
+        result = parser.parse(doc_path, target_pages=target, ocr_enabled=False)
+        if not result or not result.pages:
+            return {}
+
+        texts: dict[int, str] = {}
+        for page in result.pages:
+            if page.text and page.text.strip():
+                texts[page.pageNum - 1] = page.text  # Convert to 0-indexed
+        return texts
+    except ImportError:
+        return {}
+    except Exception:
+        logger.debug("LiteParse multi-page failed for %s", doc_path, exc_info=True)
+        return {}
+
+
 def is_available() -> bool:
     """Check if LiteParse is installed and working."""
     try:
