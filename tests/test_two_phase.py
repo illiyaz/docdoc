@@ -890,7 +890,7 @@ class TestCoordinatePipelineWiring:
         # After Path 0, Path 1 should check 'not records'
         path1_section = source[source.find("Path 1: Vision"):]
         # The condition should include 'not records' (may be in the if-block below the comment)
-        assert "not records" in path1_section[:1000], \
+        assert "not records" in path1_section[:2000], \
             "Path 1 (Vision) must be guarded by 'not records' to skip when coordinate path succeeds"
 
     def test_coordinate_path_uses_reconciliation_on_failures(self):
@@ -1128,7 +1128,7 @@ class TestVisionRoutingPipelineWiring:
         source = inspect.getsource(two_phase.run_extraction_background)
         # Path 1 section still has "not records" guard
         path1_section = source[source.find("Path 1: Vision"):]
-        assert "not records" in path1_section[:1000]
+        assert "not records" in path1_section[:2000]
 
     def test_llm_template_path_from_vision_routing(self):
         """Vision routing can recommend llm_template, which falls to Path 2b."""

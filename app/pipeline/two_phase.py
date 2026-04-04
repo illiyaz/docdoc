@@ -2669,18 +2669,18 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                     if is_template and instances:
                         records = extract_with_template(detections, schema, str(doc.id), total_pg)
                     else:
-                        # Group detections by page and build composite records
-                        # so that PERSON + SSN + PHONE on the same page become
-                        # one multi-field PIIRecord instead of 3 single-field records.
+                        # Group by (page, row) for table data, page-only for prose
+                        # Each TABLE ROW becomes one person, not each page
                         from collections import defaultdict as _defaultdict
-                        page_groups: dict[int | str, list] = _defaultdict(list)
+                        row_groups: dict = _defaultdict(list)
                         for det in detections:
                             pg = det.block.page_or_sheet if hasattr(det, "block") and det.block else 0
-                            page_groups[pg].append(det)
+                            row = getattr(det.block, "row", None) if hasattr(det, "block") and det.block else None
+                            key = (pg, row) if row is not None else (pg, None)
+                            row_groups[key].append(det)
 
                         records = []
-                        for pg, pg_dets in page_groups.items():
-                            # If page has a PERSON detection, build composite
+                        for _key, pg_dets in row_groups.items():
                             has_person = any(d.entity_type in _PERSON_TYPES_SET for d in pg_dets)
                             if has_person:
                                 records.append(build_composite_record(pg_dets, str(doc.id)))

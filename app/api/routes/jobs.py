@@ -649,9 +649,10 @@ def _pipeline_generator(
 
                                 prompt = (
                                     "Extract ALL personally identifiable information from these document pages.\n"
-                                    "For each person found, return a JSON object with fields: "
+                                    "IMPORTANT: There may be MULTIPLE people per page (e.g. tables, lists).\n"
+                                    "Return one JSON object per INDIVIDUAL person with fields: "
                                     "PERSON, US_SSN, DATE_OF_BIRTH, EMAIL_ADDRESS, PHONE_NUMBER, LOCATION.\n"
-                                    "Return a JSON array of objects. Only include fields that are present.\n\n"
+                                    "Return a JSON array. If a page has 8 people, return 8 objects.\n\n"
                                     f"Document content:\n{batch_text[:6000]}"
                                 )
                                 try:
@@ -689,19 +690,23 @@ def _pipeline_generator(
                                 except Exception:
                                     pass
 
-                            # Group by page, build composite records
+                            # Group by (page, row) for table data, or by page for prose
+                            # This ensures each TABLE ROW becomes one person, not each page
                             from collections import defaultdict as _ddict
-                            page_groups: dict = _ddict(list)
+                            row_groups: dict = _ddict(list)
                             for det in detections:
                                 pg = det.block.page_or_sheet if hasattr(det, "block") and det.block else 0
-                                page_groups[pg].append(det)
+                                row = getattr(det.block, "row", None) if hasattr(det, "block") and det.block else None
+                                # Use (page, row) key for table cells, page-only for prose
+                                key = (pg, row) if row is not None else (pg, None)
+                                row_groups[key].append(det)
 
-                            for pg_dets in page_groups.values():
-                                has_person = any(d.entity_type in ("PERSON", "PERSON_NAME") for d in pg_dets)
+                            for group_dets in row_groups.values():
+                                has_person = any(d.entity_type in ("PERSON", "PERSON_NAME") for d in group_dets)
                                 if has_person:
-                                    doc_records.append(build_composite_record(pg_dets, doc_info["source_path"]))
+                                    doc_records.append(build_composite_record(group_dets, doc_info["source_path"]))
                                 else:
-                                    doc_records.extend(detection_to_pii_record(d, doc_info["source_path"]) for d in pg_dets)
+                                    doc_records.extend(detection_to_pii_record(d, doc_info["source_path"]) for d in group_dets)
                         except Exception:
                             logger.warning("Path C (Presidio) failed for %s", doc_name, exc_info=True)
 

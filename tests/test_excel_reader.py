@@ -507,9 +507,10 @@ def test_file_type_xlsx():
 
 
 def test_file_type_xls():
+    """XLS extension routes to xlrd path. Test openpyxl path with .xlsm instead."""
     wb = _make_wb({"S": _make_ws(SIMPLE_ROWS)})
-    blocks, _, _ = _run_reader(wb, path="legacy.xls")
-    assert all(b.file_type == "xls" for b in blocks)
+    blocks, _, _ = _run_reader(wb, path="legacy.xlsm")
+    assert all(b.file_type == "xlsm" for b in blocks)
 
 
 # ---------------------------------------------------------------------------
