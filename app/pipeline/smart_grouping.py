@@ -32,11 +32,16 @@ def group_detections_to_records(
     detections: list,
     doc_id: str,
     schema: object | None = None,
+    doc_path: str | None = None,
 ) -> list[PIIRecord]:
     """Group Presidio detections into composite PIIRecords.
 
     If *schema* is a DocumentSchema, uses its structure metadata to choose
-    the best grouping strategy. Otherwise falls back to proximity grouping.
+    the best grouping strategy. If *doc_path* is provided and the schema
+    indicates a multi-page template, uses marker-based instance detection
+    for variable-length records (e.g. person 1 = 3 pages, person 2 = 2 pages).
+
+    Otherwise falls back to proximity grouping.
     """
     if not detections:
         return []
@@ -45,6 +50,7 @@ def group_detections_to_records(
     records_per_page = 1
     is_tabular = False
     pages_per_instance = 1
+    instance_marker: str | None = None
 
     if schema is not None:
         records_per_page = getattr(schema, "records_per_page_estimate", 1) or 1
@@ -52,9 +58,25 @@ def group_detections_to_records(
         template = getattr(schema, "template", None)
         if template:
             pages_per_instance = getattr(template, "pages_per_instance", 1) or 1
+            instance_marker = getattr(template, "instance_marker", None)
 
-    # Strategy 1: Multi-page template — group across consecutive pages
+    # Strategy 1: Multi-page template — try marker-based boundaries first
     if pages_per_instance > 1:
+        boundaries = None
+        if doc_path and instance_marker:
+            try:
+                from app.pipeline.instance_detector import find_instance_boundaries
+                boundaries = find_instance_boundaries(doc_path, instance_marker=instance_marker)
+                if boundaries:
+                    logger.info(
+                        "Marker-based instance boundaries for %s: %d instances (marker=%r)",
+                        doc_id, len(boundaries), instance_marker,
+                    )
+            except Exception:
+                logger.debug("Marker-based boundary detection failed for %s", doc_id, exc_info=True)
+
+        if boundaries:
+            return _group_by_boundaries(detections, doc_id, boundaries)
         return _group_multi_page_template(detections, doc_id, pages_per_instance)
 
     # Strategy 2: Single person per page — one composite per page
@@ -63,6 +85,51 @@ def group_detections_to_records(
 
     # Strategy 3: Table / multiple persons — per-row or per-person proximity
     return _group_per_person(detections, doc_id)
+
+
+def _group_by_boundaries(
+    detections: list,
+    doc_id: str,
+    boundaries: list[list[int]],
+) -> list[PIIRecord]:
+    """Group detections by marker-detected instance boundaries.
+
+    Handles variable-length instances (person 1 = pages 0-2, person 2 = pages 3-6).
+    Each boundary is a list of page numbers belonging to one instance.
+    """
+    # Map page → boundary index
+    page_to_instance: dict[int, int] = {}
+    for idx, pages in enumerate(boundaries):
+        for pg in pages:
+            page_to_instance[pg] = idx
+
+    # Group detections by instance
+    instance_dets: dict[int, list] = defaultdict(list)
+    unassigned: list = []
+    for d in detections:
+        pg = d.block.page_or_sheet if hasattr(d, "block") and d.block else -1
+        inst = page_to_instance.get(pg)
+        if inst is not None:
+            instance_dets[inst].append(d)
+        else:
+            unassigned.append(d)
+
+    records: list[PIIRecord] = []
+    for dets in instance_dets.values():
+        if not dets:
+            continue
+        has_person = any(d.entity_type in _PERSON_TYPES for d in dets)
+        if has_person:
+            records.append(build_composite_record(dets, doc_id))
+        else:
+            records.extend(detection_to_pii_record(d, doc_id) for d in dets)
+
+    # Handle detections on pages not in any boundary (e.g. cover page)
+    if unassigned:
+        for d in unassigned:
+            records.append(detection_to_pii_record(d, doc_id))
+
+    return records
 
 
 def _group_one_per_page(detections: list, doc_id: str) -> list[PIIRecord]:
