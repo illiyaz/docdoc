@@ -1,0 +1,89 @@
+{
+  "created": "2026-04-05",
+  "strategy": "5 files per batch, mixed types for variety, escalating complexity",
+  "batches": [
+    {
+      "batch": 1,
+      "label": "Simple PDFs (text-heavy, small)",
+      "files": [
+        "3046246.pdf",
+        "3666752.pdf",
+        "3733050.pdf",
+        "3738594.pdf",
+        "3738641.pdf"
+      ],
+      "status": "pending"
+    },
+    {
+      "batch": 2,
+      "label": "AWIR legal docs (structured, multi-page)",
+      "files": [
+        "AWIR-DOC.00000001.00000038.00000806.pdf",
+        "AWIR-DOC.00000001.00000098.00000939.pdf",
+        "AWIR-DOC.00000001.00000103.00000993.pdf",
+        "AWIR-DOC.00000001.00000124.00000482.pdf",
+        "AWIR-DOC.00000038.15.pdf"
+      ],
+      "status": "pending"
+    },
+    {
+      "batch": 3,
+      "label": "Corporate docs + complex PDF",
+      "files": [
+        "ABCNY_560_0001384129.pdf",
+        "CMG_Inc_0000414153.pdf",
+        "CMG_Inc_0001352703.pdf",
+        "Complex1.pdf",
+        "EdmondsSD_0003650859.pdf"
+      ],
+      "status": "pending"
+    },
+    {
+      "batch": 4,
+      "label": "TPHS + Vamp PDFs",
+      "files": [
+        "TPHS2_656_0000067171.pdf",
+        "TPHS2_656_0000070715.pdf",
+        "TPHS2_656_0000071913.pdf",
+        "Vamp0000068240.pdf",
+        "Vamp0000068247.pdf"
+      ],
+      "status": "pending"
+    },
+    {
+      "batch": 5,
+      "label": "MSG email files (Outlook)",
+      "files": [
+        "Vamp0000066511.msg",
+        "Vamp0000066652.msg",
+        "Vamp0000068289.msg",
+        "Vamp0000068368.msg",
+        "Vamp0000068375.msg"
+      ],
+      "status": "pending"
+    },
+    {
+      "batch": 6,
+      "label": "Mixed formats (HEIC, JPG, XLS, XLSX)",
+      "files": [
+        "Vamp0000068253.heic",
+        "Vamp0000068254.jpg",
+        "Vamp0000068722.xls",
+        "Vamp0000069297.xlsx",
+        "WashingtonCMD_0000102080.pdf"
+      ],
+      "status": "pending"
+    },
+    {
+      "batch": 7,
+      "label": "Remaining Vamp PDFs",
+      "files": [
+        "Vamp0000071981.pdf",
+        "Vamp0000071987.pdf",
+        "Vamp0000072380.pdf",
+        "Vamp0000074646.pdf"
+      ],
+      "status": "pending"
+    }
+  ]
+}
