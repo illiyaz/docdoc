@@ -377,9 +377,12 @@ class TestTwoPhaseImports:
         assert "VisionRoutingResult" in self.src
 
     def test_static_filter_before_records_assignment(self):
-        """Static filter should appear BEFORE 'records = coord_records'."""
-        filter_pos = self.src.index("filter_static_values")
-        assign_pos = self.src.index("records = coord_records")
+        """Static filter should appear BEFORE 'records = coord_records' in normal path."""
+        # Find the normal-path (non-large-doc) filter_static_values
+        # The large-doc block also uses filter_static_values, so find the one after "NORMAL EXTRACTION"
+        normal_start = self.src.index("NORMAL EXTRACTION PATHS")
+        filter_pos = self.src.index("filter_static_values", normal_start)
+        assign_pos = self.src.index("records = coord_records", normal_start)
         assert filter_pos < assign_pos
 
     def test_template_cache_before_analyze_document(self):

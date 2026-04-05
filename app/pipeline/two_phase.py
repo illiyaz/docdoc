@@ -2074,6 +2074,7 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                 return
 
             _doc_start = time.time()
+            DOC_TIMEOUT_SECONDS = 900  # 15 minutes max per document
             _doc_meta_pre = doc.metadata_json or {}
             _vr = _doc_meta_pre.get("vision_routing", {})
             logger.info(
@@ -2191,6 +2192,140 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
 
                 records: list[PIIRecord] = []
                 extraction_path = "3"
+
+                # ============================================================
+                # LARGE DOC FAST-PATH (>500 pages)
+                # Skip LLM-heavy paths (1, 2a, 2b). Instead:
+                # 1. LLM reads pages 0-20 to learn the pattern (~1 min)
+                # 2. Try coordinate extraction on ALL pages (30ms/page)
+                # 3. Fall back to Presidio smart-group (30s for 3000 pages)
+                # ============================================================
+                _is_large_doc = total_pg > 500
+                if _is_large_doc:
+                    logger.info(
+                        "[%d/%d] LARGE DOC: %s (%d pages) — using fast-path (LLM sample + coordinate/Presidio)",
+                        i, len(approved_docs), doc.file_name, total_pg,
+                    )
+
+                    # Step 1: LLM learns from first 20 pages (4 batches × 5 pages)
+                    llm_sample_records: list[PIIRecord] = []
+                    if settings.llm_assist_enabled and blocks:
+                        try:
+                            from app.llm.client import OllamaClient
+                            from app.structure.llm_template_extractor import LLMTemplateExtractor
+
+                            sample_page_texts: dict[int, str] = {}
+                            sample_pages = sorted(doc_pages)[:20]
+                            for b in blocks:
+                                if b.page_or_sheet in sample_pages:
+                                    if b.page_or_sheet not in sample_page_texts:
+                                        sample_page_texts[b.page_or_sheet] = ""
+                                    sample_page_texts[b.page_or_sheet] += b.text + "\n"
+
+                            if sample_page_texts:
+                                client = OllamaClient(db_session=db, timeout_s=120)
+                                extractor = LLMTemplateExtractor(
+                                    client, batch_size=DEFAULT_EXTRACTION_BATCH_SIZE,
+                                )
+                                llm_sample_records = extractor.extract_all_instances(
+                                    schema, sample_page_texts, doc.source_path, len(sample_pages),
+                                ) if schema else []
+                                if llm_sample_records:
+                                    logger.info(
+                                        "Large doc LLM sample: %d records from %d pages of %s",
+                                        len(llm_sample_records), len(sample_pages), doc.file_name,
+                                    )
+                        except Exception:
+                            logger.warning("Large doc LLM sample failed for %s", doc.file_name, exc_info=True)
+
+                    # Step 2: Try coordinate extraction on ALL pages
+                    coord_records: list[PIIRecord] = []
+                    effective_field_map = None
+                    if schema and getattr(schema, "layout_field_map", None):
+                        effective_field_map = schema.layout_field_map
+                    if not effective_field_map:
+                        vision_fm = doc_meta.get("vision_field_map")
+                        if vision_fm:
+                            try:
+                                from app.structure.document_schema import FieldMapping as _FM
+                                effective_field_map = [_FM(**f) for f in vision_fm]
+                            except Exception:
+                                pass
+
+                    if effective_field_map:
+                        try:
+                            from app.pipeline.coordinate_extractor import CoordinateExtractor
+                            _person_samples = doc_meta.get("person_samples")
+                            coord_ext = CoordinateExtractor(
+                                effective_field_map, doc.source_path, str(doc.id),
+                                name_samples=_person_samples or None,
+                            )
+                            coord_records, _failed = coord_ext.extract_all_pages()
+                            if coord_records:
+                                logger.info(
+                                    "Large doc coordinate: %d records from %s (%d failed pages)",
+                                    len(coord_records), doc.file_name, len(_failed),
+                                )
+                        except Exception:
+                            logger.warning("Large doc coordinate failed for %s", doc.file_name, exc_info=True)
+
+                    # Step 3: Presidio smart-group ALL pages (always runs as backup)
+                    presidio_records: list[PIIRecord] = []
+                    if blocks:
+                        try:
+                            detections = engine.analyze(blocks, target_entity_types=doc_targets)
+                            if schema is not None and schema_filter_cls is not None:
+                                try:
+                                    sf = schema_filter_cls(schema)
+                                    result = sf.filter_detections(detections)
+                                    detections = result.kept
+                                except Exception:
+                                    pass
+                            from app.pipeline.smart_grouping import group_detections_to_records as _sg
+                            presidio_records = _sg(
+                                detections, str(doc.id),
+                                schema=schema, doc_path=doc.source_path,
+                            )
+                            logger.info(
+                                "Large doc Presidio: %d records from %s (%d detections)",
+                                len(presidio_records), doc.file_name, len(detections),
+                            )
+                        except Exception:
+                            logger.warning("Large doc Presidio failed for %s", doc.file_name, exc_info=True)
+
+                    # Merge: coordinate > LLM sample > Presidio gap-fill
+                    if coord_records:
+                        records = coord_records
+                        extraction_path = "0-coord-large"
+                    elif llm_sample_records:
+                        records = llm_sample_records
+                        extraction_path = "2-llm-sample"
+
+                    # Add Presidio gap-fill (names not already found)
+                    if presidio_records:
+                        existing_names = {r.raw_name.lower().strip() for r in records if r.raw_name}
+                        for pr in presidio_records:
+                            if pr.raw_name and pr.raw_name.lower().strip() not in existing_names:
+                                records.append(pr)
+                                existing_names.add(pr.raw_name.lower().strip())
+                            elif not pr.raw_name and (pr.raw_government_id or pr.raw_phone or pr.raw_email):
+                                records.append(pr)
+                        if not extraction_path.startswith("0"):
+                            extraction_path = "3-presidio-large"
+
+                    logger.info(
+                        "[%d/%d] LARGE DOC DONE: %s | path=%s | records=%d | time=%.1fs",
+                        i, len(approved_docs), doc.file_name, extraction_path,
+                        len(records), time.time() - _doc_start,
+                    )
+
+                    # Skip to post-extraction (validation, persist, etc.)
+                    # Jump past all the normal Path 0/1/2/3 logic
+
+                # ============================================================
+                # NORMAL EXTRACTION PATHS (≤500 pages)
+                # Only runs if large-doc fast-path didn't produce records
+                # ============================================================
 
                 batch_size = DEFAULT_EXTRACTION_BATCH_SIZE
                 base_key = protocol_id.lower().replace("-", "_").replace(" ", "_")
@@ -2822,11 +2957,29 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
 
             except Exception as e:
                 _doc_elapsed = time.time() - _doc_start
-                logger.warning(
-                    "[%d/%d] FAILED: %s | error=%s | time=%.1fs",
-                    i, len(approved_docs), doc.file_name,
-                    type(e).__name__, _doc_elapsed, exc_info=True,
-                )
+                _timed_out = _doc_elapsed > DOC_TIMEOUT_SECONDS
+                if _timed_out:
+                    logger.warning(
+                        "[%d/%d] TIMEOUT: %s | %.0fs > %ds limit | saving partial results",
+                        i, len(approved_docs), doc.file_name,
+                        _doc_elapsed, DOC_TIMEOUT_SECONDS,
+                    )
+                    # Mark as partial in metadata
+                    try:
+                        _partial_meta = dict(doc.metadata_json or {})
+                        _partial_meta["extraction_status"] = "partial"
+                        _partial_meta["extraction_timeout"] = True
+                        doc.metadata_json = _partial_meta
+                        flag_modified(doc, "metadata_json")
+                        db.commit()
+                    except Exception:
+                        pass
+                else:
+                    logger.warning(
+                        "[%d/%d] FAILED: %s | error=%s | time=%.1fs",
+                        i, len(approved_docs), doc.file_name,
+                        type(e).__name__, _doc_elapsed, exc_info=True,
+                    )
 
         if _is_cancelled():
             return
