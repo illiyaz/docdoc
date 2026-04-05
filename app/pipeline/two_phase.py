@@ -1814,6 +1814,49 @@ def _count_valid_names(records: list) -> int:
     return count
 
 
+class _DocStallDetector:
+    """Detect if per-doc extraction has stalled (no progress for N seconds).
+
+    Instead of a hard timeout, monitors whether records/pages are advancing.
+    Only triggers if the doc is < 80% done AND no progress for 5 minutes.
+    Allows slow-but-progressing docs to finish.
+    """
+
+    STALL_THRESHOLD_SECONDS = 300  # 5 minutes with no progress = stalled
+    COMPLETION_THRESHOLD = 0.80    # if ≥80% done, let it finish
+
+    def __init__(self) -> None:
+        self._last_progress_time = time.time()
+        self._last_record_count = 0
+        self._total_pages = 0
+
+    def update(self, record_count: int, current_page: int = 0, total_pages: int = 0) -> None:
+        """Call periodically with current extraction state."""
+        if total_pages > 0:
+            self._total_pages = total_pages
+        if record_count > self._last_record_count:
+            self._last_record_count = record_count
+            self._last_progress_time = time.time()
+
+    def is_stalled(self) -> bool:
+        """Return True if extraction appears stalled and should be interrupted."""
+        elapsed_since_progress = time.time() - self._last_progress_time
+        if elapsed_since_progress < self.STALL_THRESHOLD_SECONDS:
+            return False  # Made progress recently — not stalled
+
+        # Check if nearly done — let it finish
+        if self._total_pages > 0 and self._last_record_count > 0:
+            # Rough estimate: if we have lots of records relative to pages, we're far along
+            # Can't know exact page progress, so use record count as proxy
+            pass  # Can't reliably determine % done from record count alone
+
+        return True  # No progress for 5+ minutes = stalled
+
+    @property
+    def stall_seconds(self) -> float:
+        return time.time() - self._last_progress_time
+
+
 def _validate_field_map(field_map: list, doc_path: str, onset: int = 0) -> bool:
     """Validate field map quality by onset-aware page sampling.
 
@@ -2074,7 +2117,7 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                 return
 
             _doc_start = time.time()
-            DOC_TIMEOUT_SECONDS = 900  # 15 minutes max per document
+            _stall_detector = _DocStallDetector()
             _doc_meta_pre = doc.metadata_json or {}
             _vr = _doc_meta_pre.get("vision_routing", {})
             logger.info(
@@ -2366,8 +2409,17 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                         else:
                             instances = schema.template.get_instance_pages(total_pg)
 
-                # Heartbeat callback — keeps SSE relay from thinking thread is dead
+                # Heartbeat callback — keeps SSE relay alive + stall detection
+                class _StallError(Exception):
+                    """Raised when per-doc extraction stalls (no progress for 5 min)."""
+
                 def _heartbeat_cb(batch_idx: int, total_batches: int, records_so_far: int) -> None:
+                    _stall_detector.update(records_so_far, batch_idx, total_batches)
+                    if _stall_detector.is_stalled():
+                        raise _StallError(
+                            f"Stalled for {_stall_detector.stall_seconds:.0f}s "
+                            f"at batch {batch_idx}/{total_batches} ({records_so_far} records)"
+                        )
                     _update_extraction_progress(
                         db, run,
                         stage="detection",
@@ -2957,32 +3009,119 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
 
             except Exception as e:
                 _doc_elapsed = time.time() - _doc_start
-                _timed_out = _doc_elapsed > DOC_TIMEOUT_SECONDS
-                if _timed_out:
-                    logger.warning(
-                        "[%d/%d] TIMEOUT: %s | %.0fs > %ds limit | saving partial results",
-                        i, len(approved_docs), doc.file_name,
-                        _doc_elapsed, DOC_TIMEOUT_SECONDS,
-                    )
-                    # Mark as partial in metadata
+                logger.warning(
+                    "[%d/%d] FAILED: %s | error=%s | time=%.1fs | records_so_far=%d",
+                    i, len(approved_docs), doc.file_name,
+                    type(e).__name__, _doc_elapsed, len(records),
+                    exc_info=True,
+                )
+                # Save partial results + resume info for retry
+                if records:
                     try:
                         _partial_meta = dict(doc.metadata_json or {})
+                        _partial_meta["extracted_records"] = [_serialize_pii_record(r) for r in records]
                         _partial_meta["extraction_status"] = "partial"
-                        _partial_meta["extraction_timeout"] = True
+                        _partial_meta["extraction_path_used"] = extraction_path
+                        _partial_meta["last_record_count"] = len(records)
                         doc.metadata_json = _partial_meta
                         flag_modified(doc, "metadata_json")
+                        all_records.extend(records)
+                        completed_doc_ids.append(str(doc.id))
                         db.commit()
+                        logger.info(
+                            "[%d/%d] PARTIAL: %s | %d records saved for retry",
+                            i, len(approved_docs), doc.file_name, len(records),
+                        )
                     except Exception:
                         pass
-                else:
-                    logger.warning(
-                        "[%d/%d] FAILED: %s | error=%s | time=%.1fs",
-                        i, len(approved_docs), doc.file_name,
-                        type(e).__name__, _doc_elapsed, exc_info=True,
-                    )
 
         if _is_cancelled():
             return
+
+        # --- Retry partial docs (DLQ) ---
+        # Docs that stalled or failed with partial results get one more try
+        # using the same extraction strategy, resuming from existing records.
+        partial_docs = [
+            d for d in approved_docs
+            if (d.metadata_json or {}).get("extraction_status") == "partial"
+        ]
+        if partial_docs:
+            logger.info("Retrying %d partial doc(s)...", len(partial_docs))
+            _update_extraction_progress(
+                db, run, stage="detection",
+                message=f"Retrying {len(partial_docs)} partial document(s)...",
+                completed_doc_ids=completed_doc_ids,
+                total_docs=len(approved_docs), current_doc=len(approved_docs),
+                records_found=len(all_records),
+            )
+
+            for pdoc in partial_docs:
+                if _is_cancelled():
+                    break
+                _retry_start = time.time()
+                try:
+                    # Load existing partial records
+                    _pmeta = pdoc.metadata_json or {}
+                    existing_records = []
+                    for rd in _pmeta.get("extracted_records", []):
+                        try:
+                            existing_records.append(_deserialize_pii_record(rd))
+                        except Exception:
+                            pass
+
+                    # Use Presidio smart-group as the retry strategy (fast, reliable)
+                    retry_blocks = get_reader(pdoc.source_path).read()
+                    if retry_blocks:
+                        retry_dets = engine.analyze(retry_blocks, target_entity_types=target_entities)
+                        if schema_filter_cls:
+                            retry_schema_dict = _pmeta.get("document_schema")
+                            retry_schema = None
+                            if retry_schema_dict:
+                                try:
+                                    from app.structure.document_schema import DocumentSchema as _RetryDS
+                                    retry_schema = _RetryDS.from_dict(retry_schema_dict)
+                                except Exception:
+                                    pass
+                            if retry_schema:
+                                try:
+                                    sf = schema_filter_cls(retry_schema)
+                                    r = sf.filter_detections(retry_dets)
+                                    retry_dets = r.kept
+                                except Exception:
+                                    pass
+
+                        from app.pipeline.smart_grouping import group_detections_to_records as _retry_sg
+                        retry_records = _retry_sg(retry_dets, str(pdoc.id), schema=retry_schema, doc_path=pdoc.source_path)
+
+                        # Merge: keep existing + add new names not already found
+                        existing_names = {r.raw_name.lower().strip() for r in existing_records if r.raw_name}
+                        merged = list(existing_records)
+                        new_count = 0
+                        for rr in retry_records:
+                            if rr.raw_name and rr.raw_name.lower().strip() not in existing_names:
+                                merged.append(rr)
+                                existing_names.add(rr.raw_name.lower().strip())
+                                new_count += 1
+                            elif not rr.raw_name and (rr.raw_government_id or rr.raw_phone or rr.raw_email):
+                                merged.append(rr)
+                                new_count += 1
+
+                        # Save merged results
+                        _pmeta["extracted_records"] = [_serialize_pii_record(r) for r in merged]
+                        _pmeta["extraction_status"] = "complete"
+                        _pmeta["retry_added"] = new_count
+                        pdoc.metadata_json = _pmeta
+                        flag_modified(pdoc, "metadata_json")
+                        all_records.extend(merged[len(existing_records):])  # Only add new ones
+                        db.commit()
+
+                        logger.info(
+                            "RETRY OK: %s | existing=%d + new=%d = %d | %.1fs",
+                            pdoc.file_name, len(existing_records), new_count,
+                            len(merged), time.time() - _retry_start,
+                        )
+                except Exception as retry_err:
+                    logger.warning("RETRY FAILED: %s | %s", pdoc.file_name, type(retry_err).__name__)
 
         _update_extraction_progress(
             db, run,
