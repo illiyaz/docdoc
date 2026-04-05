@@ -931,13 +931,32 @@ def analyze_stream(
 ):
     """Run the analysis phase of the two-phase pipeline with SSE streaming.
 
-    Stages: discovery, cataloging, structure analysis, sample extraction,
-    auto-approve decisions.
+    Analysis runs in a background thread that survives browser disconnects.
+    The SSE response is a thin relay that polls progress from the DB.
     """
-    from app.pipeline.two_phase import analyze_generator
+    from app.pipeline.two_phase import run_analysis_background, analysis_relay_generator, _analysis_threads
+    import threading
+
+    # Generate a job_id and pass it in the body so analyze_generator uses it
+    job_id = str(uuid4())
+    body.job_id = job_id
+
+    # Start background analysis thread
+    t = threading.Thread(
+        target=run_analysis_background,
+        args=(body, registry),
+        daemon=True,
+        name=f"analyze-{job_id[:8]}",
+    )
+    _analysis_threads[job_id] = t
+    t.start()
+
+    # Give the thread a moment to create the IngestionRun
+    import time
+    time.sleep(1)
 
     return StreamingResponse(
-        analyze_generator(body, None, registry),
+        analysis_relay_generator(job_id, body, registry),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

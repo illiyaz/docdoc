@@ -3256,3 +3256,185 @@ def _maybe_launch_extraction(job_id: str, registry: ProtocolRegistry) -> None:
     )
     _extraction_threads[job_id] = t
     t.start()
+
+
+# ---------------------------------------------------------------------------
+# Analysis background thread + SSE relay (same pattern as extraction)
+# ---------------------------------------------------------------------------
+
+_analysis_threads: dict[str, threading.Thread] = {}
+
+
+def run_analysis_background(body, registry: ProtocolRegistry) -> None:
+    """Run analyze_generator in a background thread.
+
+    Captures each SSE event and writes it to IngestionRun.metrics["analysis_progress"].
+    The SSE relay polls this and forwards to the browser.
+    """
+    from app.api.deps import _get_session_factory
+
+    db = _get_session_factory()()
+    run = None
+
+    try:
+        gen = analyze_generator(body, db, registry)
+        last_event = {}
+        job_uuid = None
+
+        for sse_line in gen:
+            # Parse SSE event
+            if not sse_line.startswith("data: "):
+                continue
+            try:
+                event = json.loads(sse_line[6:].strip())
+            except (json.JSONDecodeError, ValueError):
+                continue
+
+            last_event = event
+
+            # Find the run if we don't have it yet
+            if job_uuid is None and run is None:
+                # The run is created inside analyze_generator — find the latest
+                run = db.execute(
+                    select(IngestionRun)
+                    .where(IngestionRun.pipeline_mode == "two_phase")
+                    .order_by(IngestionRun.created_at.desc())
+                ).scalars().first()
+                if run:
+                    job_uuid = run.id
+
+            # Write progress to metrics
+            if run is not None:
+                try:
+                    db.expire(run)
+                    metrics = dict(run.metrics or {})
+                    metrics["analysis_progress"] = {
+                        "stage": event.get("stage", ""),
+                        "message": event.get("message", ""),
+                        "status": event.get("status", "running"),
+                        "detail": event.get("detail", {}),
+                        "result": event.get("result"),
+                        "heartbeat": datetime.now(timezone.utc).isoformat(),
+                    }
+                    run.metrics = metrics
+                    flag_modified(run, "metrics")
+                    db.commit()
+                except Exception:
+                    try:
+                        db.rollback()
+                    except Exception:
+                        pass
+
+        # Generator finished — mark as analyzed if not already
+        if run is not None:
+            db.expire(run)
+            if run.status == "running":
+                run.status = "analyzed"
+                run.analysis_completed_at = datetime.now(timezone.utc)
+                db.commit()
+                logger.info("Analysis background thread completed for job %s", str(job_uuid)[:8])
+
+    except Exception as exc:
+        logger.error("Analysis background thread failed: %s", type(exc).__name__, exc_info=True)
+        if run is not None:
+            try:
+                run.status = "failed"
+                run.error_summary = str(type(exc).__name__)
+                db.commit()
+            except Exception:
+                pass
+    finally:
+        db.close()
+
+
+def analysis_relay_generator(
+    job_id: str,
+    body,
+    registry: ProtocolRegistry,
+) -> Generator[str, None, None]:
+    """SSE relay for analysis — starts background thread, polls progress.
+
+    Survives browser disconnects because the analysis runs in a background
+    thread. The relay just polls IngestionRun.metrics["analysis_progress"].
+    """
+    from app.api.deps import _get_session_factory
+
+    db = _get_session_factory()()
+
+    try:
+        job_uuid = UUID(job_id)
+    except (ValueError, AttributeError):
+        yield _sse({"stage": "error", "message": f"Invalid job_id: {job_id!r}"})
+        db.close()
+        return
+
+    run = db.execute(
+        select(IngestionRun).where(IngestionRun.id == job_uuid)
+    ).scalar_one_or_none()
+
+    if run is None:
+        yield _sse({"stage": "error", "message": f"Job {job_id!r} not found"})
+        db.close()
+        return
+
+    # Start background thread if not already running
+    existing = _analysis_threads.get(job_id)
+    if existing is None or not existing.is_alive():
+        if run.status in ("pending", "running"):
+            logger.info("Launching analysis background thread for %s", job_id[:8])
+            t = threading.Thread(
+                target=run_analysis_background,
+                args=(body, registry),
+                daemon=True,
+                name=f"analyze-{job_id[:8]}",
+            )
+            _analysis_threads[job_id] = t
+            t.start()
+
+    # Poll loop
+    last_message = ""
+    POLL_INTERVAL = 2
+
+    for _ in range(1800):  # Max 1 hour (1800 × 2s)
+        time.sleep(POLL_INTERVAL)
+
+        db.expire_all()
+        run = db.execute(
+            select(IngestionRun).where(IngestionRun.id == job_uuid)
+        ).scalar_one_or_none()
+
+        if run is None:
+            yield _sse({"stage": "error", "message": "Job disappeared"})
+            break
+
+        progress = (run.metrics or {}).get("analysis_progress", {})
+        message = progress.get("message", "")
+
+        if message and message != last_message:
+            event = {
+                "stage": progress.get("stage", ""),
+                "message": message,
+                "status": progress.get("status", "running"),
+            }
+            detail = progress.get("detail")
+            if detail:
+                event["detail"] = detail
+            result = progress.get("result")
+            if result:
+                event["result"] = result
+            yield _sse(event)
+            last_message = message
+
+        # Terminal states
+        if run.status == "analyzed":
+            final = progress.get("result") or {"job_id": job_id, "status": "analyzed"}
+            yield _sse({"stage": "complete", "result": final})
+            break
+        if run.status == "failed":
+            yield _sse({"stage": "error", "message": progress.get("message", "Analysis failed")})
+            break
+        if run.status == "cancelled":
+            yield _sse({"stage": "error", "message": "Analysis cancelled"})
+            break
+
+    db.close()
