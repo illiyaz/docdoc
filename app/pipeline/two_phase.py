@@ -2347,12 +2347,21 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                     # Add Presidio gap-fill (names not already found)
                     if presidio_records:
                         existing_names = {r.raw_name.lower().strip() for r in records if r.raw_name}
+                        existing_ids = {r.raw_government_id for r in records if r.raw_government_id}
+                        existing_emails = {r.raw_email for r in records if r.raw_email}
                         for pr in presidio_records:
                             if pr.raw_name and pr.raw_name.lower().strip() not in existing_names:
                                 records.append(pr)
                                 existing_names.add(pr.raw_name.lower().strip())
-                            elif not pr.raw_name and (pr.raw_government_id or pr.raw_phone or pr.raw_email):
-                                records.append(pr)
+                            elif not pr.raw_name:
+                                # Only add orphans if their key PII isn't already in a named record
+                                is_dup = False
+                                if pr.raw_government_id and pr.raw_government_id in existing_ids:
+                                    is_dup = True
+                                if pr.raw_email and pr.raw_email in existing_emails:
+                                    is_dup = True
+                                if not is_dup and (pr.raw_government_id or pr.raw_phone or pr.raw_email):
+                                    records.append(pr)
                         if not extraction_path.startswith("0"):
                             extraction_path = "3-presidio-large"
 
@@ -2362,12 +2371,11 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                         len(records), time.time() - _doc_start,
                     )
 
-                    # Skip to post-extraction (validation, persist, etc.)
-                    # Jump past all the normal Path 0/1/2/3 logic
+                    # Skip normal Path 0/1/2/3 logic — handled above
 
                 # ============================================================
                 # NORMAL EXTRACTION PATHS (≤500 pages)
-                # Only runs if large-doc fast-path didn't produce records
+                # Only runs if large-doc fast-path was NOT triggered
                 # ============================================================
 
                 batch_size = DEFAULT_EXTRACTION_BATCH_SIZE
@@ -2842,6 +2850,50 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                 if records and extraction_path in ("2", "2-hybrid") and not _check_extraction_quality(records, "2-template"):
                     records = []
                     extraction_path = ""
+
+                # Density guard: if template extraction yields very few records
+                # relative to the page count, the schema likely misclassified a
+                # tabular doc as a template.  Re-try as table extraction.
+                if (
+                    records
+                    and extraction_path in ("2", "2-hybrid")
+                    and total_pg >= 20
+                    and len(records) < total_pg * 0.3
+                    and settings.llm_assist_enabled
+                    and schema
+                ):
+                    logger.info(
+                        "Density guard: Path 2b yielded %d records for %d pages (%.1f rec/page) "
+                        "in %s. Re-trying as table extraction.",
+                        len(records), total_pg, len(records) / total_pg, doc.file_name,
+                    )
+                    try:
+                        from app.llm.client import OllamaClient
+                        from app.structure.llm_template_extractor import LLMTemplateExtractor
+                        page_texts_retry: dict[int, str] = {}
+                        for b in blocks:
+                            pg = b.page_or_sheet
+                            if pg not in page_texts_retry:
+                                page_texts_retry[pg] = ""
+                            page_texts_retry[pg] += b.text + "\n"
+                        client = OllamaClient(db_session=db, timeout_s=120)
+                        retry_extractor = LLMTemplateExtractor(client, batch_size=batch_size)
+                        table_retry_records = retry_extractor.extract_table_pages(
+                            schema, page_texts_retry, str(doc.id),
+                            progress_callback=_heartbeat_cb,
+                        )
+                        if table_retry_records and len(table_retry_records) > len(records) * 1.5:
+                            logger.info(
+                                "Table re-extraction improved %s: %d→%d records",
+                                doc.file_name, len(records), len(table_retry_records),
+                            )
+                            records = table_retry_records
+                            extraction_path = "2-table-retry"
+                    except Exception:
+                        logger.warning(
+                            "Table re-extraction failed for %s, keeping template results",
+                            doc.file_name, exc_info=True,
+                        )
 
                 # --- Path 3: Presidio only ---
                 if not records:

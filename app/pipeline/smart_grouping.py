@@ -13,7 +13,11 @@ right grouping strategy:
 3. **Multi-page template** (template with pages_per_instance > 1):
    Group detections across consecutive pages into one composite per instance.
 
-4. **Unknown / no schema**: Fall back to per-person proximity grouping.
+4. **Multi-page record blocks** (mainframe reports where one person spans
+   2-4 consecutive pages): detect PERSON boundaries and merge cross-page
+   PII into one composite per person.
+
+5. **Unknown / no schema**: Fall back to per-person proximity grouping.
 """
 from __future__ import annotations
 
@@ -81,7 +85,35 @@ def group_detections_to_records(
 
     # Strategy 2: Single person per page — one composite per page
     if records_per_page <= 1 and not is_tabular:
-        return _group_one_per_page(detections, doc_id)
+        records = _group_one_per_page(detections, doc_id)
+        # Density guard: if most records have no PERSON name, this is likely
+        # a multi-page-per-person report (e.g. mainframe caller journal) where
+        # one person's PII spans consecutive pages.  Re-group using cross-page
+        # person-boundary detection to merge orphan fragments.
+        if len(records) >= 10:
+            named = sum(1 for r in records if r.raw_name)
+            orphan_ratio = 1.0 - (named / len(records)) if records else 0.0
+            if orphan_ratio > 0.50:
+                logger.info(
+                    "Density guard triggered for %s: %d/%d records lack names (%.0f%% orphans). "
+                    "Re-grouping with cross-page person boundaries.",
+                    doc_id, len(records) - named, len(records), orphan_ratio * 100,
+                )
+                regrouped = _group_cross_page_person_blocks(detections, doc_id)
+                if regrouped:
+                    regrouped_named = sum(1 for r in regrouped if r.raw_name)
+                    if regrouped_named > named:
+                        logger.info(
+                            "Cross-page regrouping improved %s: %d→%d named records (%d→%d total)",
+                            doc_id, named, regrouped_named, len(records), len(regrouped),
+                        )
+                        return regrouped
+                    else:
+                        logger.info(
+                            "Cross-page regrouping did not improve %s, keeping per-page grouping.",
+                            doc_id,
+                        )
+        return records
 
     # Strategy 3: Table / multiple persons — per-row or per-person proximity
     return _group_per_person(detections, doc_id)
@@ -189,6 +221,90 @@ def _group_multi_page_template(
             if has_person:
                 records.append(build_composite_record(dets, doc_id))
 
+    return records
+
+
+def _group_cross_page_person_blocks(detections: list, doc_id: str) -> list[PIIRecord]:
+    """Merge detections across consecutive pages into one composite per person.
+
+    For mainframe-style reports (e.g. Middlefield Banking Caller Reference
+    Journal) where one person's block spans 2-4 consecutive pages:
+      page N   → NAME + SSN + address
+      page N+1 → phone + email + account details
+      page N+2 → more account details (same person)
+
+    Algorithm: walk pages in order.  When a PERSON detection appears, start a
+    new person block.  All subsequent detections on the same or consecutive
+    pages (until the next PERSON) belong to the same person.
+    """
+    # Gather detections by page
+    page_dets: dict[int, list] = defaultdict(list)
+    for d in detections:
+        pg = d.block.page_or_sheet if hasattr(d, "block") and d.block else 0
+        page_dets[pg].append(d)
+
+    sorted_pages = sorted(page_dets.keys())
+    if not sorted_pages:
+        return []
+
+    # Walk pages in order; PERSON detections mark the start of a new block
+    blocks: list[list] = []  # each block = list of detections for one person
+    current_block: list = []
+
+    for pg in sorted_pages:
+        dets_on_page = page_dets[pg]
+        has_person = any(d.entity_type in _PERSON_TYPES for d in dets_on_page)
+
+        if has_person:
+            # New person boundary — flush previous block
+            if current_block:
+                blocks.append(current_block)
+            current_block = list(dets_on_page)
+        else:
+            # No PERSON on this page — belongs to current person's block
+            if current_block:
+                current_block.extend(dets_on_page)
+            else:
+                # Orphan page before first person — start a block anyway
+                current_block = list(dets_on_page)
+
+    # Flush last block
+    if current_block:
+        blocks.append(current_block)
+
+    # Build composites from each person block
+    records: list[PIIRecord] = []
+    for block_dets in blocks:
+        has_person = any(d.entity_type in _PERSON_TYPES for d in block_dets)
+        if has_person:
+            # May have multiple PERSON detections (e.g. repeated header name
+            # + actual name).  Use per-person grouping within the block.
+            persons = [d for d in block_dets if d.entity_type in _PERSON_TYPES]
+            non_persons = [d for d in block_dets if d.entity_type not in _PERSON_TYPES]
+            if len(persons) == 1:
+                records.append(build_composite_record(block_dets, doc_id))
+            else:
+                # Multiple persons in one block — nearest-neighbour
+                person_groups: dict[int, list] = {i: [p] for i, p in enumerate(persons)}
+                for np_det in non_persons:
+                    np_pos = np_det.start if hasattr(np_det, "start") else 0
+                    best_idx = min(
+                        range(len(persons)),
+                        key=lambda j: abs(
+                            (persons[j].start if hasattr(persons[j], "start") else 0) - np_pos
+                        ),
+                    )
+                    person_groups[best_idx].append(np_det)
+                for dets in person_groups.values():
+                    records.append(build_composite_record(dets, doc_id))
+        else:
+            # No person at all — emit individual orphans
+            records.extend(detection_to_pii_record(d, doc_id) for d in block_dets)
+
+    logger.info(
+        "Cross-page person-block grouping for %s: %d person blocks from %d pages, %d records",
+        doc_id, len(blocks), len(sorted_pages), len(records),
+    )
     return records
 
 

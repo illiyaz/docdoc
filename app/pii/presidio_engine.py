@@ -275,6 +275,34 @@ class PresidioEngine:
                 continue
             filtered.append(det)
 
+        # Suppress US_BANK_NUMBER when the same span is already detected as US_SSN.
+        # US_BANK_NUMBER (Presidio built-in) matches any 8-17 digit number, which
+        # overlaps with SSNs, causing massive false positives.  If a value is
+        # already classified as US_SSN (more specific), drop the BANK_NUMBER hit.
+        ssn_spans: set[tuple[int, int, int]] = set()
+        for det in filtered:
+            if det.entity_type in ("US_SSN", "TAX_ID"):
+                pg = det.block.page_or_sheet if hasattr(det, "block") and det.block else 0
+                ssn_spans.add((pg, det.start, det.end))
+
+        if ssn_spans:
+            pre_bank = len(filtered)
+            filtered = [
+                det for det in filtered
+                if det.entity_type != "US_BANK_NUMBER"
+                or (
+                    det.block.page_or_sheet if hasattr(det, "block") and det.block else 0,
+                    det.start,
+                    det.end,
+                ) not in ssn_spans
+            ]
+            bank_dropped = pre_bank - len(filtered)
+            if bank_dropped:
+                logger.debug(
+                    "Suppressed %d US_BANK_NUMBER detection(s) overlapping with US_SSN",
+                    bank_dropped,
+                )
+
         # Phase 14c: deduplicate — keep highest confidence per (value, entity_type, page)
         filtered = deduplicate_detections(filtered)
 

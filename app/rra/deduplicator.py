@@ -12,15 +12,33 @@ Canonical field selection strategy (``_best_value``):
 """
 from __future__ import annotations
 
+import logging
 from collections import Counter
 from uuid import uuid4
 
 from sqlalchemy.orm import Session
 
 from app.db.models import Document, NotificationSubject
+from app.normalization.dob_normalizer import normalize_dob
 from app.normalization.name_normalizer import normalize_name
 from app.pipeline.record_mapper import _GOV_ID_FIELD_TYPES
 from app.rra.entity_resolver import PIIRecord, ResolvedGroup
+
+logger = logging.getLogger(__name__)
+
+# Minimum PII threshold: a notification subject must have at least a name
+# PLUS one of these corroborating PII types.  Name-only records are noise
+# and should not generate notification subjects.
+_CORROBORATING_PII_TYPES = frozenset({
+    "US_SSN", "CREDIT_CARD", "BANK_ACCOUNT", "US_BANK_ROUTING",
+    "US_DRIVER_LICENSE", "US_PASSPORT", "NI_NUMBER", "AADHAAR",
+    "PAN_CARD", "TAX_ID", "NATIONAL_INSURANCE_UK", "UK_NINO",
+    "NATIONAL_ID", "DATE_OF_BIRTH", "DATE_OF_BIRTH_MDY",
+    "DATE_OF_BIRTH_DMY", "EMAIL_ADDRESS", "EMAIL",
+    "PHONE_NUMBER", "PHONE_US", "PHONE_INTL",
+    "LOCATION", "ADDRESS", "PHI_MRN", "PHI_NPI",
+    "MEDICAL_LICENSE", "BIOMETRIC",
+})
 
 
 # ---------------------------------------------------------------------------
@@ -80,8 +98,30 @@ class Deduplicator:
         is flushed but **not** committed — the caller owns the transaction.
         """
         subjects: list[NotificationSubject] = []
+        skipped_thin = 0
 
         for group in groups:
+            # Minimum-PII threshold: skip groups that have only a name and
+            # no corroborating PII (SSN, DOB, email, phone, address, etc.).
+            # These are noise — headers, labels, or orphan PERSON detections.
+            has_corroboration = False
+            for r in group.records:
+                if r.raw_email or r.raw_phone or r.raw_dob or r.raw_address or r.raw_government_id:
+                    has_corroboration = True
+                    break
+                # Also check entity_types_found for corroborating types
+                if r.entity_types_found:
+                    for et in r.entity_types_found:
+                        if et.upper() in _CORROBORATING_PII_TYPES:
+                            has_corroboration = True
+                            break
+                if has_corroboration:
+                    break
+
+            if not has_corroboration:
+                skipped_thin += 1
+                continue
+
             ns = self._build_one(group)
             existing = self._find_existing(ns)
             if existing is not None:
@@ -91,6 +131,12 @@ class Deduplicator:
                 self.db.add(ns)
                 self.db.flush()
                 subjects.append(ns)
+
+        if skipped_thin:
+            logger.info(
+                "Minimum-PII threshold: skipped %d group(s) with name-only records",
+                skipped_thin,
+            )
         return subjects
 
     # ------------------------------------------------------------------
@@ -121,7 +167,18 @@ class Deduplicator:
         canonical_address = _best_address(addresses)
 
         # --- PII types (sorted unique) ---
-        pii_types = sorted({r.entity_type for r in records})
+        # Use the FULL entity_types_found from each record (not just the primary
+        # entity_type) so that composite records (entity_type="PERSON" but also
+        # containing US_SSN, DOB, etc.) propagate all types to the subject.
+        # This is critical for protocol triggering — apply_protocol() checks
+        # pii_types_found against triggering_entity_types.
+        pii_types_set: set[str] = set()
+        for r in records:
+            if r.entity_types_found:
+                pii_types_set.update(r.entity_types_found)
+            if r.entity_type:
+                pii_types_set.add(r.entity_type)
+        pii_types = sorted(pii_types_set)
 
         # --- Source records ---
         source_records = [r.record_id for r in records]
@@ -146,18 +203,36 @@ class Deduplicator:
         source_page_range = ", ".join(sorted(set(page_ranges))) if page_ranges else None
 
         # government_id_type: entity type of the record that has raw_government_id
+        # Check entity_types_found first for specific subtypes (US_SSN, NI_NUMBER, etc.)
+        # since composite records may have entity_type="PERSON" but a gov ID subtype
+        # in their entity_types_found tuple.
         government_id_type: str | None = None
         for r in records:
             if r.raw_government_id:
-                if r.entity_type.upper() in _GOV_ID_FIELD_TYPES:
-                    government_id_type = r.entity_type
-                else:
-                    government_id_type = "GOVERNMENT_ID"
+                # First check entity_types_found for specific gov ID subtypes
+                if r.entity_types_found:
+                    for et in r.entity_types_found:
+                        if et.upper() in _GOV_ID_FIELD_TYPES:
+                            government_id_type = et
+                            break
+                # Fall back to primary entity_type
+                if not government_id_type:
+                    if r.entity_type.upper() in _GOV_ID_FIELD_TYPES:
+                        government_id_type = r.entity_type
+                    else:
+                        government_id_type = "GOVERNMENT_ID"
                 break
 
-        # canonical_dob: best DOB from records
+        # canonical_dob: best DOB from records, normalized to ISO 8601
         dobs = [r.raw_dob for r in records if r.raw_dob]
-        canonical_dob = _best_value(dobs)
+        # Normalize all DOBs first, then pick best from normalized values
+        normalized_dobs = [normalize_dob(d) for d in dobs]
+        normalized_dobs = [d for d in normalized_dobs if d]  # drop None
+        if normalized_dobs:
+            canonical_dob = _best_value(normalized_dobs)
+        else:
+            # Fall back to raw value if normalization fails for all
+            canonical_dob = _best_value(dobs)
 
         # canonical_government_id: best government ID from records
         gov_ids = [r.raw_government_id for r in records if r.raw_government_id]

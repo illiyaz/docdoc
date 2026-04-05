@@ -16,6 +16,7 @@ Step 17 additions:
 """
 from __future__ import annotations
 
+import logging
 import re
 from collections import defaultdict
 from uuid import uuid4
@@ -23,6 +24,8 @@ from uuid import uuid4
 from app.pii.presidio_engine import DetectionResult
 from app.rra.entity_resolver import PIIRecord, _GOV_ID_TYPES
 from app.structure.document_schema import DocumentSchema
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Entity type → raw_* field mapping
@@ -58,6 +61,151 @@ _GOV_ID_FIELD_TYPES = _GOV_ID_TYPES | frozenset({
 _NI_NUMBER_RE = re.compile(r"\b([A-Z]{2}\d{6}[A-Z])\b")
 
 
+# ---------------------------------------------------------------------------
+# Name validation (imported from coordinate_extractor for Presidio path)
+# ---------------------------------------------------------------------------
+
+def _is_likely_name(name: str) -> bool:
+    """Check if a string looks like a real person name (not header/boilerplate).
+
+    Rejects:
+    - Too short (<3 chars) or too long (>80 chars)
+    - Contains digits
+    - Single-word "names"
+    - All significant words are in blocklist
+    - First word (likely surname) is a blocklisted word
+    """
+    from app.pipeline.coordinate_extractor import _NAME_BLOCKLIST
+    if not name:
+        return False
+    t = name.strip()
+    if len(t) < 3 or len(t) > 80:
+        return False
+    if any(c.isdigit() for c in t):
+        return False
+    words = t.split()
+    if len(words) < 2:
+        return False
+    if not any(len(w) >= 3 for w in words):
+        return False
+    upper_words = [w.upper().rstrip(",.;:") for w in words]
+    if all(w in _NAME_BLOCKLIST for w in upper_words if len(w) >= 2):
+        return False
+    if upper_words and upper_words[0] in _NAME_BLOCKLIST:
+        return False
+    return True
+
+
+# ---------------------------------------------------------------------------
+# Address validation
+# ---------------------------------------------------------------------------
+
+# Bare state abbreviations, account numbers, city lists are not addresses
+_US_STATE_ABBREVS = frozenset({
+    "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA", "HI", "ID",
+    "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD", "MA", "MI", "MN", "MS",
+    "MO", "MT", "NE", "NV", "NH", "NJ", "NM", "NY", "NC", "ND", "OH", "OK",
+    "OR", "PA", "RI", "SC", "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV",
+    "WI", "WY", "DC",
+})
+
+_ADDRESS_INDICATOR_RE = re.compile(
+    r"\b(\d+\s+\w+|P\.?\s*O\.?\s*BOX|SUITE\s+\d|APT\s+\d|UNIT\s+\d)",
+    re.IGNORECASE,
+)
+
+
+def _is_likely_address(text: str) -> bool:
+    """Check if a text looks like a real street address.
+
+    Requires either a street number, PO Box, suite/apt/unit number, or
+    a zip code pattern. Rejects bare state abbreviations, single words,
+    and text that looks like account numbers or form labels.
+    """
+    if not text:
+        return False
+    t = text.strip()
+    if len(t) < 5:
+        return False
+    # Single word → not an address
+    if len(t.split()) < 2:
+        return False
+    # Bare state abbreviation
+    if t.upper().strip() in _US_STATE_ABBREVS:
+        return False
+    # Has a street number, PO Box, or suite/apt/unit?
+    if _ADDRESS_INDICATOR_RE.search(t):
+        return True
+    # Has a zip code?
+    if re.search(r"\b\d{5}(?:-\d{4})?\b", t):
+        return True
+    # Has a common street suffix?
+    if re.search(
+        r"\b(?:ST|AVE|RD|DR|LN|BLVD|WAY|PL|CT|STREET|AVENUE|ROAD|DRIVE|LANE)\b",
+        t.upper(),
+    ):
+        return True
+    return False
+
+
+# ---------------------------------------------------------------------------
+# Synthetic data detection
+# ---------------------------------------------------------------------------
+
+_SYNTHETIC_SSNS = frozenset({
+    "123-45-6789", "12345-6789", "123456789",
+    "000-00-0000", "999-99-9999",
+    "111-11-1111", "222-22-2222", "333-33-3333",
+    "444-44-4444", "555-55-5555", "666-66-6666",
+    "777-77-7777", "888-88-8888",
+})
+
+_SYNTHETIC_NAME_RE = re.compile(
+    r"\b(JOHN\s+DOE|JANE\s+DOE|JANE\s+SMITH|JOHN\s+SMITH|"
+    r"TEST\s+USER|SAMPLE\s+NAME|DUMMY\s+NAME|"
+    r"XXX\s+XXX|FIRST\s+LAST)\b",
+    re.IGNORECASE,
+)
+
+
+def _is_synthetic_value(value: str, entity_type: str) -> bool:
+    """Detect placeholder/synthetic PII values.
+
+    Flags:
+    - SSNs: 123-45-6789, 000-*, 999-*, all-same-digit, starts with 9xx-xx
+    - Phones: 555-xxxx exchanges
+    - Names: John Doe, Jane Smith, Test User, etc.
+    """
+    if not value:
+        return False
+    t = value.strip()
+
+    if entity_type in ("US_SSN", "TAX_ID", "GOVERNMENT_ID"):
+        digits_only = re.sub(r"[^0-9]", "", t)
+        # Known synthetic SSNs
+        if t in _SYNTHETIC_SSNS or digits_only in {"123456789", "000000000", "999999999"}:
+            return True
+        # All same digit
+        if len(digits_only) == 9 and len(set(digits_only)) == 1:
+            return True
+        # SSNs starting with 000, 666, or 9xx are invalid per SSA rules
+        if len(digits_only) == 9 and digits_only[:3] in ("000", "666"):
+            return True
+        if len(digits_only) == 9 and digits_only[0] == "9":
+            return True
+
+    if entity_type in ("PHONE_NUMBER", "PHONE_US", "PHONE_INTL"):
+        # 555 exchange (reserved for fictional use)
+        if re.search(r"\b555[-.]?\d{4}\b", t):
+            return True
+
+    if entity_type in ("PERSON", "PERSON_NAME"):
+        if _SYNTHETIC_NAME_RE.search(t):
+            return True
+
+    return False
+
+
 def detection_to_pii_record(
     det: DetectionResult,
     doc_id: str,
@@ -79,14 +227,25 @@ def detection_to_pii_record(
 
     et = det.entity_type
 
+    # Synthetic data guard — strip placeholder values so they don't
+    # contribute meaningful PII (minimum-PII threshold will filter later)
+    if _is_synthetic_value(detected_text, et):
+        logger.debug("Stripping synthetic %s value in doc %s", et, doc_id)
+        detected_text = ""  # empty text → no raw_* field populated
+
     if et in _PERSON_TYPES:
-        raw_name = detected_text
+        # Name validation: reject headers, form labels, company names
+        if not _is_likely_name(detected_text):
+            logger.debug("Rejected unlikely name %r in doc %s", detected_text[:40], doc_id)
+            raw_name = None  # keep as orphan record without name
+        else:
+            raw_name = detected_text
         # Split embedded UK NI number: "Blunt NH828286D" → name + gov ID
         ni_match = _NI_NUMBER_RE.search(detected_text)
         if ni_match:
             raw_government_id = ni_match.group(1)
             cleaned_name = detected_text[:ni_match.start()].strip()
-            if cleaned_name:
+            if cleaned_name and _is_likely_name(cleaned_name):
                 raw_name = cleaned_name
     elif et in _EMAIL_TYPES:
         raw_email = detected_text
@@ -95,8 +254,12 @@ def detection_to_pii_record(
     elif et in _DOB_TYPES:
         raw_dob = detected_text
     elif et in _ADDRESS_TYPES:
-        # raw_address is typed as dict | None in PIIRecord
-        raw_address = {"raw": detected_text}
+        # Address validation: reject bare state abbreviations, labels
+        if _is_likely_address(detected_text):
+            raw_address = {"raw": detected_text}
+        else:
+            logger.debug("Rejected unlikely address %r in doc %s", detected_text[:40], doc_id)
+            raw_address = None
     elif et.upper() in _GOV_ID_FIELD_TYPES:
         raw_government_id = detected_text
 
@@ -178,8 +341,20 @@ def build_composite_record(
 
     if names:
         best = max(names, key=lambda d: d.score)
-        raw_name = _extract_text(best)
-        entity_type = best.entity_type
+        candidate_name = _extract_text(best)
+        if _is_likely_name(candidate_name):
+            raw_name = candidate_name
+            entity_type = best.entity_type
+        else:
+            # Try other name candidates
+            for n in sorted(names, key=lambda d: d.score, reverse=True):
+                cand = _extract_text(n)
+                if _is_likely_name(cand):
+                    raw_name = cand
+                    entity_type = n.entity_type
+                    break
+            if raw_name is None:
+                entity_type = best.entity_type  # keep entity_type even if name rejected
     if emails:
         raw_email = _extract_text(max(emails, key=lambda d: d.score))
     if phones:
@@ -201,9 +376,18 @@ def build_composite_record(
             if txt and txt.lower() not in seen_texts:
                 seen_texts.add(txt.lower())
                 unique_parts.append(txt)
-        raw_address = {"raw": ", ".join(unique_parts)} if unique_parts else {"raw": _extract_text(addresses[0])}
+        joined = ", ".join(unique_parts) if unique_parts else _extract_text(addresses[0])
+        if _is_likely_address(joined):
+            raw_address = {"raw": joined}
+        else:
+            logger.debug("Rejected composite address %r in doc %s", joined[:40], doc_id)
     if gov_ids:
-        raw_government_id = _extract_text(max(gov_ids, key=lambda d: d.score))
+        best_gov = max(gov_ids, key=lambda d: d.score)
+        gov_text = _extract_text(best_gov)
+        if _is_synthetic_value(gov_text, best_gov.entity_type):
+            logger.debug("Skipping synthetic gov ID in composite for doc %s", doc_id)
+        else:
+            raw_government_id = gov_text
 
     # Use highest-confidence PERSON detection as normalized_value, or first detection
     normalized = raw_name or _extract_text(detections[0])
