@@ -1134,6 +1134,7 @@ def get_job_status(job_id: UUID, db: Session = Depends(get_db)):
         "completed_at": run.completed_at.isoformat() if run.completed_at else None,
         "created_at": run.created_at.isoformat() if run.created_at else None,
         "error_summary": run.error_summary,
+        "metrics": run.metrics or {},
     }
 
 

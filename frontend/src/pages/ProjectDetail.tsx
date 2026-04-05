@@ -2719,11 +2719,10 @@ function JobsTab({
                           </button>
                           {isExpanded && (
                             <div className="border-t bg-muted/20 px-4 py-3">
-                              {job.status === "extracting" ? (
-                                <div className="flex items-center gap-2 text-sm text-muted-foreground py-2">
-                                  <Loader2 className="h-4 w-4 animate-spin" />
-                                  <span>Extraction in progress — this may take several minutes for large documents...</span>
-                                </div>
+                              {(job.status === "running" || job.status === "analyzing") ? (
+                                <LiveAnalysisProgress jobId={job.id} />
+                              ) : job.status === "extracting" ? (
+                                <LiveAnalysisProgress jobId={job.id} phase="extraction" />
                               ) : job.status === "analyzed" ? (
                                 <AnalysisReviewPanel
                                   jobId={job.id}
@@ -3883,6 +3882,120 @@ function DensityTab({ projectId }: { projectId: string }) {
             </div>
           </CardContent>
         </Card>
+      )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Live Analysis/Extraction Progress
+// ---------------------------------------------------------------------------
+
+const ANALYSIS_STAGES = [
+  { key: "discovery", label: "Discovery" },
+  { key: "cataloging", label: "Cataloging" },
+  { key: "structure_analysis", label: "Structure Analysis" },
+  { key: "verified_onset", label: "Content Onset Detection" },
+  { key: "document_understanding", label: "Document Understanding (LLM)" },
+  { key: "vision_routing", label: "Vision Routing" },
+  { key: "sample_extraction", label: "Sample Extraction" },
+  { key: "extraction_preview", label: "Extraction Preview" },
+  { key: "entity_analysis", label: "Entity Analysis" },
+  { key: "auto_approve", label: "Auto-Approve" },
+]
+
+const EXTRACTION_STAGES = [
+  { key: "detection", label: "PII Detection & Extraction" },
+  { key: "verification", label: "Extraction Verification" },
+  { key: "gap_fill", label: "Gap Fill (Missing Fields)" },
+  { key: "resolution", label: "Entity Resolution" },
+  { key: "deduplication", label: "Deduplication" },
+  { key: "notification", label: "Notification List" },
+  { key: "complete", label: "Complete" },
+]
+
+function LiveAnalysisProgress({ jobId, phase = "analysis" }: { jobId: string; phase?: "analysis" | "extraction" }) {
+  const BASE = import.meta.env.VITE_API_URL ?? "/api"
+  const [progress, setProgress] = useState<{
+    stage: string; message: string; status: string;
+    detail?: { total?: number; current?: number; doc_name?: string };
+  } | null>(null)
+
+  useEffect(() => {
+    const poll = setInterval(async () => {
+      try {
+        const res = await fetch(`${BASE}/jobs/${jobId}/status`)
+        if (!res.ok) return
+        const data = await res.json()
+        // Get analysis_progress from metrics if available
+        const metrics = data.metrics || {}
+        const ap = phase === "extraction"
+          ? metrics.extraction_progress
+          : metrics.analysis_progress
+        if (ap) setProgress(ap)
+      } catch { /* ignore */ }
+    }, 3000)
+    return () => clearInterval(poll)
+  }, [jobId, phase, BASE])
+
+  const stages = phase === "extraction" ? EXTRACTION_STAGES : ANALYSIS_STAGES
+  const currentStage = progress?.stage || ""
+  const currentIdx = stages.findIndex(s => s.key === currentStage)
+
+  return (
+    <div className="space-y-3">
+      {/* Current activity */}
+      <div className="flex items-center gap-2">
+        <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
+        <span className="text-sm font-medium">
+          {phase === "extraction" ? "Extracting PII..." : "Analyzing documents..."}
+        </span>
+      </div>
+
+      {/* Stage stepper */}
+      <div className="space-y-1">
+        {stages.map((stage, idx) => {
+          const isDone = idx < currentIdx
+          const isActive = idx === currentIdx
+          const isPending = idx > currentIdx
+          return (
+            <div key={stage.key} className="flex items-center gap-2 text-xs">
+              {isDone ? (
+                <CheckCircle className="h-3.5 w-3.5 text-green-500" />
+              ) : isActive ? (
+                <Loader2 className="h-3.5 w-3.5 text-blue-500 animate-spin" />
+              ) : (
+                <Circle className="h-3.5 w-3.5 text-gray-300" />
+              )}
+              <span className={isPending ? "text-muted-foreground/50" : isDone ? "text-green-700" : "font-medium"}>
+                {stage.label}
+              </span>
+              {isActive && progress?.message && (
+                <span className="text-muted-foreground ml-1">— {progress.message}</span>
+              )}
+            </div>
+          )
+        })}
+      </div>
+
+      {/* Per-doc progress bar */}
+      {progress?.detail?.total && progress.detail.total > 0 && (
+        <div className="space-y-1 pt-1">
+          <div className="flex justify-between text-xs text-muted-foreground">
+            <span>
+              {progress.detail.doc_name
+                ? `Processing: ${progress.detail.doc_name}`
+                : `Document ${progress.detail.current || 0} of ${progress.detail.total}`}
+            </span>
+            <span>{Math.round(((progress.detail.current || 0) / progress.detail.total) * 100)}%</span>
+          </div>
+          <div className="h-1.5 rounded-full bg-gray-200">
+            <div
+              className="h-1.5 rounded-full bg-blue-500 transition-all"
+              style={{ width: `${((progress.detail.current || 0) / progress.detail.total) * 100}%` }}
+            />
+          </div>
+        </div>
       )}
     </div>
   )
