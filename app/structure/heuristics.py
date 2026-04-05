@@ -33,39 +33,89 @@ DOCUMENT_TYPE_SIGNALS: dict[DocumentType, list[str]] = {
         "patient", "diagnosis", "medical record", "physician",
         "hospital", "treatment", "mrn", "npi", "hipaa", "health plan",
         "prescription", "medication", "clinical", "prognosis",
+        # German
+        "patient", "diagnose", "arzt", "krankenhaus", "behandlung", "rezept",
+        # French
+        "patient", "diagnostic", "médecin", "hôpital", "traitement", "ordonnance",
+        # Spanish
+        "paciente", "diagnóstico", "médico", "hospital", "tratamiento", "receta",
+        # Italian
+        "paziente", "diagnosi", "medico", "ospedale", "trattamento", "ricetta",
     ],
     "student_file": [
         "student", "school", "grade", "enrollment", "ferpa",
         "transcript", "parent/guardian", "academic", "pupil",
         "semester", "gpa", "course",
+        # German
+        "schüler", "schule", "note", "einschreibung", "zeugnis",
+        # French
+        "étudiant", "école", "note", "inscription", "bulletin",
+        # Spanish
+        "estudiante", "escuela", "calificación", "inscripción",
     ],
     "financial_statement": [
         "account", "balance", "transaction", "bank",
         "routing number", "deposit", "credit card", "statement",
         "interest", "debit", "wire transfer",
+        # German
+        "konto", "saldo", "überweisung", "bank", "kontoauszug", "zinsen",
+        # French
+        "compte", "solde", "virement", "banque", "relevé", "intérêts",
+        # Spanish
+        "cuenta", "saldo", "transferencia", "banco", "extracto", "intereses",
     ],
     "employment_record": [
         "employee", "employer", "hire date", "salary",
         "department", "w-2", "payroll", "compensation",
         "benefits", "termination", "position",
+        # German
+        "arbeitnehmer", "arbeitgeber", "gehalt", "abteilung", "lohnabrechnung",
+        # French
+        "employé", "employeur", "salaire", "département", "fiche de paie",
+        # Spanish
+        "empleado", "empleador", "salario", "departamento", "nómina",
     ],
     "insurance_document": [
         "policy", "premium", "insured", "beneficiary",
         "claim", "coverage", "deductible", "underwriter",
         "policyholder",
+        # German
+        "versicherung", "prämie", "versichert", "anspruch", "deckung",
+        # French
+        "assurance", "prime", "assuré", "sinistre", "couverture",
+        # Spanish
+        "seguro", "prima", "asegurado", "reclamación", "cobertura",
     ],
     "legal_document": [
         "plaintiff", "defendant", "court", "jurisdiction",
         "hereby", "whereas", "stipulation", "affidavit",
         "subpoena", "attorney",
+        # German
+        "kläger", "beklagter", "gericht", "hiermit", "anwalt",
+        # French
+        "demandeur", "défendeur", "tribunal", "par la présente", "avocat",
+        # Spanish
+        "demandante", "demandado", "tribunal", "por la presente", "abogado",
     ],
     "correspondence": [
         "dear", "sincerely", "regards", "re:",
         "attached", "enclosed", "to whom it may concern",
+        # German
+        "sehr geehrte", "mit freundlichen grüßen", "anlage", "betreff",
+        # French
+        "cher", "cordialement", "veuillez agréer", "pièce jointe", "objet",
+        # Spanish
+        "estimado", "atentamente", "adjunto", "asunto",
     ],
     "form_fillable": [
         "fill in", "check one", "please print", "signature line",
         "date:", "name:", "applicant",
+        # German
+        "bitte ausfüllen", "unterschrift", "datum:", "name:", "antragsteller",
+        # French
+        "à remplir", "signature", "date:", "nom:", "demandeur",
+        # Spanish
+        "rellenar", "firma", "fecha:", "nombre:", "solicitante",
     ],
 }
 
@@ -79,6 +129,15 @@ SECTION_HEADING_PATTERNS: dict[SectionType, list[re.Pattern[str]]] = {
         re.compile(r"patient\s+details", re.IGNORECASE),
         re.compile(r"patient\s+data", re.IGNORECASE),
         re.compile(r"patient\s+demographics", re.IGNORECASE),
+        # German
+        re.compile(r"patientendaten", re.IGNORECASE),
+        re.compile(r"patienteninformation", re.IGNORECASE),
+        # French
+        re.compile(r"informations?\s+(?:du\s+)?patient", re.IGNORECASE),
+        re.compile(r"données\s+patient", re.IGNORECASE),
+        # Spanish
+        re.compile(r"información\s+del\s+paciente", re.IGNORECASE),
+        re.compile(r"datos\s+del\s+paciente", re.IGNORECASE),
     ],
     "provider_information": [
         re.compile(r"provider\s+information", re.IGNORECASE),
@@ -114,6 +173,15 @@ SECTION_HEADING_PATTERNS: dict[SectionType, list[re.Pattern[str]]] = {
         re.compile(r"employee\s+details", re.IGNORECASE),
         re.compile(r"employee\s+data", re.IGNORECASE),
         re.compile(r"worker\s+information", re.IGNORECASE),
+        # German
+        re.compile(r"mitarbeiterdaten", re.IGNORECASE),
+        re.compile(r"arbeitnehmer(?:daten|information)", re.IGNORECASE),
+        # French
+        re.compile(r"informations?\s+(?:de\s+l.)?employé", re.IGNORECASE),
+        re.compile(r"données\s+(?:de\s+l.)?employé", re.IGNORECASE),
+        # Spanish
+        re.compile(r"información\s+del\s+empleado", re.IGNORECASE),
+        re.compile(r"datos\s+del\s+empleado", re.IGNORECASE),
     ],
     "employer_information": [
         re.compile(r"employer\s+information", re.IGNORECASE),
@@ -133,11 +201,29 @@ SECTION_HEADING_PATTERNS: dict[SectionType, list[re.Pattern[str]]] = {
     "header_footer": [
         re.compile(r"page\s+\d+\s+of\s+\d+", re.IGNORECASE),
         re.compile(r"confidential", re.IGNORECASE),
+        # German
+        re.compile(r"seite\s+\d+\s+von\s+\d+", re.IGNORECASE),
+        re.compile(r"vertraulich", re.IGNORECASE),
+        # French
+        re.compile(r"page\s+\d+\s+sur\s+\d+", re.IGNORECASE),
+        re.compile(r"confidentiel", re.IGNORECASE),
+        # Spanish
+        re.compile(r"página\s+\d+\s+de\s+\d+", re.IGNORECASE),
+        re.compile(r"confidencial", re.IGNORECASE),
     ],
     "legal_boilerplate": [
         re.compile(r"terms\s+and\s+conditions", re.IGNORECASE),
         re.compile(r"privacy\s+notice", re.IGNORECASE),
         re.compile(r"disclaimer", re.IGNORECASE),
+        # German
+        re.compile(r"allgemeine\s+geschäftsbedingungen", re.IGNORECASE),
+        re.compile(r"datenschutz(?:hinweis|erklärung)", re.IGNORECASE),
+        # French
+        re.compile(r"conditions\s+générales", re.IGNORECASE),
+        re.compile(r"politique\s+de\s+confidentialité", re.IGNORECASE),
+        # Spanish
+        re.compile(r"términos\s+y\s+condiciones", re.IGNORECASE),
+        re.compile(r"aviso\s+de\s+privacidad", re.IGNORECASE),
     ],
 }
 
@@ -186,6 +272,39 @@ SECTION_TO_ROLE: dict[SectionType, EntityRole] = {
 
 # Number of leading pages to scan for document type classification
 _DOC_TYPE_SCAN_PAGES = 5
+
+# ---------------------------------------------------------------------------
+# Headerless table detection heuristics
+# ---------------------------------------------------------------------------
+# Minimum rows of consistent column count to identify a headerless table
+_MIN_TABLE_ROWS = 3
+
+# Value-type patterns for inferring column type from cell content
+_COLUMN_TYPE_PATTERNS: dict[str, re.Pattern[str]] = {
+    "PHONE_NUMBER": re.compile(r"^[\+\d\(\)\-\.\s]{7,20}$"),
+    "EMAIL_ADDRESS": re.compile(r"^[^@]+@[^@]+\.[^@]+$"),
+    "SSN": re.compile(r"^\d{3}-\d{2}-\d{4}$"),
+    "DATE_TIME": re.compile(r"^\d{1,2}[/\-\.]\d{1,2}[/\-\.]\d{2,4}$"),
+    "PERSON": re.compile(r"^[A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3}$"),
+    "LOCATION": re.compile(r"^\d+\s+[A-Z]"),  # street address pattern
+}
+
+
+def infer_headerless_column_type(values: list[str]) -> str | None:
+    """Infer PII entity type from a list of cell values in one column.
+
+    Checks what fraction of non-empty values match each type pattern.
+    Returns the entity type if >60% of values match, else None.
+    """
+    non_empty = [v.strip() for v in values if v.strip()]
+    if len(non_empty) < _MIN_TABLE_ROWS:
+        return None
+
+    for entity_type, pattern in _COLUMN_TYPE_PATTERNS.items():
+        matches = sum(1 for v in non_empty if pattern.match(v))
+        if matches / len(non_empty) > 0.60:
+            return entity_type
+    return None
 
 
 # ---------------------------------------------------------------------------

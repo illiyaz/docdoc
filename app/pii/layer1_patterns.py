@@ -221,6 +221,27 @@ CUSTOM_PATTERNS: list[PatternDefinition] = [
         regulatory_framework="HIPAA/CCPA",
     ),
     PatternDefinition(
+        # Masked/redacted SSN — still PII under most state breach laws.
+        # Matches: ***-**-1234, XXX-XX-1234, ###-##-1234
+        name="ssn_partial_masked",
+        entity_type="SSN_PARTIAL",
+        regex=r"(?i)\b[*Xx#]{3}[- ][*Xx#]{2}[- ]\d{4}\b",
+        score=0.80,
+        geography=GEOGRAPHY_US,
+        regulatory_framework="HIPAA/CCPA/State-Breach",
+    ),
+    PatternDefinition(
+        # "Last 4" SSN reference — context-linked partial SSN.
+        # Matches: "last 4: 1234", "last four: 1234", "last 4 digits: 1234",
+        #          "last four digits of SSN: 1234"
+        name="ssn_last_four",
+        entity_type="SSN_LAST_FOUR",
+        regex=r"(?i)\blast\s+(?:4|four)\s*(?:digits?\s*(?:of\s+(?:ssn|social\s+security))?\s*)?[:\-\s]+\d{4}\b",
+        score=0.75,
+        geography=GEOGRAPHY_US,
+        regulatory_framework="HIPAA/CCPA/State-Breach",
+    ),
+    PatternDefinition(
         name="phone_us",
         entity_type="PHONE_US",
         regex=r"(?<!\w)(?:1[\s\-.])?(?:\(\d{3}\)|\d{3})[\s\-.]?\d{3}[\s\-.]?\d{4}(?!\w)",
@@ -304,6 +325,16 @@ CUSTOM_PATTERNS: list[PatternDefinition] = [
         regulatory_framework="DPDP/TRAI",
     ),
     PatternDefinition(
+        # Indian landline: area code (2-4 digits) + subscriber (6-8 digits).
+        # With optional +91 or 0 trunk prefix.
+        name="phone_in_landline",
+        entity_type="PHONE_IN_LANDLINE",
+        regex=r"(?<!\w)(?:\+91[\s\-]?|0)(?:[1-9]\d{1,3})[\s\-]?\d{6,8}(?!\w)",
+        score=0.70,
+        geography=GEOGRAPHY_IN,
+        regulatory_framework="DPDP/TRAI",
+    ),
+    PatternDefinition(
         name="voter_id_in",
         entity_type="VOTER_ID_IN",
         regex=r"\b[A-Z]{3}\d{7}\b",
@@ -356,6 +387,24 @@ CUSTOM_PATTERNS: list[PatternDefinition] = [
         entity_type="PASSPORT_UK",
         regex=r"\b\d{9}\b",
         score=0.60,
+        geography=GEOGRAPHY_UK,
+        regulatory_framework="UK-GDPR",
+    ),
+    PatternDefinition(
+        # UK mobile: 07XXX XXXXXX or +44 7XXX XXXXXX
+        name="phone_uk_mobile",
+        entity_type="PHONE_UK_MOBILE",
+        regex=r"(?<!\w)(?:\+44[\s\-]?7\d{3}|07\d{3})[\s\-]?\d{3}[\s\-]?\d{3}(?!\w)",
+        score=0.85,
+        geography=GEOGRAPHY_UK,
+        regulatory_framework="UK-GDPR",
+    ),
+    PatternDefinition(
+        # UK landline: 01X/02X area codes
+        name="phone_uk_landline",
+        entity_type="PHONE_UK_LANDLINE",
+        regex=r"(?<!\w)(?:\+44[\s\-]?[12]\d{2,4}|0[12]\d{2,4})[\s\-]?\d{3,4}[\s\-]?\d{3,4}(?!\w)",
+        score=0.75,
         geography=GEOGRAPHY_UK,
         regulatory_framework="UK-GDPR",
     ),
@@ -427,6 +476,29 @@ CUSTOM_PATTERNS: list[PatternDefinition] = [
         score=0.90,
         geography=GEOGRAPHY_EU,
         regulatory_framework="GDPR/Codice-Privacy",
+    ),
+    PatternDefinition(
+        # EU landline/mobile: +31/+33/+34/+39/+49 etc. with national number.
+        # Covers DE (+49), FR (+33), IT (+39), ES (+34), NL (+31), BE (+32),
+        # AT (+43), PL (+48), PT (+351), SE (+46), DK (+45), FI (+358).
+        name="phone_eu",
+        entity_type="PHONE_EU",
+        regex=(
+            r"(?<!\w)\+(?:3[1-9]|4[3-9]|35[18]|358)"
+            r"[\s\-]?\(?\d{1,4}\)?[\s\-]?\d{2,4}[\s\-]?\d{2,4}[\s\-]?\d{0,4}(?!\w)"
+        ),
+        score=0.80,
+        geography=GEOGRAPHY_EU,
+        regulatory_framework="GDPR",
+    ),
+    PatternDefinition(
+        # German domestic: 0XXX XXXXXXX (landline/mobile without +49)
+        name="phone_de_domestic",
+        entity_type="PHONE_DE",
+        regex=r"(?<!\w)0(?:1[5-7]\d|[2-9]\d{1,4})[\s\-/]?\d{3,8}(?!\w)",
+        score=0.70,
+        geography=GEOGRAPHY_EU,
+        regulatory_framework="GDPR/BDSG",
     ),
 
     # =====================================================================

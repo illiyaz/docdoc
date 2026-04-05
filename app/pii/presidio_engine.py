@@ -29,6 +29,45 @@ from app.pii.context_deny_list import is_likely_false_positive
 
 logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# Text preprocessing: join line-break-split numbers before regex matching
+# ---------------------------------------------------------------------------
+
+import re
+
+# Patterns that rejoin numbers split across lines by hyphens/whitespace.
+# E.g. "123-\n45-\n6789" → "123-45-6789", "078 1234\n5678" → "078 12345678"
+_LINEBREAK_SPLIT_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    # Digit-hyphen-newline-digit: "123-\n45" → "123-45"
+    (re.compile(r"(\d)-\s*\n\s*(\d)"), r"\1-\2"),
+    # Digit-newline-hyphen-digit: "123\n-45" → "123-45"
+    (re.compile(r"(\d)\s*\n\s*-(\d)"), r"\1-\2"),
+    # Digit-newline-digit (no separator, within a number context):
+    # only rejoin when surrounded by number-like context (phone, SSN etc.)
+    (re.compile(r"(\d)\s*\n\s*(\d)"), r"\1\2"),
+    # Plus-newline-digit for international phone: "+\n44" → "+44"
+    (re.compile(r"(\+)\s*\n\s*(\d)"), r"\1\2"),
+]
+
+
+def preprocess_block_text(text: str) -> str:
+    """Rejoin number patterns split across line breaks.
+
+    OCR and PDF extraction frequently insert newlines mid-number. This
+    preprocessing step stitches those fragments back together so the
+    regex engine can match complete patterns like SSNs, phone numbers,
+    and credit card numbers.
+
+    The original block text is never modified — this returns a cleaned
+    copy used only for detection matching.
+    """
+    if "\n" not in text:
+        return text
+    result = text
+    for pattern, replacement in _LINEBREAK_SPLIT_PATTERNS:
+        result = pattern.sub(replacement, result)
+    return result
+
 def _resolve_spacy_model() -> str:
     """Pick the best available spaCy model: trf > lg > md > sm."""
     try:
@@ -173,8 +212,10 @@ class PresidioEngine:
         results: list[DetectionResult] = []
 
         for block in blocks:
+            # Preprocess: rejoin numbers split across line breaks
+            cleaned_text = preprocess_block_text(block.text)
             presidio_hits = self._analyzer.analyze(
-                text=block.text,
+                text=cleaned_text,
                 language="en",
                 entities=entities,
             )
@@ -215,11 +256,13 @@ class PresidioEngine:
         # Phase 14a: post-filter through context deny-list
         filtered: list[DetectionResult] = []
         for det in results:
-            detected_text = det.block.text[det.start:det.end]
+            # Use cleaned text for FP checks (offsets are from cleaned copy)
+            block_text = preprocess_block_text(det.block.text)
+            detected_text = block_text[det.start:det.end]
             # Build surrounding context (~120 chars before/after)
             ctx_start = max(0, det.start - 120)
-            ctx_end = min(len(det.block.text), det.end + 120)
-            surrounding = det.block.text[ctx_start:ctx_end]
+            ctx_end = min(len(block_text), det.end + 120)
+            surrounding = block_text[ctx_start:ctx_end]
 
             is_fp, reason = is_likely_false_positive(
                 detected_text, det.entity_type, surrounding,
@@ -235,7 +278,158 @@ class PresidioEngine:
         # Phase 14c: deduplicate — keep highest confidence per (value, entity_type, page)
         filtered = deduplicate_detections(filtered)
 
+        # Cross-page header dedup: collapse repeated header/footer PII
+        filtered = deduplicate_cross_page_headers(filtered)
+
         return filtered
+
+    def analyze_metadata(
+        self,
+        source_path: str,
+        *,
+        pdf_info: dict[str, str] | None = None,
+        target_entity_types: list[str] | None = None,
+    ) -> list[DetectionResult]:
+        """Run PII detection on filename and optional PDF document info fields.
+
+        Scans the basename of source_path and any values in pdf_info
+        (Title, Author, Subject, Creator, Producer, Keywords).  Returns
+        detections tagged with extraction_layer="metadata".
+
+        Parameters
+        ----------
+        source_path:
+            Absolute path to the file — only the basename is scanned.
+        pdf_info:
+            Optional dict from PyMuPDF ``doc.metadata``.  Keys like
+            "title", "author", "subject" etc.
+        target_entity_types:
+            Restrict to these entity types (same as analyze()).
+        """
+        import os
+
+        entities = target_entity_types if target_entity_types else None
+        results: list[DetectionResult] = []
+
+        # Build synthetic text fragments to scan
+        fragments: list[tuple[str, str]] = []  # (label, text)
+        basename = os.path.basename(source_path)
+        # Strip extension, replace separators with spaces for better matching
+        name_cleaned = os.path.splitext(basename)[0].replace("_", " ").replace("-", " ")
+        if name_cleaned.strip():
+            fragments.append(("filename", name_cleaned))
+
+        if pdf_info:
+            for key in ("title", "author", "subject", "creator", "keywords"):
+                val = pdf_info.get(key, "")
+                if val and val.strip():
+                    fragments.append((f"pdf_{key}", val))
+
+        for label, text in fragments:
+            # Build a synthetic block for provenance
+            meta_block = ExtractedBlock(
+                text=text,
+                page_or_sheet=0,
+                source_path=source_path,
+                file_type="metadata",
+                block_type="prose",
+            )
+            presidio_hits = self._analyzer.analyze(
+                text=text,
+                language="en",
+                entities=entities,
+            )
+            for hit in presidio_hits:
+                if hit.score < MIN_DETECTION_CONFIDENCE:
+                    continue
+                pat_def = self._pattern_map.get(hit.entity_type)
+                geography = pat_def.geography if pat_def else GEOGRAPHY_GLOBAL
+                regulatory_framework = pat_def.regulatory_framework if pat_def else ""
+                pattern_used = pat_def.regex if pat_def else ""
+
+                logger.debug(
+                    "Metadata PII: source=%s entity_type=%s score=%.3f",
+                    label, hit.entity_type, hit.score,
+                )
+                results.append(DetectionResult(
+                    block=meta_block,
+                    entity_type=hit.entity_type,
+                    start=hit.start,
+                    end=hit.end,
+                    score=hit.score,
+                    pattern_used=pattern_used,
+                    geography=geography,
+                    regulatory_framework=regulatory_framework,
+                    extraction_layer="metadata",
+                ))
+
+        return results
+
+
+_CROSS_PAGE_HEADER_THRESHOLD = 3  # appear on >N pages to be considered header
+
+
+def deduplicate_cross_page_headers(
+    detections: list[DetectionResult],
+    *,
+    threshold: int = _CROSS_PAGE_HEADER_THRESHOLD,
+) -> list[DetectionResult]:
+    """Remove detections whose (text, entity_type) appears on more than *threshold* pages.
+
+    This catches header/footer PII (company phone, report dates, preparer names)
+    that repeat across many pages.  Unlike static_filter.py (which works
+    post-extraction on PIIRecords), this runs at detection time and reduces
+    noise before extraction even begins.
+
+    Protected entity types (SSN, GOVERNMENT_ID) are never removed.
+
+    Returns
+    -------
+    list[DetectionResult]
+        Detections with cross-page headers collapsed.
+    """
+    if not detections:
+        return detections
+
+    PROTECTED = frozenset({"SSN", "SSN_NODASH", "SSN_PARTIAL", "SSN_LAST_FOUR", "GOVERNMENT_ID"})
+
+    # Count distinct pages per (text, entity_type)
+    page_sets: dict[tuple[str, str], set[int | str]] = {}
+    for det in detections:
+        text = preprocess_block_text(det.block.text)[det.start:det.end]
+        key = (text.strip(), det.entity_type)
+        page_sets.setdefault(key, set()).add(det.block.page_or_sheet)
+
+    # Identify header keys
+    header_keys = {
+        key for key, pages in page_sets.items()
+        if len(pages) > threshold and key[1] not in PROTECTED
+    }
+
+    if not header_keys:
+        return detections
+
+    # Keep only one representative per header key (highest score)
+    kept: list[DetectionResult] = []
+    best_per_header: dict[tuple[str, str], DetectionResult] = {}
+    for det in detections:
+        text = preprocess_block_text(det.block.text)[det.start:det.end]
+        key = (text.strip(), det.entity_type)
+        if key in header_keys:
+            existing = best_per_header.get(key)
+            if existing is None or det.score > existing.score:
+                best_per_header[key] = det
+        else:
+            kept.append(det)
+
+    kept.extend(best_per_header.values())
+    removed = len(detections) - len(kept)
+    if removed:
+        logger.debug(
+            "Cross-page header dedup removed %d detection(s) across %d header pattern(s)",
+            removed, len(header_keys),
+        )
+    return kept
 
 
 def deduplicate_detections(detections: list[DetectionResult]) -> list[DetectionResult]:

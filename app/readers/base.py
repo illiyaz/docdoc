@@ -58,6 +58,9 @@ class ExtractedBlock:
     col_header: str | None = None  # column header text for this cell
     row_index: int | None = None   # 0-based row position within the table
 
+    # OCR provenance (populated only for OCR'd blocks)
+    ocr_confidence: float | None = None  # 0.0–1.0 average word confidence from OCR engine
+
     def __post_init__(self) -> None:
         if self.block_type not in _VALID_BLOCK_TYPES:
             raise ValueError(

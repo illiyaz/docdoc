@@ -13,6 +13,7 @@ Output: list[DetectionResult]
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 from app.readers.base import ExtractedBlock
 from app.structure.models import DocumentStructureAnalysis
@@ -68,6 +69,7 @@ class DetectionTask:
         blocks: list[ExtractedBlock],
         *,
         structure: DocumentStructureAnalysis | None = None,
+        pdf_info: dict[str, Any] | None = None,
     ) -> list[DetectionResult]:
         """Detect PII in a list of ExtractedBlocks; return scored candidates.
 
@@ -79,5 +81,9 @@ class DetectionTask:
             Optional structure analysis result.  When provided, each
             DetectionResult is annotated with ``entity_role`` and
             ``entity_role_confidence`` from the analysis.
+        pdf_info:
+            Optional PDF document info dict (from PyMuPDF ``doc.metadata``).
+            When provided, a metadata PII scan is performed on filename
+            and document info fields (title, author, subject, etc.).
         """
         ...

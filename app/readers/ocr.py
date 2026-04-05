@@ -126,14 +126,25 @@ class OCREngine:
         for line in result[0]:
             # PaddleOCR v2: line = (box, (text, confidence))
             # PaddleOCR v3: line may be dict or different structure
+            confidence: float | None = None
             try:
                 if isinstance(line, dict):
                     text = str(line.get("rec_text", line.get("text", "")))
                     box = line.get("dt_polys", line.get("box", [[0, 0], [0, 0], [0, 0], [0, 0]]))
+                    # Extract confidence from dict format
+                    conf_val = line.get("rec_score", line.get("confidence", None))
+                    if conf_val is not None:
+                        confidence = float(conf_val)
                 elif isinstance(line, (list, tuple)) and len(line) >= 2:
                     box = line[0]
                     text_data = line[1]
                     text = text_data[0] if isinstance(text_data, (list, tuple)) else str(text_data)
+                    # PaddleOCR v2 returns (text, confidence) tuple
+                    if isinstance(text_data, (list, tuple)) and len(text_data) >= 2:
+                        try:
+                            confidence = float(text_data[1])
+                        except (ValueError, TypeError):
+                            pass
                 else:
                     continue
             except (IndexError, TypeError, ValueError):
@@ -150,6 +161,7 @@ class OCREngine:
                 file_type="pdf",
                 block_type="prose",
                 bbox=bbox,
+                ocr_confidence=confidence,
             ))
 
         return blocks
