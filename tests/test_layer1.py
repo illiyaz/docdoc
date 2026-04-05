@@ -832,7 +832,7 @@ def test_survey_response_regulatory_framework_ppra():
 # ---------------------------------------------------------------------------
 
 _ORIGINAL_COUNT = 42
-_NEW_PATTERN_COUNT = 10
+_NEW_PATTERN_COUNT = 17  # 10 original + 7 from PII detection enhancement
 _EXPECTED_TOTAL = _ORIGINAL_COUNT + _NEW_PATTERN_COUNT
 
 

@@ -1561,10 +1561,10 @@ class TestParallelVisionRouting:
     """Test parallel vision routing infrastructure."""
 
     def test_vision_routing_workers_setting(self):
-        """Settings includes vision_routing_workers with default 1 (single GPU)."""
+        """Settings includes vision_routing_workers with default 4."""
         from app.core.settings import Settings
         s = Settings(DATABASE_URL="sqlite:///test.db")
-        assert s.vision_routing_workers == 1
+        assert s.vision_routing_workers == 4
 
     def test_template_cache_thread_safety(self):
         """TemplateCache has a threading lock."""

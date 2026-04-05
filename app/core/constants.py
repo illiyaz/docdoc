@@ -192,6 +192,26 @@ ENTITY_CATEGORY_MAP: dict[str, list[str]] = {
     "API_KEY": ["CREDENTIALS"],
     "AWS_ACCESS_KEY": ["CREDENTIALS"],
     "AZURE_KEY": ["CREDENTIALS"],
+    # ==================================================================
+    # Additional patterns from PII detection enhancement (Step 27)
+    # ==================================================================
+    "PHONE_INTERNATIONAL": ["PII"],
+    "SSN_US": ["SPII"],
+    "SSN_US_NODASH": ["SPII"],
+    "SSN_PARTIAL_MASKED": ["SPII"],
+    "SSN_LAST_FOUR": ["SPII"],
+    "EIN_US": ["PFI"],
+    "PAN_CARD": ["PFI"],
+    "PHONE_IN_LANDLINE": ["PII"],
+    "GST_IN": ["PFI"],
+    "PHONE_UK_MOBILE": ["PII"],
+    "PHONE_UK_LANDLINE": ["PII"],
+    "PERSONALAUSWEIS_DE": ["PII"],
+    "PHONE_EU": ["PII"],
+    "PHONE_DE_DOMESTIC": ["PII"],
+    "PHONE_DE": ["PII"],
+    "SSN_PARTIAL": ["SPII"],
+    "TFN_AU": ["PFI", "NPI"],
 }
 
 
