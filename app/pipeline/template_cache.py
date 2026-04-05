@@ -67,7 +67,7 @@ class TemplateCache:
     arrangement) get the same cache key, even if the VALUES differ.
     """
     
-    def __init__(self, max_entries: int = 100) -> None:
+    def __init__(self, max_entries: int = 500) -> None:
         self._cache: dict[str, CacheEntry] = {}
         self._max_entries = max_entries
         self._lock = threading.Lock()

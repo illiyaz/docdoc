@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     ollama_vision_fallback_model: str = Field(default="llama3.2-vision:latest", alias="OLLAMA_VISION_FALLBACK_MODEL")
     use_vision_extraction: bool = Field(default=True, alias="USE_VISION_EXTRACTION")
     vision_page_dpi: int = Field(default=150, alias="VISION_PAGE_DPI")
-    vision_routing_workers: int = Field(default=1, alias="VISION_ROUTING_WORKERS")
+    vision_routing_workers: int = Field(default=4, alias="VISION_ROUTING_WORKERS")
     ollama_understanding_model: str | None = Field(default=None, alias="OLLAMA_UNDERSTANDING_MODEL")
 
 

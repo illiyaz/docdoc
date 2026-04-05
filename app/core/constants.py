@@ -306,7 +306,7 @@ PROTOCOL_LLM_CONFIG: dict[str, dict[str, int | bool | str]] = {
     "hipaa": {
         "llm_pages_to_read": 5,
         "expect_multi_page_records": True,
-        "extraction_batch_size": 2,
+        "extraction_batch_size": 5,
         "vision_model": "qwen2.5vl:32b",
         "vision_fallback_model": "llama3.2-vision:latest",
         "vision_page_dpi": 150,
@@ -315,7 +315,7 @@ PROTOCOL_LLM_CONFIG: dict[str, dict[str, int | bool | str]] = {
     "gdpr": {
         "llm_pages_to_read": 3,
         "expect_multi_page_records": True,
-        "extraction_batch_size": 2,
+        "extraction_batch_size": 5,
         "vision_model": "qwen2.5vl:32b",
         "vision_fallback_model": "llama3.2-vision:latest",
         "vision_page_dpi": 150,
@@ -324,7 +324,7 @@ PROTOCOL_LLM_CONFIG: dict[str, dict[str, int | bool | str]] = {
     "gdpr_article_33": {
         "llm_pages_to_read": 3,
         "expect_multi_page_records": True,
-        "extraction_batch_size": 2,
+        "extraction_batch_size": 5,
         "vision_model": "qwen2.5vl:32b",
         "vision_fallback_model": "llama3.2-vision:latest",
         "vision_page_dpi": 150,
@@ -333,7 +333,7 @@ PROTOCOL_LLM_CONFIG: dict[str, dict[str, int | bool | str]] = {
     "ccpa": {
         "llm_pages_to_read": 3,
         "expect_multi_page_records": True,
-        "extraction_batch_size": 2,
+        "extraction_batch_size": 5,
         "vision_model": "qwen2.5vl:32b",
         "vision_fallback_model": "llama3.2-vision:latest",
         "vision_page_dpi": 150,
@@ -342,7 +342,7 @@ PROTOCOL_LLM_CONFIG: dict[str, dict[str, int | bool | str]] = {
     "hitech": {
         "llm_pages_to_read": 5,
         "expect_multi_page_records": True,
-        "extraction_batch_size": 2,
+        "extraction_batch_size": 5,
         "vision_model": "qwen2.5vl:32b",
         "vision_fallback_model": "llama3.2-vision:latest",
         "vision_page_dpi": 150,
@@ -351,7 +351,7 @@ PROTOCOL_LLM_CONFIG: dict[str, dict[str, int | bool | str]] = {
     "ferpa": {
         "llm_pages_to_read": 4,
         "expect_multi_page_records": True,
-        "extraction_batch_size": 2,
+        "extraction_batch_size": 5,
         "vision_model": "qwen2.5vl:32b",
         "vision_fallback_model": "llama3.2-vision:latest",
         "vision_page_dpi": 150,
@@ -360,7 +360,7 @@ PROTOCOL_LLM_CONFIG: dict[str, dict[str, int | bool | str]] = {
     "state_breach": {
         "llm_pages_to_read": 3,
         "expect_multi_page_records": True,
-        "extraction_batch_size": 2,
+        "extraction_batch_size": 5,
         "vision_model": "qwen2.5vl:32b",
         "vision_fallback_model": "llama3.2-vision:latest",
         "vision_page_dpi": 150,
@@ -369,7 +369,7 @@ PROTOCOL_LLM_CONFIG: dict[str, dict[str, int | bool | str]] = {
     "state_breach_generic": {
         "llm_pages_to_read": 3,
         "expect_multi_page_records": True,
-        "extraction_batch_size": 2,
+        "extraction_batch_size": 5,
         "vision_model": "qwen2.5vl:32b",
         "vision_fallback_model": "llama3.2-vision:latest",
         "vision_page_dpi": 150,
@@ -378,7 +378,7 @@ PROTOCOL_LLM_CONFIG: dict[str, dict[str, int | bool | str]] = {
     "bipa": {
         "llm_pages_to_read": 2,
         "expect_multi_page_records": False,
-        "extraction_batch_size": 2,
+        "extraction_batch_size": 5,
         "vision_model": "qwen2.5vl:32b",
         "vision_fallback_model": "llama3.2-vision:latest",
         "vision_page_dpi": 150,
@@ -387,7 +387,7 @@ PROTOCOL_LLM_CONFIG: dict[str, dict[str, int | bool | str]] = {
     "pci_dss": {
         "llm_pages_to_read": 3,
         "expect_multi_page_records": False,
-        "extraction_batch_size": 2,
+        "extraction_batch_size": 5,
         "vision_model": "qwen2.5vl:32b",
         "vision_fallback_model": "llama3.2-vision:latest",
         "vision_page_dpi": 150,
@@ -396,7 +396,7 @@ PROTOCOL_LLM_CONFIG: dict[str, dict[str, int | bool | str]] = {
     "glba": {
         "llm_pages_to_read": 3,
         "expect_multi_page_records": True,
-        "extraction_batch_size": 2,
+        "extraction_batch_size": 5,
         "vision_model": "qwen2.5vl:32b",
         "vision_fallback_model": "llama3.2-vision:latest",
         "vision_page_dpi": 150,
@@ -405,7 +405,7 @@ PROTOCOL_LLM_CONFIG: dict[str, dict[str, int | bool | str]] = {
     "dpdpa": {
         "llm_pages_to_read": 3,
         "expect_multi_page_records": True,
-        "extraction_batch_size": 2,
+        "extraction_batch_size": 5,
         "vision_model": "qwen2.5vl:32b",
         "vision_fallback_model": "llama3.2-vision:latest",
         "vision_page_dpi": 150,
@@ -414,7 +414,7 @@ PROTOCOL_LLM_CONFIG: dict[str, dict[str, int | bool | str]] = {
     "custom": {
         "llm_pages_to_read": 3,
         "expect_multi_page_records": True,
-        "extraction_batch_size": 2,
+        "extraction_batch_size": 5,
         "vision_model": "qwen2.5vl:32b",
         "vision_fallback_model": "llama3.2-vision:latest",
         "vision_page_dpi": 150,
@@ -423,7 +423,7 @@ PROTOCOL_LLM_CONFIG: dict[str, dict[str, int | bool | str]] = {
 }
 
 DEFAULT_LLM_PAGES_TO_READ = 3
-DEFAULT_EXTRACTION_BATCH_SIZE = 2
+DEFAULT_EXTRACTION_BATCH_SIZE = 5
 
 
 # ---------------------------------------------------------------------------
