@@ -3059,9 +3059,11 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                 if _is_cancelled():
                     break
                 _retry_start = time.time()
+                _pmeta = pdoc.metadata_json or {}
+                _orig_path = _pmeta.get("extraction_path_used", "3")
+
                 try:
                     # Load existing partial records
-                    _pmeta = pdoc.metadata_json or {}
                     existing_records = []
                     for rd in _pmeta.get("extracted_records", []):
                         try:
@@ -3069,57 +3071,117 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                         except Exception:
                             pass
 
-                    # Use Presidio smart-group as the retry strategy (fast, reliable)
+                    logger.info(
+                        "RETRY: %s | original_path=%s | existing=%d records",
+                        pdoc.file_name, _orig_path, len(existing_records),
+                    )
+
+                    # Load schema + blocks
                     retry_blocks = get_reader(pdoc.source_path).read()
-                    if retry_blocks:
-                        retry_dets = engine.analyze(retry_blocks, target_entity_types=target_entities)
-                        if schema_filter_cls:
-                            retry_schema_dict = _pmeta.get("document_schema")
-                            retry_schema = None
-                            if retry_schema_dict:
-                                try:
-                                    from app.structure.document_schema import DocumentSchema as _RetryDS
-                                    retry_schema = _RetryDS.from_dict(retry_schema_dict)
-                                except Exception:
-                                    pass
+                    if not retry_blocks:
+                        continue
+
+                    retry_schema = None
+                    retry_schema_dict = _pmeta.get("document_schema")
+                    if retry_schema_dict:
+                        try:
+                            from app.structure.document_schema import DocumentSchema as _RetryDS
+                            retry_schema = _RetryDS.from_dict(retry_schema_dict)
+                        except Exception:
+                            pass
+
+                    retry_records: list[PIIRecord] = []
+
+                    # --- Retry using ORIGINAL extraction method ---
+                    if _orig_path.startswith("0") and retry_schema:
+                        # Coordinate extraction
+                        try:
+                            from app.pipeline.coordinate_extractor import CoordinateExtractor as _RetryCoord
+                            fm = getattr(retry_schema, "layout_field_map", None)
+                            vision_fm = _pmeta.get("vision_field_map")
+                            if not fm and vision_fm:
+                                from app.structure.document_schema import FieldMapping as _RetryFM
+                                fm = [_RetryFM(**f) for f in vision_fm]
+                            if fm:
+                                ext = _RetryCoord(fm, pdoc.source_path, str(pdoc.id),
+                                                  name_samples=_pmeta.get("person_samples"))
+                                retry_records, _ = ext.extract_all_pages()
+                                logger.info("RETRY coordinate: %d records", len(retry_records))
+                        except Exception:
+                            logger.warning("RETRY coordinate failed for %s", pdoc.file_name, exc_info=True)
+
+                    elif _orig_path.startswith("2") and settings.llm_assist_enabled:
+                        # LLM template/table extraction
+                        try:
+                            from app.llm.client import OllamaClient as _RetryOllama
+                            from app.structure.llm_template_extractor import LLMTemplateExtractor as _RetryLLM
+
+                            page_texts: dict[int, str] = {}
+                            for b in retry_blocks:
+                                pg = b.page_or_sheet
+                                if pg not in page_texts:
+                                    page_texts[pg] = ""
+                                page_texts[pg] += b.text + "\n"
+
+                            client = _RetryOllama(db_session=db, timeout_s=120)
+                            extractor = _RetryLLM(client, batch_size=DEFAULT_EXTRACTION_BATCH_SIZE)
                             if retry_schema:
+                                retry_records = extractor.extract_all_instances(
+                                    retry_schema, page_texts, pdoc.source_path, len(page_texts),
+                                )
+                                logger.info("RETRY LLM: %d records", len(retry_records))
+                        except Exception:
+                            logger.warning("RETRY LLM failed for %s", pdoc.file_name, exc_info=True)
+
+                    # --- Fallback: Presidio smart-group (if original method produced nothing) ---
+                    if not retry_records:
+                        try:
+                            retry_dets = engine.analyze(retry_blocks, target_entity_types=target_entities)
+                            if retry_schema and schema_filter_cls:
                                 try:
                                     sf = schema_filter_cls(retry_schema)
                                     r = sf.filter_detections(retry_dets)
                                     retry_dets = r.kept
                                 except Exception:
                                     pass
+                            from app.pipeline.smart_grouping import group_detections_to_records as _retry_sg
+                            retry_records = _retry_sg(
+                                retry_dets, str(pdoc.id),
+                                schema=retry_schema, doc_path=pdoc.source_path,
+                            )
+                            logger.info("RETRY Presidio fallback: %d records", len(retry_records))
+                        except Exception:
+                            logger.warning("RETRY Presidio failed for %s", pdoc.file_name, exc_info=True)
 
-                        from app.pipeline.smart_grouping import group_detections_to_records as _retry_sg
-                        retry_records = _retry_sg(retry_dets, str(pdoc.id), schema=retry_schema, doc_path=pdoc.source_path)
+                    # --- Merge: existing + new (name dedup) ---
+                    existing_names = {r.raw_name.lower().strip() for r in existing_records if r.raw_name}
+                    merged = list(existing_records)
+                    new_count = 0
+                    for rr in retry_records:
+                        if rr.raw_name and rr.raw_name.lower().strip() not in existing_names:
+                            merged.append(rr)
+                            existing_names.add(rr.raw_name.lower().strip())
+                            new_count += 1
+                        elif not rr.raw_name and (rr.raw_government_id or rr.raw_phone or rr.raw_email):
+                            merged.append(rr)
+                            new_count += 1
 
-                        # Merge: keep existing + add new names not already found
-                        existing_names = {r.raw_name.lower().strip() for r in existing_records if r.raw_name}
-                        merged = list(existing_records)
-                        new_count = 0
-                        for rr in retry_records:
-                            if rr.raw_name and rr.raw_name.lower().strip() not in existing_names:
-                                merged.append(rr)
-                                existing_names.add(rr.raw_name.lower().strip())
-                                new_count += 1
-                            elif not rr.raw_name and (rr.raw_government_id or rr.raw_phone or rr.raw_email):
-                                merged.append(rr)
-                                new_count += 1
+                    # Save merged results
+                    _pmeta["extracted_records"] = [_serialize_pii_record(r) for r in merged]
+                    _pmeta["extraction_status"] = "complete"
+                    _pmeta["retry_added"] = new_count
+                    _pmeta["retry_method"] = _orig_path if retry_records else "presidio_fallback"
+                    pdoc.metadata_json = _pmeta
+                    flag_modified(pdoc, "metadata_json")
+                    all_records.extend(merged[len(existing_records):])
+                    db.commit()
 
-                        # Save merged results
-                        _pmeta["extracted_records"] = [_serialize_pii_record(r) for r in merged]
-                        _pmeta["extraction_status"] = "complete"
-                        _pmeta["retry_added"] = new_count
-                        pdoc.metadata_json = _pmeta
-                        flag_modified(pdoc, "metadata_json")
-                        all_records.extend(merged[len(existing_records):])  # Only add new ones
-                        db.commit()
-
-                        logger.info(
-                            "RETRY OK: %s | existing=%d + new=%d = %d | %.1fs",
-                            pdoc.file_name, len(existing_records), new_count,
-                            len(merged), time.time() - _retry_start,
-                        )
+                    logger.info(
+                        "RETRY OK: %s | method=%s | existing=%d + new=%d = %d | %.1fs",
+                        pdoc.file_name, _pmeta.get("retry_method", "?"),
+                        len(existing_records), new_count, len(merged),
+                        time.time() - _retry_start,
+                    )
                 except Exception as retry_err:
                     logger.warning("RETRY FAILED: %s | %s", pdoc.file_name, type(retry_err).__name__)
 
