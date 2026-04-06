@@ -1,0 +1,454 @@
+[
+  {
+    "filename": "synthetic_pii.csv",
+    "format": "csv",
+    "expected_records": 8,
+    "notes": "Simple tabular CSV with header row",
+    "persons": [
+      {
+        "name": "John Michael Smith",
+        "ssn": "123-45-6789",
+        "dob": "01/15/1990",
+        "email": "john.smith@example.com",
+        "phone": "(555) 123-4567",
+        "address": "123 Main St, Springfield IL 62701"
+      },
+      {
+        "name": "Maria Elena Garcia",
+        "ssn": "234-56-7890",
+        "dob": "03/22/1985",
+        "email": "maria.garcia@example.com",
+        "phone": "(555) 234-5678",
+        "address": "456 Oak Ave, Portland OR 97201"
+      },
+      {
+        "name": "Robert James Wilson",
+        "ssn": "345-67-8901",
+        "dob": "07/04/1978",
+        "email": "r.wilson@example.com",
+        "phone": "(555) 345-6789",
+        "address": "789 Pine Rd, Austin TX 78701"
+      },
+      {
+        "name": "Sarah Ann Johnson",
+        "ssn": "456-78-9012",
+        "dob": "11/30/1992",
+        "email": "s.johnson@example.com",
+        "phone": "(555) 456-7890",
+        "address": "321 Elm Blvd, Denver CO 80201"
+      },
+      {
+        "name": "David Lee Chen",
+        "ssn": "567-89-0123",
+        "dob": "05/18/1988",
+        "email": "david.chen@example.com",
+        "phone": "(555) 567-8901",
+        "address": "654 Maple Ln, Seattle WA 98101"
+      },
+      {
+        "name": "Jennifer Rose Brown",
+        "ssn": "678-90-1234",
+        "dob": "09/12/1995",
+        "email": "j.brown@example.com",
+        "phone": "(555) 678-9012",
+        "address": "987 Cedar Dr, Miami FL 33101"
+      },
+      {
+        "name": "Michael Anthony Davis",
+        "ssn": "789-01-2345",
+        "dob": "02/28/1982",
+        "email": "m.davis@example.com",
+        "phone": "(555) 789-0123",
+        "address": "147 Birch Way, Chicago IL 60601"
+      },
+      {
+        "name": "Emily Kate Martinez",
+        "ssn": "890-12-3456",
+        "dob": "06/15/1993",
+        "email": "e.martinez@example.com",
+        "phone": "(555) 890-1234",
+        "address": "258 Walnut Ct, Phoenix AZ 85001"
+      }
+    ],
+    "org_metadata": {
+      "company_name": "Acme Healthcare Systems Inc.",
+      "company_phone": "(800) 555-0100",
+      "company_email": "privacy@acmehealthcare.com",
+      "sender_name": "Dr. Patricia Williams",
+      "sender_title": "Chief Privacy Officer"
+    },
+    "false_positives_expected": [
+      "Acme Healthcare Systems Inc.",
+      "(800) 555-0100",
+      "Dr. Patricia Williams"
+    ]
+  },
+  {
+    "filename": "synthetic_pii.xlsx",
+    "format": "xlsx",
+    "expected_records": 8,
+    "notes": "Multi-sheet: standard headers + title-row offset + hidden sheet",
+    "persons": [
+      {
+        "name": "John Michael Smith",
+        "ssn": "123-45-6789",
+        "dob": "01/15/1990",
+        "email": "john.smith@example.com",
+        "phone": "(555) 123-4567",
+        "address": "123 Main St, Springfield IL 62701"
+      },
+      {
+        "name": "Maria Elena Garcia",
+        "ssn": "234-56-7890",
+        "dob": "03/22/1985",
+        "email": "maria.garcia@example.com",
+        "phone": "(555) 234-5678",
+        "address": "456 Oak Ave, Portland OR 97201"
+      },
+      {
+        "name": "Robert James Wilson",
+        "ssn": "345-67-8901",
+        "dob": "07/04/1978",
+        "email": "r.wilson@example.com",
+        "phone": "(555) 345-6789",
+        "address": "789 Pine Rd, Austin TX 78701"
+      },
+      {
+        "name": "Sarah Ann Johnson",
+        "ssn": "456-78-9012",
+        "dob": "11/30/1992",
+        "email": "s.johnson@example.com",
+        "phone": "(555) 456-7890",
+        "address": "321 Elm Blvd, Denver CO 80201"
+      },
+      {
+        "name": "David Lee Chen",
+        "ssn": "567-89-0123",
+        "dob": "05/18/1988",
+        "email": "david.chen@example.com",
+        "phone": "(555) 567-8901",
+        "address": "654 Maple Ln, Seattle WA 98101"
+      },
+      {
+        "name": "Jennifer Rose Brown",
+        "ssn": "678-90-1234",
+        "dob": "09/12/1995",
+        "email": "j.brown@example.com",
+        "phone": "(555) 678-9012",
+        "address": "987 Cedar Dr, Miami FL 33101"
+      },
+      {
+        "name": "Michael Anthony Davis",
+        "ssn": "789-01-2345",
+        "dob": "02/28/1982",
+        "email": "m.davis@example.com",
+        "phone": "(555) 789-0123",
+        "address": "147 Birch Way, Chicago IL 60601"
+      },
+      {
+        "name": "Emily Kate Martinez",
+        "ssn": "890-12-3456",
+        "dob": "06/15/1993",
+        "email": "e.martinez@example.com",
+        "phone": "(555) 890-1234",
+        "address": "258 Walnut Ct, Phoenix AZ 85001"
+      }
+    ],
+    "org_metadata": {
+      "company_name": "Acme Healthcare Systems Inc.",
+      "company_phone": "(800) 555-0100",
+      "company_email": "privacy@acmehealthcare.com",
+      "sender_name": "Dr. Patricia Williams",
+      "sender_title": "Chief Privacy Officer"
+    },
+    "false_positives_expected": [
+      "Acme Healthcare Systems Inc.",
+      "(800) 555-0100",
+      "Dr. Patricia Williams"
+    ]
+  },
+  {
+    "filename": "synthetic_pii_legacy.xls",
+    "format": "xls",
+    "expected_records": 4,
+    "notes": "SKIPPED \u2014 xlwt not available, CSV fallback",
+    "persons": [
+      {
+        "name": "John Michael Smith",
+        "ssn": "123-45-6789",
+        "dob": "01/15/1990",
+        "email": "john.smith@example.com",
+        "phone": "(555) 123-4567",
+        "address": "123 Main St, Springfield IL 62701"
+      },
+      {
+        "name": "Maria Elena Garcia",
+        "ssn": "234-56-7890",
+        "dob": "03/22/1985",
+        "email": "maria.garcia@example.com",
+        "phone": "(555) 234-5678",
+        "address": "456 Oak Ave, Portland OR 97201"
+      },
+      {
+        "name": "Robert James Wilson",
+        "ssn": "345-67-8901",
+        "dob": "07/04/1978",
+        "email": "r.wilson@example.com",
+        "phone": "(555) 345-6789",
+        "address": "789 Pine Rd, Austin TX 78701"
+      },
+      {
+        "name": "Sarah Ann Johnson",
+        "ssn": "456-78-9012",
+        "dob": "11/30/1992",
+        "email": "s.johnson@example.com",
+        "phone": "(555) 456-7890",
+        "address": "321 Elm Blvd, Denver CO 80201"
+      }
+    ],
+    "org_metadata": {
+      "company_name": "Acme Healthcare Systems Inc.",
+      "company_phone": "(800) 555-0100",
+      "company_email": "privacy@acmehealthcare.com",
+      "sender_name": "Dr. Patricia Williams",
+      "sender_title": "Chief Privacy Officer"
+    },
+    "false_positives_expected": [
+      "Acme Healthcare Systems Inc.",
+      "(800) 555-0100",
+      "Dr. Patricia Williams"
+    ]
+  },
+  {
+    "filename": "synthetic_breach_report.docx",
+    "format": "docx",
+    "expected_records": 3,
+    "notes": "Prose doc with org metadata header and embedded PII",
+    "persons": [
+      {
+        "name": "John Michael Smith",
+        "ssn": "123-45-6789",
+        "dob": "01/15/1990",
+        "email": "john.smith@example.com",
+        "phone": "(555) 123-4567",
+        "address": "123 Main St, Springfield IL 62701"
+      },
+      {
+        "name": "Maria Elena Garcia",
+        "ssn": "234-56-7890",
+        "dob": "03/22/1985",
+        "email": "maria.garcia@example.com",
+        "phone": "(555) 234-5678",
+        "address": "456 Oak Ave, Portland OR 97201"
+      },
+      {
+        "name": "Robert James Wilson",
+        "ssn": "345-67-8901",
+        "dob": "07/04/1978",
+        "email": "r.wilson@example.com",
+        "phone": "(555) 345-6789",
+        "address": "789 Pine Rd, Austin TX 78701"
+      }
+    ],
+    "org_metadata": {
+      "company_name": "Acme Healthcare Systems Inc.",
+      "company_phone": "(800) 555-0100",
+      "company_email": "privacy@acmehealthcare.com",
+      "sender_name": "Dr. Patricia Williams",
+      "sender_title": "Chief Privacy Officer"
+    },
+    "false_positives_expected": [
+      "Acme Healthcare Systems Inc.",
+      "(800) 555-0100",
+      "Dr. Patricia Williams"
+    ]
+  },
+  {
+    "filename": "synthetic_breach_table.html",
+    "format": "html",
+    "expected_records": 5,
+    "notes": "HTML table with org metadata header",
+    "persons": [
+      {
+        "name": "John Michael Smith",
+        "ssn": "123-45-6789",
+        "dob": "01/15/1990",
+        "email": "john.smith@example.com",
+        "phone": "(555) 123-4567",
+        "address": "123 Main St, Springfield IL 62701"
+      },
+      {
+        "name": "Maria Elena Garcia",
+        "ssn": "234-56-7890",
+        "dob": "03/22/1985",
+        "email": "maria.garcia@example.com",
+        "phone": "(555) 234-5678",
+        "address": "456 Oak Ave, Portland OR 97201"
+      },
+      {
+        "name": "Robert James Wilson",
+        "ssn": "345-67-8901",
+        "dob": "07/04/1978",
+        "email": "r.wilson@example.com",
+        "phone": "(555) 345-6789",
+        "address": "789 Pine Rd, Austin TX 78701"
+      },
+      {
+        "name": "Sarah Ann Johnson",
+        "ssn": "456-78-9012",
+        "dob": "11/30/1992",
+        "email": "s.johnson@example.com",
+        "phone": "(555) 456-7890",
+        "address": "321 Elm Blvd, Denver CO 80201"
+      },
+      {
+        "name": "David Lee Chen",
+        "ssn": "567-89-0123",
+        "dob": "05/18/1988",
+        "email": "david.chen@example.com",
+        "phone": "(555) 567-8901",
+        "address": "654 Maple Ln, Seattle WA 98101"
+      }
+    ],
+    "org_metadata": {
+      "company_name": "Acme Healthcare Systems Inc.",
+      "company_phone": "(800) 555-0100",
+      "company_email": "privacy@acmehealthcare.com",
+      "sender_name": "Dr. Patricia Williams",
+      "sender_title": "Chief Privacy Officer"
+    },
+    "false_positives_expected": [
+      "Acme Healthcare Systems Inc.",
+      "(800) 555-0100",
+      "Dr. Patricia Williams"
+    ]
+  },
+  {
+    "filename": "synthetic_breach_email.eml",
+    "format": "eml",
+    "expected_records": 3,
+    "notes": "Plain-text email with PII in body, sender in From header",
+    "persons": [
+      {
+        "name": "John Michael Smith",
+        "ssn": "123-45-6789",
+        "dob": "01/15/1990",
+        "email": "john.smith@example.com",
+        "phone": "(555) 123-4567",
+        "address": "123 Main St, Springfield IL 62701"
+      },
+      {
+        "name": "Maria Elena Garcia",
+        "ssn": "234-56-7890",
+        "dob": "03/22/1985",
+        "email": "maria.garcia@example.com",
+        "phone": "(555) 234-5678",
+        "address": "456 Oak Ave, Portland OR 97201"
+      },
+      {
+        "name": "Robert James Wilson",
+        "ssn": "345-67-8901",
+        "dob": "07/04/1978",
+        "email": "r.wilson@example.com",
+        "phone": "(555) 345-6789",
+        "address": "789 Pine Rd, Austin TX 78701"
+      }
+    ],
+    "org_metadata": {
+      "company_name": "Acme Healthcare Systems Inc.",
+      "company_phone": "(800) 555-0100",
+      "company_email": "privacy@acmehealthcare.com",
+      "sender_name": "Dr. Patricia Williams",
+      "sender_title": "Chief Privacy Officer"
+    },
+    "false_positives_expected": [
+      "Acme Healthcare Systems Inc.",
+      "(800) 555-0100",
+      "Dr. Patricia Williams"
+    ]
+  },
+  {
+    "filename": "synthetic_pii_list.txt",
+    "format": "txt",
+    "expected_records": 8,
+    "notes": "Plain text with all 8 persons, org metadata header",
+    "persons": [
+      {
+        "name": "John Michael Smith",
+        "ssn": "123-45-6789",
+        "dob": "01/15/1990",
+        "email": "john.smith@example.com",
+        "phone": "(555) 123-4567",
+        "address": "123 Main St, Springfield IL 62701"
+      },
+      {
+        "name": "Maria Elena Garcia",
+        "ssn": "234-56-7890",
+        "dob": "03/22/1985",
+        "email": "maria.garcia@example.com",
+        "phone": "(555) 234-5678",
+        "address": "456 Oak Ave, Portland OR 97201"
+      },
+      {
+        "name": "Robert James Wilson",
+        "ssn": "345-67-8901",
+        "dob": "07/04/1978",
+        "email": "r.wilson@example.com",
+        "phone": "(555) 345-6789",
+        "address": "789 Pine Rd, Austin TX 78701"
+      },
+      {
+        "name": "Sarah Ann Johnson",
+        "ssn": "456-78-9012",
+        "dob": "11/30/1992",
+        "email": "s.johnson@example.com",
+        "phone": "(555) 456-7890",
+        "address": "321 Elm Blvd, Denver CO 80201"
+      },
+      {
+        "name": "David Lee Chen",
+        "ssn": "567-89-0123",
+        "dob": "05/18/1988",
+        "email": "david.chen@example.com",
+        "phone": "(555) 567-8901",
+        "address": "654 Maple Ln, Seattle WA 98101"
+      },
+      {
+        "name": "Jennifer Rose Brown",
+        "ssn": "678-90-1234",
+        "dob": "09/12/1995",
+        "email": "j.brown@example.com",
+        "phone": "(555) 678-9012",
+        "address": "987 Cedar Dr, Miami FL 33101"
+      },
+      {
+        "name": "Michael Anthony Davis",
+        "ssn": "789-01-2345",
+        "dob": "02/28/1982",
+        "email": "m.davis@example.com",
+        "phone": "(555) 789-0123",
+        "address": "147 Birch Way, Chicago IL 60601"
+      },
+      {
+        "name": "Emily Kate Martinez",
+        "ssn": "890-12-3456",
+        "dob": "06/15/1993",
+        "email": "e.martinez@example.com",
+        "phone": "(555) 890-1234",
+        "address": "258 Walnut Ct, Phoenix AZ 85001"
+      }
+    ],
+    "org_metadata": {
+      "company_name": "Acme Healthcare Systems Inc.",
+      "company_phone": "(800) 555-0100",
+      "company_email": "privacy@acmehealthcare.com",
+      "sender_name": "Dr. Patricia Williams",
+      "sender_title": "Chief Privacy Officer"
+    },
+    "false_positives_expected": [
+      "Acme Healthcare Systems Inc.",
+      "(800) 555-0100",
+      "Dr. Patricia Williams"
+    ]
+  }
+]

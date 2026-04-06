@@ -1,0 +1,62 @@
+BREACH NOTIFICATION LIST — Acme Healthcare Systems Inc.
+Prepared by: Dr. Patricia Williams
+Contact: (800) 555-0100
+
+============================================================
+
+Name: John Michael Smith
+SSN: 123-45-6789
+DOB: 01/15/1990
+Email: john.smith@example.com
+Phone: (555) 123-4567
+Address: 123 Main St, Springfield IL 62701
+----------------------------------------
+Name: Maria Elena Garcia
+SSN: 234-56-7890
+DOB: 03/22/1985
+Email: maria.garcia@example.com
+Phone: (555) 234-5678
+Address: 456 Oak Ave, Portland OR 97201
+----------------------------------------
+Name: Robert James Wilson
+SSN: 345-67-8901
+DOB: 07/04/1978
+Email: r.wilson@example.com
+Phone: (555) 345-6789
+Address: 789 Pine Rd, Austin TX 78701
+----------------------------------------
+Name: Sarah Ann Johnson
+SSN: 456-78-9012
+DOB: 11/30/1992
+Email: s.johnson@example.com
+Phone: (555) 456-7890
+Address: 321 Elm Blvd, Denver CO 80201
+----------------------------------------
+Name: David Lee Chen
+SSN: 567-89-0123
+DOB: 05/18/1988
+Email: david.chen@example.com
+Phone: (555) 567-8901
+Address: 654 Maple Ln, Seattle WA 98101
+----------------------------------------
+Name: Jennifer Rose Brown
+SSN: 678-90-1234
+DOB: 09/12/1995
+Email: j.brown@example.com
+Phone: (555) 678-9012
+Address: 987 Cedar Dr, Miami FL 33101
+----------------------------------------
+Name: Michael Anthony Davis
+SSN: 789-01-2345
+DOB: 02/28/1982
+Email: m.davis@example.com
+Phone: (555) 789-0123
+Address: 147 Birch Way, Chicago IL 60601
+----------------------------------------
+Name: Emily Kate Martinez
+SSN: 890-12-3456
+DOB: 06/15/1993
+Email: e.martinez@example.com
+Phone: (555) 890-1234
+Address: 258 Walnut Ct, Phoenix AZ 85001
+----------------------------------------
