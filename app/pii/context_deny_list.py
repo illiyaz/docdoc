@@ -436,10 +436,21 @@ def is_label_as_person(detected_text: str) -> tuple[bool, str]:
     if len(words) >= 2 and words[-1] in _ROAD_SUFFIXES:
         return True, f"road_name: '{text}' ends with road suffix '{words[-1]}'"
 
-    # 3. Truncated single-initial names ("James L", "Amanda L", "Ssword Ex")
-    #    Real names have a last name with 2+ chars
+    # 3. Truncated single-initial names ("James L", "Amanda L")
+    #    Real names have a last name with 2+ chars.  Exception: known short
+    #    surnames (Le, Wu, Li, Ma, Xu, Ho, Hu, He, Ye, Yu, Lo, Lu, Do, Jo, etc.)
+    #    and suffixes (Jr, Sr, II, IV).
     if len(words) == 2 and len(words[-1]) <= 2 and words[-1].isalpha():
-        return True, f"truncated_name: '{text}' has single-char last component"
+        last_lower = words[-1].lower()
+        _LEGIT_SHORT = {
+            "le", "wu", "li", "ma", "xu", "ho", "hu", "he", "ye", "yu",
+            "lo", "lu", "do", "ha", "go", "qi", "fu", "gu", "su", "tu",
+            "bo", "bi", "di", "ji", "mu", "ni", "nu", "pu", "ru", "si",
+            "jo",  # double first names: "Carla Jo"
+            "jr", "sr", "ii", "iv",  # suffixes
+        }
+        if last_lower not in _LEGIT_SHORT:
+            return True, f"truncated_name: '{text}' has single-char last component"
 
     # 4. Very short — likely a fragment
     if len(text) < 4:
