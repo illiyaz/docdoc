@@ -808,9 +808,9 @@ def test_sample_tables_only_samples_n_pages():
 
     with patch("app.readers.pdf_reader.pdfplumber") as mock_plumber:
         mock_plumber.open.return_value.__enter__.return_value = plumber_doc
-        reader._sample_tables(mock_doc, onset_page=0, n=3)
+        reader._sample_tables(mock_doc, onset_page=0, n=5)
 
-    assert len(access_log) == 3
+    assert len(access_log) == 5
 
 
 # ---------------------------------------------------------------------------

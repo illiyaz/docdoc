@@ -217,7 +217,7 @@ class PDFReader(BaseReader):
         return text_count / len(sample_pages)
 
     def _sample_tables(
-        self, doc: object, onset_page: int, n: int = 3,
+        self, doc: object, onset_page: int, n: int = 5,
     ) -> list[str]:
         """Sample N pages with pdfplumber to detect table column headers.
 
@@ -226,7 +226,7 @@ class PDFReader(BaseReader):
         of header strings (lowercased).  Returns empty list if no tables
         found or pdfplumber fails.
 
-        This is lightweight — pdfplumber only processes 3 pages, not 3000.
+        This is lightweight — pdfplumber only processes 5 pages, not 3000.
         """
         total_pages = doc.page_count
         stride = max(1, (total_pages - onset_page) // n)
