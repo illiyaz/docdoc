@@ -135,24 +135,48 @@ class PDFReader(BaseReader):
 
         Streams pages one at a time; doc._forget_page is called after each
         page to release memory immediately (CLAUDE.md § 2 memory rule).
+
+        For docs >500 pages, skips per-page OCR (too expensive — 13GB+ RAM).
+        Text layer is extracted as-is; truly scanned pages produce empty blocks
+        and are handled later by the extraction selector or vision path.
         """
         doc = fitz.open(str(self.path))
         onset_page = find_data_onset(doc)
         stitcher = PageStitcher()
         # OCR engine created lazily on first scanned/corrupted page
+        # DISABLED for large docs — per-page OCR is too expensive
         ocr_engine = None
+        _skip_ocr = doc.page_count > 500
+        if _skip_ocr:
+            logger.info(
+                "Large PDF (%d pages): skipping per-page OCR in reader, text layer only",
+                doc.page_count,
+            )
         document_id = str(self.path)
         all_blocks: list[ExtractedBlock] = []
 
-        with pdfplumber.open(str(self.path)) as plumber_doc:
+        # For large docs, skip pdfplumber (table extraction) — text layer only
+        _plumber_ctx = pdfplumber.open(str(self.path)) if not _skip_ocr else None
+        try:
+            plumber_doc = _plumber_ctx.__enter__() if _plumber_ctx else None
             for page_num in range(onset_page, len(doc)):
                 page = doc.load_page(page_num)
-                page_blocks, ocr_engine = self._process_page(
-                    page, page_num, plumber_doc, stitcher, ocr_engine
-                )
+                if _skip_ocr:
+                    # Fast path: text extraction only, no tables, no OCR
+                    prose_blocks = self._extract_prose(page, page_num, set())
+                    page_text = "\n".join(b.text for b in prose_blocks)
+                    stitcher.stitch(page_num, page_text)
+                    page_blocks = prose_blocks
+                else:
+                    page_blocks, ocr_engine = self._process_page(
+                        page, page_num, plumber_doc, stitcher, ocr_engine,
+                    )
                 all_blocks.extend(page_blocks)
                 doc._forget_page(page_num)
                 self._write_checkpoint(document_id, page_num, all_blocks)
+        finally:
+            if _plumber_ctx:
+                _plumber_ctx.__exit__(None, None, None)
 
         doc.close()
         return all_blocks
@@ -182,6 +206,9 @@ class PDFReader(BaseReader):
         )
 
         if label == "digital":
+            prose_blocks = self._extract_prose(page, page_num, table_bboxes)
+        elif ocr_engine == "SKIP":
+            # Large doc — skip OCR, extract whatever text layer exists
             prose_blocks = self._extract_prose(page, page_num, table_bboxes)
         else:
             # scanned or corrupted: render to raster image and OCR
