@@ -98,6 +98,16 @@ ORGANIZATION_SUFFIXES = frozenset({
     "solutions", "systems", "technologies", "enterprises",
 })
 
+# Multi-word legal entity patterns (trust, estate, foundation) that indicate
+# the text is a legal entity name, not a person.  Requires at least one
+# qualifying keyword anywhere in the text (not just as suffix).
+_LEGAL_ENTITY_KEYWORDS = re.compile(
+    r"\b(?:revocable|irrevocable|trust\s+agreement|living\s+trust|"
+    r"family\s+trust|(?:revocable|irrevocable)\s+trust|"
+    r"inter\s+vivos|testamentary|estate\s+of|foundation\b)",
+    re.IGNORECASE,
+)
+
 
 def is_likely_organization(text: str) -> bool:
     """Check if detected PERSON text is actually an organization.
@@ -115,6 +125,9 @@ def is_likely_organization(text: str) -> bool:
         return True
     # "Foo & Bar" pattern common in firms (3+ words with & as penultimate)
     if len(words) >= 3 and words[-2] == "&":
+        return True
+    # Legal entity patterns (trusts, estates, foundations)
+    if _LEGAL_ENTITY_KEYWORDS.search(text):
         return True
     return False
 
