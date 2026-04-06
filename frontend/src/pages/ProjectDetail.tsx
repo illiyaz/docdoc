@@ -4123,9 +4123,9 @@ function SubjectsTab({ projectId }: { projectId: string }) {
                     <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${STATUS_COLORS[s.review_status as string] ?? "bg-gray-100"}`}>
                       {s.review_status as string}
                     </span>
-                    {s.notification_required && (
+                    {s.notification_required ? (
                       <span className="ml-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-orange-100 text-orange-700">NOTIFY</span>
-                    )}
+                    ) : null}
                   </td>
                   <td className="px-3 py-2">
                     <div className="flex flex-wrap gap-0.5">

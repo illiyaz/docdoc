@@ -56,6 +56,19 @@ export interface JobStatus {
   created_at: string | null
 }
 
+export interface FieldFrequency {
+  pii_type: string
+  page_count: number
+  total_pages: number
+  is_org_metadata: boolean
+}
+
+export interface PersonFieldContext {
+  person_name: string
+  role: string
+  pii_types: string[]
+}
+
 export interface MaskedSubject {
   subject_id: string
   canonical_name: string
@@ -65,6 +78,8 @@ export interface MaskedSubject {
   notification_required: boolean
   review_status: string
   merge_confidence: number | null
+  field_frequency?: FieldFrequency[]
+  person_context?: PersonFieldContext[]
 }
 
 export interface AuditEvent {

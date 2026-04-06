@@ -316,6 +316,103 @@ def is_likely_false_positive(
 
 
 # ---------------------------------------------------------------------------
+# Email sender role filtering (Overnight Pipeline — Phase 3)
+# ---------------------------------------------------------------------------
+# In email-based extraction, the sender's name, email, and phone are
+# organizational metadata — not breach-subject PII.
+
+_EMAIL_SENDER_LABELS = frozenset({
+    "from", "sender", "sent by", "on behalf of",
+    "regards", "sincerely", "best regards", "kind regards",
+    "thank you", "thanks",
+})
+
+_EMAIL_SENDER_LABEL_PATTERN = re.compile(
+    r"\b(?:" + "|".join(re.escape(lbl) for lbl in sorted(_EMAIL_SENDER_LABELS, key=len, reverse=True)) + r")\s*[,:]*\s*$",
+    re.IGNORECASE,
+)
+
+
+def is_email_sender_context(
+    detected_text: str,
+    entity_type: str,
+    surrounding_text: str,
+) -> tuple[bool, str]:
+    """Check if a detection appears in an email sender/signature context.
+
+    Values detected near "From:", "Regards,", email signatures etc.
+    are typically the sender — not a breach subject.
+
+    Parameters
+    ----------
+    detected_text:
+        The text span detected as PII.
+    entity_type:
+        The Presidio entity type.
+    surrounding_text:
+        Context window around the detection.
+
+    Returns
+    -------
+    tuple[bool, str]
+        (is_sender, reason)
+    """
+    if entity_type not in ("PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER"):
+        return False, ""
+
+    if not surrounding_text:
+        return False, ""
+
+    # Check if sender label appears anywhere in surrounding text
+    # The label could appear before or after the detected text
+    # Use a broader pattern that matches labels anywhere in context
+    sender_context_pattern = re.compile(
+        r"\b(?:" + "|".join(
+            re.escape(lbl) for lbl in sorted(_EMAIL_SENDER_LABELS, key=len, reverse=True)
+        ) + r")\b",
+        re.IGNORECASE,
+    )
+    if sender_context_pattern.search(surrounding_text):
+        return True, (
+            f"email_sender_context: '{entity_type}' detected near sender label, "
+            "likely organizational metadata"
+        )
+
+    return False, ""
+
+
+# ---------------------------------------------------------------------------
+# Label-as-PII rejection (Overnight Pipeline — Phase 3)
+# ---------------------------------------------------------------------------
+# Common labels and category names that get misclassified as PERSON names
+# due to title-case or ALL-CAPS formatting.
+
+LABEL_DENY_LIST = frozenset({
+    "drug test", "other transactions", "city of federal way",
+    "group rochester", "johnstone supply", "total amount",
+    "account holder", "primary care", "health plan",
+    "emergency contact", "next of kin", "authorized representative",
+    "legal guardian", "power of attorney", "billing address",
+    "shipping address", "mailing address", "home address",
+    "work address", "physical address", "permanent address",
+})
+
+
+def is_label_as_person(detected_text: str) -> tuple[bool, str]:
+    """Check if detected PERSON text is actually a label or category name.
+
+    Returns
+    -------
+    tuple[bool, str]
+        (is_label, reason)
+    """
+    text_lower = detected_text.strip().lower()
+    if text_lower in LABEL_DENY_LIST:
+        return True, f"label_as_person: '{detected_text}' is a label/category, not a person name"
+    return False, ""
+
+
+# ---------------------------------------------------------------------------
 # Cross-type suppression (Step 17)
 # ---------------------------------------------------------------------------
 

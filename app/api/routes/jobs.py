@@ -31,7 +31,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_db, get_protocol_registry
 from app.core.settings import get_settings
-from app.db.models import Document, IngestionRun, NotificationList, NotificationSubject, Project
+from app.db.models import Document, Extraction, IngestionRun, NotificationList, NotificationSubject, Project
 from app.notification.list_builder import build_notification_list, get_notification_subjects
 from app.protocols.registry import ProtocolRegistry
 from app.rra.deduplicator import Deduplicator
@@ -107,7 +107,10 @@ def _mask_phone(phone: str | None) -> str | None:
     return f"***-***-{digits[-4:]}" if len(digits) >= 4 else "***-***-****"
 
 
-def _masked_subject(ns: NotificationSubject) -> dict:
+def _masked_subject(
+    ns: NotificationSubject,
+    db: Session | None = None,
+) -> dict:
     settings = get_settings()
     if settings.pii_masking_enabled:
         email = _mask_email(ns.canonical_email)
@@ -115,7 +118,8 @@ def _masked_subject(ns: NotificationSubject) -> dict:
     else:
         email = ns.canonical_email
         phone = ns.canonical_phone
-    return {
+
+    result = {
         "subject_id": str(ns.subject_id),
         "canonical_name": ns.canonical_name,
         "canonical_email": email,
@@ -124,6 +128,90 @@ def _masked_subject(ns: NotificationSubject) -> dict:
         "notification_required": ns.notification_required,
         "review_status": ns.review_status,
     }
+
+    # Enrich with field frequency and person context when db is available
+    if db is not None:
+        try:
+            result.update(_compute_field_enrichment(ns, db))
+        except Exception:
+            # Never break the results endpoint for enrichment failures
+            logger.debug(
+                "Field enrichment failed for subject %s", ns.subject_id,
+                exc_info=True,
+            )
+
+    return result
+
+
+def _compute_field_enrichment(
+    ns: NotificationSubject,
+    db: Session,
+) -> dict:
+    """Compute field_frequency and person_context for a subject.
+
+    Uses the source_records JSON on the NotificationSubject to look up
+    Extraction records and compute page-level frequency and person context.
+    """
+    from app.pii.schema_filter import compute_field_frequency, build_person_context
+
+    source_records = ns.source_records or []
+    if not source_records:
+        return {}
+
+    # Gather document IDs from source records to query extractions
+    doc_ids: set[str] = set()
+    for rec in source_records:
+        if isinstance(rec, dict):
+            doc_id = rec.get("document_id") or rec.get("doc_id")
+            if doc_id:
+                doc_ids.add(str(doc_id))
+
+    if not doc_ids:
+        return {}
+
+    # Query extractions for these documents
+    try:
+        extractions = db.execute(
+            select(Extraction).where(
+                Extraction.document_id.in_(doc_ids)
+            )
+        ).scalars().all()
+    except Exception:
+        return {}
+
+    if not extractions:
+        return {}
+
+    # Compute total pages from source_page_range or extraction evidence_pages
+    total_pages = 1
+    if ns.source_page_range:
+        try:
+            parts = ns.source_page_range.split("-")
+            if len(parts) == 2:
+                total_pages = max(1, int(parts[1]) - int(parts[0]) + 1)
+            else:
+                total_pages = max(1, int(parts[0]))
+        except (ValueError, IndexError):
+            pass
+    if total_pages <= 1:
+        # Estimate from extraction evidence pages
+        all_pages = {
+            ext.evidence_page for ext in extractions
+            if ext.evidence_page is not None
+        }
+        if all_pages:
+            total_pages = max(all_pages) - min(all_pages) + 1
+
+    field_freq = compute_field_frequency(extractions, total_pages)
+    person_ctx = build_person_context(extractions)
+
+    enrichment: dict = {}
+    if field_freq:
+        enrichment["field_frequency"] = [f.to_dict() for f in field_freq]
+    if person_ctx:
+        enrichment["person_context"] = [p.to_dict() for p in person_ctx]
+
+    return enrichment
 
 
 # ---------------------------------------------------------------------------
@@ -1089,7 +1177,7 @@ def get_job_results(job_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
 
     subjects = get_notification_subjects(nl, db)
-    return [_masked_subject(s) for s in subjects]
+    return [_masked_subject(s, db=db) for s in subjects]
 
 
 @router.get("/{job_id}/status", summary="Get job pipeline status with per-stage breakdown")

@@ -4,7 +4,7 @@ import { useContext } from "react"
 import { ArrowLeft } from "lucide-react"
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
 import { MaskedField } from "@/components/MaskedField"
-import { PIIBadge } from "@/components/PIIBadge"
+import { SmartFieldFilter } from "@/components/SmartFieldFilter"
 import { StatusBadge } from "@/components/StatusBadge"
 import { AuditTimeline } from "@/components/AuditTimeline"
 import { MergeExplanation } from "@/components/MergeExplanation"
@@ -95,21 +95,17 @@ export function SubjectDetail() {
             </CardContent>
           </Card>
 
-          {/* Card 2 — PII Inventory */}
+          {/* Card 2 — PII Inventory (Smart Field Filter) */}
           <Card>
             <CardHeader>
               <CardTitle>Data Elements Found</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="flex flex-wrap gap-2 mb-3">
-                {(subject.pii_types_found ?? []).map((t) => (
-                  <PIIBadge key={t} type={t} />
-                ))}
-              </div>
-              <p className="text-xs text-muted-foreground">
-                {(subject.pii_types_found ?? []).length} data element type
-                {(subject.pii_types_found ?? []).length !== 1 ? "s" : ""} identified
-              </p>
+              <SmartFieldFilter
+                piiTypes={subject.pii_types_found ?? []}
+                fieldFrequency={subject.field_frequency}
+                personContext={subject.person_context}
+              />
             </CardContent>
           </Card>
         </>

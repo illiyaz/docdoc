@@ -391,3 +391,356 @@ class SchemaFilter:
             "SchemaFilter %s: entity_type=%s reason=%s",
             action, entity_type, reason,
         )
+
+
+# ---------------------------------------------------------------------------
+# Frequency-based value suppression (Overnight Pipeline — Phase 3)
+# ---------------------------------------------------------------------------
+# Detects specific values that appear on >80% of pages, indicating
+# organizational metadata (letterhead addresses, company phones, etc.)
+# rather than subject PII.
+
+# PII types eligible for value-frequency suppression
+_VALUE_FREQ_ELIGIBLE_TYPES = frozenset({
+    "PERSON", "LOCATION", "ADDRESS", "PHONE_NUMBER", "EMAIL_ADDRESS",
+    "ORGANIZATION", "URL", "FAX_NUMBER",
+    # lowercase variants for flexibility
+    "person", "location", "address", "phone_number", "email_address",
+    "organization", "url", "fax_number",
+})
+
+# Threshold: if a specific value appears on more than this fraction
+# of pages, flag it as organizational metadata
+_VALUE_FREQUENCY_THRESHOLD = 0.80
+
+# Minimum pages before frequency analysis is meaningful
+_MIN_PAGES_FOR_FREQUENCY = 3
+
+# Placeholder / blank patterns to always suppress as PERSON
+_BLANK_PERSON_PATTERN = re.compile(r"^[\s_\-.*]+$")
+
+
+@dataclass
+class HighFrequencyValue:
+    """A PII value detected as organizational metadata due to high page frequency."""
+
+    value: str
+    pii_type: str
+    page_count: int
+    total_pages: int
+    frequency: float  # page_count / total_pages
+
+    def to_dict(self) -> dict:
+        return {
+            "value_masked": self.value[:2] + "***" if len(self.value) > 4 else "***",
+            "pii_type": self.pii_type,
+            "page_count": self.page_count,
+            "total_pages": self.total_pages,
+            "frequency": round(self.frequency, 3),
+        }
+
+
+class ValueFrequencyFilter:
+    """Detects and suppresses high-frequency PII values within a document.
+
+    Values that appear on >80% of pages are almost certainly organizational
+    metadata (letterhead, footer contact info, company name) rather than
+    breach-subject PII.
+
+    Usage
+    -----
+    1. Build the filter from extraction records::
+
+        vff = ValueFrequencyFilter.from_extractions(extractions, total_pages)
+
+    2. Check individual values::
+
+        is_org, reason = vff.is_org_metadata("555-0100", "PHONE_NUMBER")
+
+    3. Filter a list of detections::
+
+        kept, suppressed = vff.filter_detections(detections)
+    """
+
+    def __init__(
+        self,
+        high_freq_values: dict[str, HighFrequencyValue] | None = None,
+    ) -> None:
+        self._high_freq: dict[str, HighFrequencyValue] = high_freq_values or {}
+
+    @classmethod
+    def from_extractions(
+        cls,
+        extractions: list,
+        total_pages: int,
+        threshold: float = _VALUE_FREQUENCY_THRESHOLD,
+        min_pages: int = _MIN_PAGES_FOR_FREQUENCY,
+    ) -> "ValueFrequencyFilter":
+        """Build a ValueFrequencyFilter from extraction records.
+
+        Parameters
+        ----------
+        extractions:
+            List of objects with ``pii_type``, ``hashed_value`` or ``detected_text``,
+            and ``evidence_page`` attributes.
+        total_pages:
+            Total pages in the source document.
+        threshold:
+            Fraction of pages above which a value is considered org metadata.
+        min_pages:
+            Minimum document page count for frequency analysis to activate.
+
+        Returns
+        -------
+        ValueFrequencyFilter
+        """
+        if total_pages < min_pages:
+            return cls()
+
+        # Collect pages per (pii_type, value_key)
+        value_pages: dict[tuple[str, str], set[int]] = {}
+        value_samples: dict[tuple[str, str], str] = {}  # keep one sample for logging
+
+        for ext in extractions:
+            pii_type = getattr(ext, "pii_type", None)
+            page = getattr(ext, "evidence_page", None)
+            if pii_type is None or page is None:
+                continue
+
+            # Use hashed_value for dedup key; fall back to detected_text
+            val_key = getattr(ext, "hashed_value", None) or ""
+            if not val_key:
+                val_key = (getattr(ext, "detected_text", None) or "").strip().lower()
+            if not val_key:
+                continue
+
+            key = (pii_type.upper(), val_key)
+            if key not in value_pages:
+                value_pages[key] = set()
+                # Store a masked sample for audit
+                raw = getattr(ext, "detected_text", None) or val_key
+                value_samples[key] = raw
+
+            value_pages[key].add(page)
+
+        # Identify high-frequency values
+        high_freq: dict[str, HighFrequencyValue] = {}
+        for (pii_type, val_key), pages in value_pages.items():
+            page_count = len(pages)
+            freq = page_count / total_pages
+            if freq >= threshold and pii_type.upper() in _VALUE_FREQ_ELIGIBLE_TYPES:
+                lookup_key = f"{pii_type}:{val_key}"
+                high_freq[lookup_key] = HighFrequencyValue(
+                    value=value_samples.get((pii_type, val_key), val_key),
+                    pii_type=pii_type,
+                    page_count=page_count,
+                    total_pages=total_pages,
+                    frequency=freq,
+                )
+
+        if high_freq:
+            logger.info(
+                "ValueFrequencyFilter: identified %d high-frequency values "
+                "(threshold=%.0f%%, %d pages)",
+                len(high_freq), threshold * 100, total_pages,
+            )
+
+        return cls(high_freq_values=high_freq)
+
+    def is_org_metadata(self, value: str, pii_type: str) -> tuple[bool, str]:
+        """Check if a specific value is flagged as organizational metadata.
+
+        Returns
+        -------
+        tuple[bool, str]
+            (is_org, reason)
+        """
+        val_key = value.strip().lower()
+        lookup = f"{pii_type.upper()}:{val_key}"
+
+        if lookup in self._high_freq:
+            hfv = self._high_freq[lookup]
+            return True, (
+                f"high_frequency_value: appears on {hfv.page_count}/{hfv.total_pages} "
+                f"pages ({hfv.frequency:.0%}), likely organizational metadata"
+            )
+
+        return False, ""
+
+    @property
+    def flagged_values(self) -> list[HighFrequencyValue]:
+        """Return all flagged high-frequency values for audit display."""
+        return sorted(self._high_freq.values(), key=lambda v: -v.frequency)
+
+
+def is_blank_or_placeholder(text: str) -> bool:
+    """Return True if text is blank, all underscores, or a placeholder pattern.
+
+    These should never be treated as valid PII values.
+    """
+    if not text or not text.strip():
+        return True
+    return bool(_BLANK_PERSON_PATTERN.match(text.strip()))
+
+
+# ---------------------------------------------------------------------------
+# Frequency-based analysis (Phase 2 — UI audit improvements)
+# ---------------------------------------------------------------------------
+
+# PII types that are commonly organizational metadata when repeated
+_ORG_CANDIDATE_TYPES = frozenset({
+    "address", "phone", "phone_number", "email", "email_address",
+    "organization", "url", "fax", "fax_number",
+})
+
+# Threshold: if a value appears on more than this fraction of pages, it's
+# likely organizational metadata rather than subject PII
+_ORG_FREQUENCY_THRESHOLD = 0.80
+
+
+@dataclass
+class FieldFrequency:
+    """Frequency metadata for a single PII type across document pages."""
+
+    pii_type: str
+    page_count: int         # number of distinct pages this type appears on
+    total_pages: int        # total pages in the document
+    is_org_metadata: bool   # True if frequency + type suggest org metadata
+
+    def to_dict(self) -> dict:
+        return {
+            "pii_type": self.pii_type,
+            "page_count": self.page_count,
+            "total_pages": self.total_pages,
+            "is_org_metadata": self.is_org_metadata,
+        }
+
+
+@dataclass
+class PersonFieldContext:
+    """Groups PII types by the person they belong to."""
+
+    person_name: str
+    role: str               # "primary_subject", "related_party", "institutional"
+    pii_types: list[str]
+
+    def to_dict(self) -> dict:
+        return {
+            "person_name": self.person_name,
+            "role": self.role,
+            "pii_types": self.pii_types,
+        }
+
+
+def compute_field_frequency(
+    extractions: list,
+    total_pages: int,
+) -> list[FieldFrequency]:
+    """Compute per-PII-type page frequency from extraction records.
+
+    Parameters
+    ----------
+    extractions:
+        List of Extraction ORM objects (must have ``pii_type`` and
+        ``evidence_page`` attributes).
+    total_pages:
+        Total number of pages in the source document(s).
+
+    Returns
+    -------
+    list[FieldFrequency]
+        One entry per distinct ``pii_type``, sorted by page_count descending.
+    """
+    if total_pages < 1:
+        total_pages = 1
+
+    # Collect distinct pages per pii_type
+    type_pages: dict[str, set[int]] = {}
+    for ext in extractions:
+        pii_type = getattr(ext, "pii_type", None)
+        page = getattr(ext, "evidence_page", None)
+        if pii_type is None:
+            continue
+        pii_lower = pii_type.lower()
+        if pii_lower not in type_pages:
+            type_pages[pii_lower] = set()
+        if page is not None:
+            type_pages[pii_lower].add(page)
+
+    results: list[FieldFrequency] = []
+    for pii_type, pages in type_pages.items():
+        page_count = len(pages) if pages else 1
+        ratio = page_count / total_pages
+        is_org = (
+            ratio >= _ORG_FREQUENCY_THRESHOLD
+            and pii_type in _ORG_CANDIDATE_TYPES
+        )
+        results.append(FieldFrequency(
+            pii_type=pii_type,
+            page_count=page_count,
+            total_pages=total_pages,
+            is_org_metadata=is_org,
+        ))
+
+    results.sort(key=lambda f: f.page_count, reverse=True)
+    return results
+
+
+def build_person_context(
+    extractions: list,
+    schema_people: list | None = None,
+) -> list[PersonFieldContext]:
+    """Group PII types by person using entity_role from extractions.
+
+    Parameters
+    ----------
+    extractions:
+        List of Extraction ORM objects (must have ``pii_type`` and
+        ``entity_role`` attributes).
+    schema_people:
+        Optional list of PersonContext objects from DocumentSchema.
+
+    Returns
+    -------
+    list[PersonFieldContext]
+        One entry per distinct person/role combination.
+    """
+    # Build role → pii_types mapping from extractions
+    role_types: dict[str, set[str]] = {}
+    for ext in extractions:
+        role = getattr(ext, "entity_role", None) or "unknown"
+        pii_type = getattr(ext, "pii_type", None)
+        if pii_type is None:
+            continue
+        if role not in role_types:
+            role_types[role] = set()
+        role_types[role].add(pii_type.lower())
+
+    # Try to match roles to names from schema people
+    role_names: dict[str, str] = {}
+    if schema_people:
+        for person in schema_people:
+            name = getattr(person, "name", "")
+            role = getattr(person, "role", "unknown")
+            if name and role not in role_names:
+                role_names[role] = name
+
+    results: list[PersonFieldContext] = []
+    for role, types in role_types.items():
+        person_name = role_names.get(role, role.replace("_", " ").title())
+        results.append(PersonFieldContext(
+            person_name=person_name,
+            role=role,
+            pii_types=sorted(types),
+        ))
+
+    # Sort: primary_subject first, then alphabetically
+    def sort_key(pc: PersonFieldContext) -> tuple:
+        if pc.role == "primary_subject":
+            return (0, pc.person_name)
+        if pc.role == "related_party":
+            return (1, pc.person_name)
+        return (2, pc.person_name)
+
+    results.sort(key=sort_key)
+    return results
