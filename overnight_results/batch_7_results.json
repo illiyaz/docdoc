@@ -1,0 +1,98 @@
+{
+  "results": [
+    {
+      "total_pages": 1,
+      "extraction_mode": "ocr_regex",
+      "total_records": 3,
+      "fields": {
+        "LOCATION": 2,
+        "PHONE_NUMBER": 2,
+        "PERSON": 2
+      },
+      "pages_ocrd": 1,
+      "ocr_chars": 1247,
+      "filename": "Vamp0000071981.pdf",
+      "extension": ".pdf",
+      "size_bytes": 952952,
+      "time_seconds": 1.07
+    },
+    {
+      "total_pages": 1,
+      "extraction_mode": "ocr_regex",
+      "total_records": 5,
+      "fields": {
+        "PERSON": 5,
+        "LOCATION": 2
+      },
+      "pages_ocrd": 1,
+      "ocr_chars": 812,
+      "filename": "Vamp0000071987.pdf",
+      "extension": ".pdf",
+      "size_bytes": 840817,
+      "time_seconds": 0.65
+    },
+    {
+      "total_pages": 17,
+      "extraction_mode": "quick_regex",
+      "total_records": 0,
+      "filename": "Vamp0000072380.pdf",
+      "extension": ".pdf",
+      "size_bytes": 83308,
+      "time_seconds": 0.06
+    },
+    {
+      "total_pages": 3,
+      "extraction_mode": "ocr_regex",
+      "total_records": 2,
+      "fields": {
+        "LOCATION": 1,
+        "PHONE_NUMBER": 2
+      },
+      "pages_ocrd": 3,
+      "ocr_chars": 9256,
+      "filename": "Vamp0000074646.pdf",
+      "extension": ".pdf",
+      "size_bytes": 833880,
+      "time_seconds": 6.47
+    }
+  ],
+  "total_records": 10,
+  "records_sample": [
+    {
+      "LOCATION": "7879 Oswego Rd",
+      "PHONE_NUMBER": "(315) 622-2000"
+    },
+    {
+      "PERSON": "SHIELDS, GEORGE",
+      "LOCATION": "405 TAMARACK STREET",
+      "PHONE_NUMBER": "(585) 935-1147\n\n-"
+    },
+    {
+      "PERSON": "ZALEPESKI, TIMOTHY"
+    },
+    {
+      "PERSON": "Karen Craft",
+      "LOCATION": "18 HIGH POINT TRL"
+    },
+    {
+      "PERSON": "Danny Blaine",
+      "LOCATION": "80 State Street"
+    },
+    {
+      "PERSON": "Albany New"
+    },
+    {
+      "PERSON": "Code\nOrthodontic"
+    },
+    {
+      "PERSON": "Retention Appliance"
+    },
+    {
+      "LOCATION": "3140 SWEET RD",
+      "PHONE_NUMBER": "315-677-5555"
+    },
+    {
+      "PHONE_NUMBER": "(832) 437-0495"
+    }
+  ]
+}

@@ -12,7 +12,8 @@
         "3738594.pdf",
         "3738641.pdf"
       ],
-      "status": "pending"
+      "status": "complete",
+      "total_records": 332
     },
     {
       "batch": 2,
@@ -24,7 +25,8 @@
         "AWIR-DOC.00000001.00000124.00000482.pdf",
         "AWIR-DOC.00000038.15.pdf"
       ],
-      "status": "pending"
+      "status": "complete",
+      "total_records": 291
     },
     {
       "batch": 3,
@@ -36,7 +38,8 @@
         "Complex1.pdf",
         "EdmondsSD_0003650859.pdf"
       ],
-      "status": "pending"
+      "status": "complete",
+      "total_records": 505
     },
     {
       "batch": 4,
@@ -48,7 +51,8 @@
         "Vamp0000068240.pdf",
         "Vamp0000068247.pdf"
       ],
-      "status": "pending"
+      "status": "complete",
+      "total_records": 1083
     },
     {
       "batch": 5,
@@ -60,7 +64,8 @@
         "Vamp0000068368.msg",
         "Vamp0000068375.msg"
       ],
-      "status": "pending"
+      "status": "complete",
+      "total_records": 49
     },
     {
       "batch": 6,
@@ -72,7 +77,8 @@
         "Vamp0000069297.xlsx",
         "WashingtonCMD_0000102080.pdf"
       ],
-      "status": "pending"
+      "status": "complete",
+      "total_records": 154
     },
     {
       "batch": 7,
@@ -83,7 +89,8 @@
         "Vamp0000072380.pdf",
         "Vamp0000074646.pdf"
       ],
-      "status": "pending"
+      "status": "complete",
+      "total_records": 10
     }
   ]
 }

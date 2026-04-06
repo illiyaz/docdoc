@@ -1,0 +1,433 @@
+{
+  "results": [
+    {
+      "error": "pillow-heif not installed \u2014 pip install pillow-heif",
+      "filename": "Vamp0000068253.heic",
+      "extension": ".heic",
+      "size_bytes": 1479450,
+      "time_seconds": 0.0
+    },
+    {
+      "total_records": 0,
+      "fields": {},
+      "ocr_chars": 159,
+      "method": "tesseract_ocr",
+      "filename": "Vamp0000068254.jpg",
+      "extension": ".jpg",
+      "size_bytes": 288063,
+      "time_seconds": 6.7
+    },
+    {
+      "total_records": 4,
+      "fields": {
+        "ACCOUNT_NUMBER": 4
+      },
+      "filename": "Vamp0000068722.xls",
+      "extension": ".xls",
+      "size_bytes": 207872,
+      "time_seconds": 0.01
+    },
+    {
+      "total_records": 62,
+      "fields": {
+        "PERSON": 62,
+        "EMAIL_ADDRESS": 3
+      },
+      "sheets": [
+        {
+          "sheet": "Sheet1",
+          "columns_mapped": {
+            "PERSON": "Employee Name:____________________",
+            "EMAIL_ADDRESS": "Personal Email:__________________________"
+          },
+          "fields": {
+            "PERSON": 62,
+            "EMAIL_ADDRESS": 3
+          },
+          "total_records": 62
+        }
+      ],
+      "filename": "Vamp0000069297.xlsx",
+      "extension": ".xlsx",
+      "size_bytes": 19411,
+      "time_seconds": 0.01
+    },
+    {
+      "total_pages": 594,
+      "extraction_mode": "quick_regex",
+      "total_records": 88,
+      "filename": "WashingtonCMD_0000102080.pdf",
+      "extension": ".pdf",
+      "size_bytes": 3471149,
+      "time_seconds": 0.2
+    }
+  ],
+  "total_records": 154,
+  "records_sample": [
+    {
+      "ACCOUNT_NUMBER": "2126209"
+    },
+    {
+      "ACCOUNT_NUMBER": "2126209"
+    },
+    {
+      "ACCOUNT_NUMBER": "2126209"
+    },
+    {
+      "ACCOUNT_NUMBER": "2126209"
+    },
+    {
+      "PERSON": "Branch:_____________________",
+      "EMAIL_ADDRESS": "Work Email:_____________________________",
+      "_source_sheet": "Sheet1"
+    },
+    {
+      "PERSON": "Job Title:____________________",
+      "EMAIL_ADDRESS": "Personal Phone:__________________________",
+      "_source_sheet": "Sheet1"
+    },
+    {
+      "PERSON": "Hire Date:___________________",
+      "EMAIL_ADDRESS": "Rate:_________________   Sign On Bonus:________________",
+      "_source_sheet": "Sheet1"
+    },
+    {
+      "PERSON": "Offer of Employment and Pre-Employment",
+      "_source_sheet": "Sheet1"
+    },
+    {
+      "PERSON": "Sent",
+      "_source_sheet": "Sheet1"
+    },
+    {
+      "PERSON": "____",
+      "_source_sheet": "Sheet1"
+    },
+    {
+      "PERSON": "____",
+      "_source_sheet": "Sheet1"
+    },
+    {
+      "PERSON": "____",
+      "_source_sheet": "Sheet1"
+    },
+    {
+      "PERSON": "____",
+      "_source_sheet": "Sheet1"
+    },
+    {
+      "PERSON": "____",
+      "_source_sheet": "Sheet1"
+    },
+    {
+      "PERSON": "____",
+      "_source_sheet": "Sheet1"
+    },
+    {
+      "PERSON": "____",
+      "_source_sheet": "Sheet1"
+    },
+    {
+      "PERSON": "____",
+      "_source_sheet": "Sheet1"
+    },
+    {
+      "PERSON": "____",
+      "_source_sheet": "Sheet1"
+    },
+    {
+      "PERSON": "____",
+      "_source_sheet": "Sheet1"
+    },
+    {
+      "PERSON": "____",
+      "_source_sheet": "Sheet1"
+    },
+    {
+      "PERSON": "____",
+      "_source_sheet": "Sheet1"
+    },
+    {
+      "PERSON": "____",
+      "_source_sheet": "Sheet1"
+    },
+    {
+      "PERSON": "____",
+      "_source_sheet": "Sheet1"
+    },
+    {
+      "PERSON": "____",
+      "_source_sheet": "Sheet1"
+    },
+    {
+      "PERSON": "____",
+      "_source_sheet": "Sheet1"
+    },
+    {
+      "PERSON": "SEND FORMS AFTER ASSESSMENT TEST, DRUG TEST AND BACKGROUND TESTS ARE COMPLETED",
+      "_source_sheet": "Sheet1"
+    },
+    {
+      "PERSON": "____",
+      "_source_sheet": "Sheet1"
+    },
+    {
+      "PERSON": "____",
+      "_source_sheet": "Sheet1"
+    },
+    {
+      "PERSON": "____",
+      "_source_sheet": "Sheet1"
+    },
+    {
+      "PERSON": "____",
+      "_source_sheet": "Sheet1"
+    },
+    {
+      "PERSON": "____",
+      "_source_sheet": "Sheet1"
+    },
+    {
+      "PERSON": "DO NOT ORDER OR REQUEST UNTIL EMPLOYEE ARRIVES FOR FIRST DAY OF WORK (CAN GET APPROVAL FROM MANAGER IN ADVANCE)",
+      "_source_sheet": "Sheet1"
+    },
+    {
+      "PERSON": "____",
+      "_source_sheet": "Sheet1"
+    },
+    {
+      "PERSON": "____",
+      "_source_sheet": "Sheet1"
+    },
+    {
+      "PERSON": "____",
+      "_source_sheet": "Sheet1"
+    },
+    {
+      "PERSON": "____",
+      "_source_sheet": "Sheet1"
+    },
+    {
+      "PERSON": "____",
+      "_source_sheet": "Sheet1"
+    },
+    {
+      "PERSON": "____",
+      "_source_sheet": "Sheet1"
+    },
+    {
+      "PERSON": "____",
+      "_source_sheet": "Sheet1"
+    },
+    {
+      "PERSON": "____",
+      "_source_sheet": "Sheet1"
+    },
+    {
+      "PERSON": "Employees - BENEFITS",
+      "_source_sheet": "Sheet1"
+    },
+    {
+      "PERSON": "____",
+      "_source_sheet": "Sheet1"
+    },
+    {
+      "PERSON": "____",
+      "_source_sheet": "Sheet1"
+    },
+    {
+      "PERSON": "____",
+      "_source_sheet": "Sheet1"
+    },
+    {
+      "PERSON": "____",
+      "_source_sheet": "Sheet1"
+    },
+    {
+      "PERSON": "____",
+      "_source_sheet": "Sheet1"
+    },
+    {
+      "PERSON": "____",
+      "_source_sheet": "Sheet1"
+    },
+    {
+      "PERSON": "____",
+      "_source_sheet": "Sheet1"
+    },
+    {
+      "PERSON": "____",
+      "_source_sheet": "Sheet1"
+    },
+    {
+      "PERSON": "____",
+      "_source_sheet": "Sheet1"
+    },
+    {
+      "PERSON": "____",
+      "_source_sheet": "Sheet1"
+    },
+    {
+      "PERSON": "ENROLL IN BENEFITS",
+      "_source_sheet": "Sheet1"
+    },
+    {
+      "PERSON": "____",
+      "_source_sheet": "Sheet1"
+    },
+    {
+      "PERSON": "____",
+      "_source_sheet": "Sheet1"
+    },
+    {
+      "PERSON": "____",
+      "_source_sheet": "Sheet1"
+    },
+    {
+      "PERSON": "____",
+      "_source_sheet": "Sheet1"
+    },
+    {
+      "PERSON": "____",
+      "_source_sheet": "Sheet1"
+    },
+    {
+      "PERSON": "____",
+      "_source_sheet": "Sheet1"
+    },
+    {
+      "PERSON": "____",
+      "_source_sheet": "Sheet1"
+    },
+    {
+      "PERSON": "____",
+      "_source_sheet": "Sheet1"
+    },
+    {
+      "PERSON": "____",
+      "_source_sheet": "Sheet1"
+    },
+    {
+      "PERSON": "____",
+      "_source_sheet": "Sheet1"
+    },
+    {
+      "PERSON": "____",
+      "_source_sheet": "Sheet1"
+    },
+    {
+      "PERSON": "____",
+      "_source_sheet": "Sheet1"
+    },
+    {
+      "PERSON": "____",
+      "_source_sheet": "Sheet1"
+    },
+    {
+      "PERSON": "REV 6/14/2022",
+      "_source_sheet": "Sheet1"
+    },
+    {
+      "LOCATION": "100 West Washington Street"
+    },
+    {
+      "LOCATION": "64\nUnited Way"
+    },
+    {
+      "LOCATION": "49 East Water Street"
+    },
+    {
+      "LOCATION": "1070 Marshall Street"
+    },
+    {
+      "LOCATION": "1302 Hamilton Blvd"
+    },
+    {
+      "LOCATION": "703 Washington Avenue"
+    },
+    {
+      "LOCATION": "2378 Hoffman Road"
+    },
+    {
+      "LOCATION": "11923 Cheryl Drive"
+    },
+    {
+      "LOCATION": "12840 Resh Road"
+    },
+    {
+      "LOCATION": "7652 Fairplay Road"
+    },
+    {
+      "LOCATION": "13408 Highlane Street"
+    },
+    {
+      "LOCATION": "18201 Candlewood Lane"
+    },
+    {
+      "LOCATION": "1116 West Irvin Avenue"
+    },
+    {
+      "LOCATION": "00\nUnited Way"
+    },
+    {
+      "LOCATION": "24 Summit Ave"
+    },
+    {
+      "LOCATION": "274 Sherwood Forest Drive"
+    },
+    {
+      "LOCATION": "1106 West Washington Street"
+    },
+    {
+      "LOCATION": "1040 Kasinof Avenue"
+    },
+    {
+      "LOCATION": "1153 Beechwood Drive"
+    },
+    {
+      "LOCATION": "95 West Washington Street"
+    },
+    {
+      "LOCATION": "9737 Beaver Creek Church Road"
+    },
+    {
+      "LOCATION": "10709 Greenwich Drive"
+    },
+    {
+      "LOCATION": "520 Summit Avenue"
+    },
+    {
+      "LOCATION": "7307 Monroe Road"
+    },
+    {
+      "LOCATION": "12423 Big Spring Road"
+    },
+    {
+      "LOCATION": "1122 Sherman Avenue"
+    },
+    {
+      "LOCATION": "339 Antietam Drive"
+    },
+    {
+      "LOCATION": "70\nUnited Way"
+    },
+    {
+      "LOCATION": "14744 Sherwood Drive"
+    },
+    {
+      "LOCATION": "11940 Seminole Drive"
+    },
+    {
+      "LOCATION": "30\nUnited Way"
+    },
+    {
+      "LOCATION": "901 Woodland Way"
+    },
+    {
+      "LOCATION": "702 Park Lane"
+    },
+    {
+      "LOCATION": "13115 Blue Ridge Road"
+    }
+  ]
+}

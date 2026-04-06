@@ -1,0 +1,372 @@
+{
+  "results": [
+    {
+      "total_pages": 67,
+      "extraction_mode": "quick_regex",
+      "total_records": 89,
+      "filename": "ABCNY_560_0001384129.pdf",
+      "extension": ".pdf",
+      "size_bytes": 598520,
+      "time_seconds": 0.45
+    },
+    {
+      "total_pages": 1354,
+      "extraction_mode": "quick_regex",
+      "total_records": 77,
+      "filename": "CMG_Inc_0000414153.pdf",
+      "extension": ".pdf",
+      "size_bytes": 1479722,
+      "time_seconds": 0.11
+    },
+    {
+      "total_pages": 453,
+      "extraction_mode": "quick_regex",
+      "total_records": 21,
+      "filename": "CMG_Inc_0001352703.pdf",
+      "extension": ".pdf",
+      "size_bytes": 2468561,
+      "time_seconds": 0.16
+    },
+    {
+      "total_pages": 4200,
+      "extraction_mode": "quick_regex",
+      "total_records": 318,
+      "filename": "Complex1.pdf",
+      "extension": ".pdf",
+      "size_bytes": 13824434,
+      "time_seconds": 0.56
+    },
+    {
+      "total_pages": 484,
+      "extraction_mode": "quick_regex",
+      "total_records": 0,
+      "filename": "EdmondsSD_0003650859.pdf",
+      "extension": ".pdf",
+      "size_bytes": 1092922,
+      "time_seconds": 0.42
+    }
+  ],
+  "total_records": 505,
+  "records_sample": [
+    {
+      "PERSON": "ABRAHAM,MARY D",
+      "LOCATION": "655 ALABAMA AVENUE"
+    },
+    {
+      "LOCATION": "135 RICHMOND STREET",
+      "PERSON": "ALEXANDER,MARILYN CHANEL"
+    },
+    {
+      "LOCATION": "115 ELM STREET"
+    },
+    {
+      "LOCATION": "47 JAMES STREET"
+    },
+    {
+      "PERSON": "BELLO,FRANCES MONICA VADIL"
+    },
+    {
+      "LOCATION": "1069 BERGEN STREET"
+    },
+    {
+      "LOCATION": "2 NEWPORT ROAD"
+    },
+    {
+      "PERSON": "BORENSTEIN,CARLA ANDREA PIERINI"
+    },
+    {
+      "PERSON": "BRODERICK,LIAM BORTZ"
+    },
+    {
+      "LOCATION": "233 DECATUR STREET"
+    },
+    {
+      "LOCATION": "106 PINNACLE POINT DR"
+    },
+    {
+      "PERSON": "CANESSA,ROMINA PIA",
+      "LOCATION": "14 JACKSON AVENUE"
+    },
+    {
+      "PERSON": "CELESTIN,CASSANDRA M"
+    },
+    {
+      "PERSON": "CHANDERDATT,RACHEL MARIA",
+      "LOCATION": "2310 BEDFORD AVENUE"
+    },
+    {
+      "LOCATION": "4720 CENTER BLVD"
+    },
+    {
+      "LOCATION": "32 SAGE STREET"
+    },
+    {
+      "LOCATION": "42 QUARTZ LANE"
+    },
+    {
+      "LOCATION": "6471 POTTERS WAY"
+    },
+    {
+      "LOCATION": "651 DEGRAW ST"
+    },
+    {
+      "PERSON": "CUEVAS,JANET-MICHELLE MAE",
+      "LOCATION": "264 WOODLANDS DRIVE"
+    },
+    {
+      "LOCATION": "614 HUBBARD AVE"
+    },
+    {
+      "LOCATION": "705 CARROLL ST"
+    },
+    {
+      "LOCATION": "62 HATHAWAY AVENUE"
+    },
+    {
+      "LOCATION": "595 MAIN STREET"
+    },
+    {
+      "LOCATION": "1035 UNION ST"
+    },
+    {
+      "PERSON": "EGBOKA,ADAOBI NKIRUKA",
+      "LOCATION": "71 MILES STREET"
+    },
+    {
+      "LOCATION": "2505 CLARKE CREST DRIVE"
+    },
+    {
+      "LOCATION": "1404 PARAISO AVENUE"
+    },
+    {
+      "PERSON": "FLEISCHER,MICHAELA PERI JOYCE"
+    },
+    {
+      "PERSON": "FREEMAN,KAYLA NICOLE"
+    },
+    {
+      "LOCATION": "249 CRESCENT STREET",
+      "PERSON": "HERRERA,KARLA ARGENTINA"
+    },
+    {
+      "PERSON": "WERNECK,MARIA PAULA"
+    },
+    {
+      "PERSON": "COLINA,WILMER D",
+      "LOCATION": "888 MAIN STREET"
+    },
+    {
+      "LOCATION": "935 METROPOLITAN AVE"
+    },
+    {
+      "LOCATION": "3104 NEWKIRK AVENUE"
+    },
+    {
+      "LOCATION": "120 FRANKLIN AVENUE"
+    },
+    {
+      "LOCATION": "7 OVERBROOK ROAD"
+    },
+    {
+      "PERSON": "JAMES,KYLA NERISSA"
+    },
+    {
+      "LOCATION": "64 FARRAGUT AVE"
+    },
+    {
+      "LOCATION": "116 NORTH PLEASANT AVENUE"
+    },
+    {
+      "PERSON": "KIM,YOUNG HAN",
+      "LOCATION": "320 ADOLPHUS AVENUE"
+    },
+    {
+      "LOCATION": "150 CROYDON ROAD"
+    },
+    {
+      "LOCATION": "30 REGENT STREET"
+    },
+    {
+      "PERSON": "LAROSA,MARY ELLEN ELIZABETH"
+    },
+    {
+      "LOCATION": "61 WEST GRAND STREET"
+    },
+    {
+      "PERSON": "LAZAN,OLIVIA WARD"
+    },
+    {
+      "LOCATION": "29 ROCK SPRING AVENUE"
+    },
+    {
+      "LOCATION": "5907 TYNDALL AVENUE",
+      "PERSON": "MARTINEZ-GALLINUCCI,TANYA L"
+    },
+    {
+      "LOCATION": "27 BARKER AVENUE"
+    },
+    {
+      "LOCATION": "83 HYACYNTH ROAD"
+    },
+    {
+      "LOCATION": "1117 NOSTRAND AVE"
+    },
+    {
+      "LOCATION": "1285 ATLANTIC AVENUE"
+    },
+    {
+      "PERSON": "MONAHAN,MARIANA LYNN"
+    },
+    {
+      "LOCATION": "2758 BOUCK AVENUE"
+    },
+    {
+      "LOCATION": "110 RIVERSIDE DRIVE"
+    },
+    {
+      "PERSON": "MUKWAYA,PAULA LILLIAN"
+    },
+    {
+      "PERSON": "NOONAN,EVELYN MICHELLE"
+    },
+    {
+      "PERSON": "NUNEZ,JEFFREY MOISES"
+    },
+    {
+      "LOCATION": "1735 MADISON AVENUE"
+    },
+    {
+      "LOCATION": "9 HUGUENOT STREET"
+    },
+    {
+      "LOCATION": "9 OLD JEROME AVENUE"
+    },
+    {
+      "PERSON": "PARK,JEAN SOO"
+    },
+    {
+      "PERSON": "PASTREICH,ELENA REBECCA"
+    },
+    {
+      "LOCATION": "77 EDGEMONT ROAD"
+    },
+    {
+      "PERSON": "PHEE,SEAN KEENAN"
+    },
+    {
+      "PERSON": "REERS,EMILY MARY",
+      "LOCATION": "122 VANDERBILT AVENUE"
+    },
+    {
+      "PERSON": "REYES,ASTRID BERENICE"
+    },
+    {
+      "LOCATION": "306 GARFIELD PL"
+    },
+    {
+      "PERSON": "ROMO,HANS ANTHONY",
+      "LOCATION": "1615 PENNSYLVANIA STREET"
+    },
+    {
+      "PERSON": "HERNANDEZ,CARLOS AMADO"
+    },
+    {
+      "PERSON": "ZARATE,CESAR FRANCISCO"
+    },
+    {
+      "PERSON": "SALMOND,MAKEDAH KHADIJAH"
+    },
+    {
+      "LOCATION": "182 CHURCH STREET"
+    },
+    {
+      "LOCATION": "3 ALLEN STREET"
+    },
+    {
+      "LOCATION": "170 PROSPECT STREET"
+    },
+    {
+      "LOCATION": "851 PATTERSON AVENUE"
+    },
+    {
+      "PERSON": "SHEMI,MARISA DEANN"
+    },
+    {
+      "LOCATION": "671 UNION STREET"
+    },
+    {
+      "LOCATION": "31 LEONARD STREET"
+    },
+    {
+      "LOCATION": "238 TODT HILL ROAD"
+    },
+    {
+      "LOCATION": "66 HILLSIDE AVENUE"
+    },
+    {
+      "LOCATION": "341 SENATOR ST"
+    },
+    {
+      "PERSON": "MICHEL,ALEXA GISELLE"
+    },
+    {
+      "LOCATION": "53 CARROLL STREET"
+    },
+    {
+      "PERSON": "WILCOX,SCOTT CHRISTOPHER",
+      "LOCATION": "62 GREELEY AVENUE"
+    },
+    {
+      "LOCATION": "20 MONROE STREET"
+    },
+    {
+      "PERSON": "YAROSH,STEVEN MARK"
+    },
+    {
+      "LOCATION": "480 WILLOUGHBY AVE"
+    },
+    {
+      "LOCATION": "00\nAc\nFK\nAc\nHF\nAc\nRD"
+    },
+    {
+      "PERSON": "FLOOR, NEW YORK",
+      "PHONE_NUMBER": "+1 (212) 541 6600"
+    },
+    {
+      "US_SSN": "285-07-5085",
+      "LOCATION": "3708 GRAHAM ROAD"
+    },
+    {
+      "US_SSN": "097-32-8959",
+      "LOCATION": "521 BERRY PICK LANE"
+    },
+    {
+      "PERSON": "MILANO, ITALY"
+    },
+    {
+      "LOCATION": "4115 BIGELOW BLVD"
+    },
+    {
+      "US_SSN": "096-09-6416",
+      "LOCATION": "748 MAPLE STREET"
+    },
+    {
+      "US_SSN": "034-14-7034",
+      "PERSON": "Other Transactions"
+    },
+    {
+      "US_SSN": "433-30-6540"
+    },
+    {
+      "US_SSN": "625-82-7107",
+      "LOCATION": "68 BRADHURST AVE"
+    },
+    {
+      "PERSON": "MILAN, ITALY"
+    },
+    {
+      "LOCATION": "1793 CHESTNUT STREET",
+      "PERSON": "HALIFAX, NOVA SCOTIA"
+    }
+  ]
+}

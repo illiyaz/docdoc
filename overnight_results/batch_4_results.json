@@ -1,0 +1,372 @@
+{
+  "results": [
+    {
+      "total_pages": 902,
+      "extraction_mode": "quick_regex",
+      "total_records": 173,
+      "filename": "TPHS2_656_0000067171.pdf",
+      "extension": ".pdf",
+      "size_bytes": 2126603,
+      "time_seconds": 0.42
+    },
+    {
+      "total_pages": 132,
+      "extraction_mode": "quick_regex",
+      "total_records": 800,
+      "filename": "TPHS2_656_0000070715.pdf",
+      "extension": ".pdf",
+      "size_bytes": 326223,
+      "time_seconds": 0.37
+    },
+    {
+      "total_pages": 211,
+      "extraction_mode": "quick_regex",
+      "total_records": 71,
+      "filename": "TPHS2_656_0000071913.pdf",
+      "extension": ".pdf",
+      "size_bytes": 363394,
+      "time_seconds": 0.25
+    },
+    {
+      "total_pages": 4,
+      "extraction_mode": "ocr_regex",
+      "total_records": 33,
+      "fields": {
+        "PHONE_NUMBER": 1,
+        "PERSON": 32,
+        "LOCATION": 1
+      },
+      "pages_ocrd": 4,
+      "ocr_chars": 8298,
+      "filename": "Vamp0000068240.pdf",
+      "extension": ".pdf",
+      "size_bytes": 5716383,
+      "time_seconds": 9.63
+    },
+    {
+      "total_pages": 1,
+      "extraction_mode": "quick_regex",
+      "total_records": 6,
+      "filename": "Vamp0000068247.pdf",
+      "extension": ".pdf",
+      "size_bytes": 64240,
+      "time_seconds": 0.01
+    }
+  ],
+  "total_records": 1083,
+  "records_sample": [
+    {
+      "PERSON": "ADAMS, BRADLEY JAY",
+      "LOCATION": "1060 FIELDING PARK CT"
+    },
+    {
+      "LOCATION": "234 BAYWOOD DRIVE"
+    },
+    {
+      "PERSON": "ADAMS, ZACHARY S"
+    },
+    {
+      "PERSON": "AIKMAN, MELISSA A."
+    },
+    {
+      "PERSON": "AIKMAN, MELISSA A"
+    },
+    {
+      "PERSON": "AILEO, MARJORIE E."
+    },
+    {
+      "PERSON": "AKINBAMIDELE, OPEYEMI",
+      "LOCATION": "2547 MICKLE AVENUE"
+    },
+    {
+      "PERSON": "ALBERTSON, ANN G"
+    },
+    {
+      "PERSON": "ALDRICH, JULIA N."
+    },
+    {
+      "PERSON": "ALDRICH, JULIA N"
+    },
+    {
+      "PERSON": "ALEXIS-JARVIS, JOAN",
+      "LOCATION": "5548 WHITTY LANE"
+    },
+    {
+      "LOCATION": "755 NORTH AVE"
+    },
+    {
+      "PERSON": "ALLEN, AMY LEIGH",
+      "LOCATION": "5270 EMERALD FALLS WAY"
+    },
+    {
+      "PERSON": "ALLEN, MELISSA LEIGH"
+    },
+    {
+      "PERSON": "ALLEN, YOLANDA DORIS"
+    },
+    {
+      "LOCATION": "8755 MESA ROAD"
+    },
+    {
+      "PERSON": "ALLISON, TARAH ANN"
+    },
+    {
+      "PERSON": "ALTERMAN, DENISE"
+    },
+    {
+      "PERSON": "AMARANENI, NITHYA",
+      "LOCATION": "1914 TYNEMOORE CT"
+    },
+    {
+      "LOCATION": "7805 CHERRY ORCHARD CT"
+    },
+    {
+      "PERSON": "AMBROW, RICHARD C"
+    },
+    {
+      "LOCATION": "4611 CRAIG AVE"
+    },
+    {
+      "PERSON": "ANDERSEN, MICHAEL O"
+    },
+    {
+      "LOCATION": "9357 OPAL DRIVE"
+    },
+    {
+      "PERSON": "ANDERSON, ALISIA TINDALE"
+    },
+    {
+      "PERSON": "ANDERSON, DONNA                                                            FLXMD",
+      "LOCATION": "4491 SHILOH HILLS DRIVE"
+    },
+    {
+      "PERSON": "ANDERSON, EMILY DIANE"
+    },
+    {
+      "LOCATION": "8506 ACADEMY ROAD"
+    },
+    {
+      "PERSON": "ANDERSON, MATTHEW TRAYNHAM"
+    },
+    {
+      "PERSON": "ANDRE, ROSS                                HOURS WORKED"
+    },
+    {
+      "LOCATION": "1080 PEACHTREE STREET"
+    },
+    {
+      "PERSON": "ANDRE, ROSS"
+    },
+    {
+      "PERSON": "ANDREWS, JOHN H",
+      "LOCATION": "1117 ROCA LANE"
+    },
+    {
+      "LOCATION": "4544 COLUMBUS STREET"
+    },
+    {
+      "PERSON": "ANGLE, ROBERT W"
+    },
+    {
+      "LOCATION": "42802 CEDAR HEDGE STREET"
+    },
+    {
+      "LOCATION": "3333 WISCONSIN AVE"
+    },
+    {
+      "PERSON": "ARAUJO, CHRISTOPHER ADRIAN"
+    },
+    {
+      "LOCATION": "18 PARK AVE"
+    },
+    {
+      "PERSON": "ARCHER, CHRISTOPHER J"
+    },
+    {
+      "LOCATION": "5630 GLEN FOREST DRIVE"
+    },
+    {
+      "PERSON": "ARCHER, KERRY-ANN"
+    },
+    {
+      "PERSON": "ARCHULETA, DANIEL P"
+    },
+    {
+      "PERSON": "ARMBRUST, MARCY"
+    },
+    {
+      "PERSON": "ARNOLD, SUSAN CHERYL",
+      "LOCATION": "1816 DUNROBIN DRIVE"
+    },
+    {
+      "PERSON": "ARWOOD, AMANDA"
+    },
+    {
+      "LOCATION": "252 DOWNING DRIVE"
+    },
+    {
+      "PERSON": "ASBURY, DAVID M"
+    },
+    {
+      "LOCATION": "814 MILL CREEK LANE"
+    },
+    {
+      "LOCATION": "10569 MARIGOLD CT"
+    },
+    {
+      "PERSON": "ASTRIN, ERIC M.",
+      "LOCATION": "814 EAST AVE"
+    },
+    {
+      "PERSON": "ASTRIN, ERIC M"
+    },
+    {
+      "PERSON": "AUSTIN, LINDSAY J"
+    },
+    {
+      "PERSON": "AVANT, ANTONIO SANTRIO",
+      "LOCATION": "3952 SMITHFIELD TRAIL"
+    },
+    {
+      "PERSON": "AYERS, LEILANI"
+    },
+    {
+      "PERSON": "BABER, BRADFORD J"
+    },
+    {
+      "PERSON": "BACCE, AGUSTINA"
+    },
+    {
+      "PERSON": "BAHADUR, RAJ"
+    },
+    {
+      "PERSON": "BAKER, GLENN W.",
+      "LOCATION": "404 NORTHLAND RD"
+    },
+    {
+      "PERSON": "BAKER, GLENN W"
+    },
+    {
+      "LOCATION": "5426 WEST GARTHDALE RD"
+    },
+    {
+      "PERSON": "BAKER, SANDRA MICHELLE"
+    },
+    {
+      "LOCATION": "409 GOLFVIEW RD"
+    },
+    {
+      "PERSON": "BAKOWSKI, ALAN WILLIAM"
+    },
+    {
+      "PERSON": "BALLARD, LESHELE"
+    },
+    {
+      "LOCATION": "40 PRV ST"
+    },
+    {
+      "LOCATION": "430 HASCALL RD"
+    },
+    {
+      "PERSON": "BALTHROP, KATIE LAMB"
+    },
+    {
+      "LOCATION": "10300 CARLEIGH LANE"
+    },
+    {
+      "PERSON": "BARATIAN, MELISSA A"
+    },
+    {
+      "PERSON": "BARBOS, COSMIN STEFAN"
+    },
+    {
+      "LOCATION": "100 COLONIAL WAY"
+    },
+    {
+      "PERSON": "BARLOW, BARRY JASON"
+    },
+    {
+      "LOCATION": "1243 LAMBETH WAY"
+    },
+    {
+      "PERSON": "BARNES, DORIS MARIE"
+    },
+    {
+      "PERSON": "BARNES, ENA ELIZABETH",
+      "LOCATION": "410 THORN CREEK WAY"
+    },
+    {
+      "LOCATION": "1329 OAKVIEW RD"
+    },
+    {
+      "PERSON": "BARNETT, HAILEY PROCTOR"
+    },
+    {
+      "PERSON": "BARNETT, SCOTT DOUGLAS"
+    },
+    {
+      "LOCATION": "19022 DIXIE BELLE LANE"
+    },
+    {
+      "PERSON": "BARTH, CHRISTINE ILLIS"
+    },
+    {
+      "PERSON": "BASCOE, JAKEEMA E."
+    },
+    {
+      "PERSON": "BASCOE, JAKEEMA E"
+    },
+    {
+      "PERSON": "BASS, LEEANNA MARIE",
+      "LOCATION": "350 HOLLAND SPRINGS WAY"
+    },
+    {
+      "PERSON": "NGASSA, ADELE MARILYN"
+    },
+    {
+      "LOCATION": "1206 CANTERBURY ROAD"
+    },
+    {
+      "PERSON": "BAUM, DANIEL WILLIAM"
+    },
+    {
+      "PERSON": "BAXTER, CHRISTOPHER W."
+    },
+    {
+      "PERSON": "BAXTER, CHRISTOPHER W"
+    },
+    {
+      "LOCATION": "4112 JEAN SHACKELFORD DRIVE"
+    },
+    {
+      "PERSON": "BEAMAN, ROBERT PRENTIS"
+    },
+    {
+      "LOCATION": "415 LEONARD ST"
+    },
+    {
+      "PERSON": "BEARDSLEY, WAYNE PETER II"
+    },
+    {
+      "PERSON": "BECK, JESSICA"
+    },
+    {
+      "PERSON": "BELATTI, GREGORY"
+    },
+    {
+      "LOCATION": "4613 CHARDONNAY CT"
+    },
+    {
+      "PERSON": "BELDICK, SHANA BETH"
+    },
+    {
+      "LOCATION": "1950 HOWLL MILL RD"
+    },
+    {
+      "LOCATION": "36 PENNSYLVANIA AVE"
+    },
+    {
+      "PERSON": "BEN-SAULL, ARIEL J"
+    }
+  ]
+}

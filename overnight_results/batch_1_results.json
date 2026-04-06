@@ -1,0 +1,358 @@
+{
+  "results": [
+    {
+      "total_pages": 158,
+      "extraction_mode": "quick_regex",
+      "total_records": 18,
+      "filename": "3046246.pdf",
+      "extension": ".pdf",
+      "size_bytes": 431531,
+      "time_seconds": 0.16
+    },
+    {
+      "total_pages": 595,
+      "extraction_mode": "quick_regex",
+      "total_records": 299,
+      "filename": "3666752.pdf",
+      "extension": ".pdf",
+      "size_bytes": 1835318,
+      "time_seconds": 0.22
+    },
+    {
+      "total_pages": 3063,
+      "extraction_mode": "quick_regex",
+      "total_records": 2,
+      "filename": "3733050.pdf",
+      "extension": ".pdf",
+      "size_bytes": 3435662,
+      "time_seconds": 0.11
+    },
+    {
+      "total_pages": 3583,
+      "extraction_mode": "quick_regex",
+      "total_records": 8,
+      "filename": "3738594.pdf",
+      "extension": ".pdf",
+      "size_bytes": 4346820,
+      "time_seconds": 0.12
+    },
+    {
+      "total_pages": 3307,
+      "extraction_mode": "quick_regex",
+      "total_records": 5,
+      "filename": "3738641.pdf",
+      "extension": ".pdf",
+      "size_bytes": 4395721,
+      "time_seconds": 0.13
+    }
+  ],
+  "total_records": 332,
+  "records_sample": [
+    {
+      "LOCATION": "127\nCity of Federal Way"
+    },
+    {
+      "LOCATION": "128\nCity of Federal Way"
+    },
+    {
+      "LOCATION": "129\nCity of Federal Way"
+    },
+    {
+      "LOCATION": "130\nCity of Federal Way"
+    },
+    {
+      "LOCATION": "131\nCity of Federal Way"
+    },
+    {
+      "LOCATION": "265\nFederal Way"
+    },
+    {
+      "LOCATION": "266\nFederal Way"
+    },
+    {
+      "LOCATION": "267\nFederal Way"
+    },
+    {
+      "LOCATION": "268\nFederal Way"
+    },
+    {
+      "LOCATION": "269\nFederal Way"
+    },
+    {
+      "LOCATION": "270\nFederal Way"
+    },
+    {
+      "LOCATION": "271\nFederal Way"
+    },
+    {
+      "LOCATION": "272\nFederal Way"
+    },
+    {
+      "LOCATION": "273\nFederal Way"
+    },
+    {
+      "LOCATION": "274\nFederal Way"
+    },
+    {
+      "LOCATION": "275\nFederal Way"
+    },
+    {
+      "LOCATION": "276\nFederal Way"
+    },
+    {
+      "LOCATION": "279\nFederal Way"
+    },
+    {
+      "PERSON": "ABRAHAM, DAVID"
+    },
+    {
+      "PERSON": "ABRAHAM, MESGANA"
+    },
+    {
+      "PERSON": "ABRAHAM, RAHEL"
+    },
+    {
+      "PERSON": "ABREGO, KASSANDRA"
+    },
+    {
+      "PERSON": "ADAMS, ALYSSIA"
+    },
+    {
+      "PERSON": "ADAMS, DAVIS"
+    },
+    {
+      "PERSON": "ADAMS, JUSTIN"
+    },
+    {
+      "PERSON": "ADAMSON, TRAVIS"
+    },
+    {
+      "PERSON": "ADDISON, LATISHA"
+    },
+    {
+      "PERSON": "ADDISON, TIONNA"
+    },
+    {
+      "PERSON": "ADIE, JACOB"
+    },
+    {
+      "PERSON": "AFRIYIE, EMMANUELA"
+    },
+    {
+      "PERSON": "AGICIC, ARMINA",
+      "LOCATION": "23320 EDMONDS WAY"
+    },
+    {
+      "PERSON": "AHMED, FARAZ"
+    },
+    {
+      "PERSON": "AHMED, SUZAN"
+    },
+    {
+      "PERSON": "AKELIPA, JONA"
+    },
+    {
+      "PERSON": "ALAMAN, RICKEY"
+    },
+    {
+      "PERSON": "ALBERTSON, ASHLEY"
+    },
+    {
+      "PERSON": "ALBO, MILAN"
+    },
+    {
+      "PERSON": "ALDERSON, ALEXANDRA"
+    },
+    {
+      "PERSON": "ALEXANDER, JEFFREY",
+      "LOCATION": "6303 ST ALBION WAY"
+    },
+    {
+      "PERSON": "ALEXANDER, JOSEPH"
+    },
+    {
+      "PERSON": "ALEXANDER, RACHEL",
+      "LOCATION": "943 ALDER ST"
+    },
+    {
+      "PERSON": "ALEXIOU, JAMES"
+    },
+    {
+      "PERSON": "ALFI, MEGAN"
+    },
+    {
+      "PERSON": "ALIABBASIBAYAN, ALI"
+    },
+    {
+      "PERSON": "ALIBHAI, ALY"
+    },
+    {
+      "PERSON": "ALLEN, MICHAEL JR"
+    },
+    {
+      "PERSON": "ALLRED, MICHAEL"
+    },
+    {
+      "PERSON": "ALMES, JORDAN"
+    },
+    {
+      "PERSON": "SOTO, ADELAIDA"
+    },
+    {
+      "PERSON": "AMADOR, NICOLE"
+    },
+    {
+      "PERSON": "AMAR, FEDDEN"
+    },
+    {
+      "PERSON": "AMEN, MADELEINE"
+    },
+    {
+      "PERSON": "AMINI, NEGIN"
+    },
+    {
+      "PERSON": "AMSDEN, CHRISTINA"
+    },
+    {
+      "PERSON": "ANAFI, JASON"
+    },
+    {
+      "PERSON": "ANAFI, JESSICA"
+    },
+    {
+      "PERSON": "ANDERSON, BREAHNA"
+    },
+    {
+      "PERSON": "ANDERSON, GRACE"
+    },
+    {
+      "PERSON": "ANDERSON, HANNA"
+    },
+    {
+      "PERSON": "ANDERSON, KENDRA"
+    },
+    {
+      "PERSON": "ANDERSON, LEE"
+    },
+    {
+      "PERSON": "ANDERSON, MICHAEL"
+    },
+    {
+      "PERSON": "ANGUS, EILEA"
+    },
+    {
+      "PERSON": "AQUINO, JUAN"
+    },
+    {
+      "PERSON": "AQUINO, MAYRA"
+    },
+    {
+      "PERSON": "AQUINO-GARCIA, VIC-LOUIE"
+    },
+    {
+      "PERSON": "ARANDA, LINDSEY"
+    },
+    {
+      "PERSON": "ARANDA, SARA"
+    },
+    {
+      "PERSON": "ARAYA, ANTHONY"
+    },
+    {
+      "PERSON": "ARMSTRONG, SCOTT"
+    },
+    {
+      "PERSON": "ARNESEN, JORGEN"
+    },
+    {
+      "PERSON": "ARNOLD, ELLIOT"
+    },
+    {
+      "PERSON": "ARRANTS, BENJAMIN"
+    },
+    {
+      "PERSON": "LOPEZ, GERARDO"
+    },
+    {
+      "PERSON": "ASEFAW, HELEN"
+    },
+    {
+      "PERSON": "ASP, ALYSSA"
+    },
+    {
+      "PERSON": "ATKINSON, BRIAN"
+    },
+    {
+      "PERSON": "AUGUSTAMAR, GABRIELLE"
+    },
+    {
+      "PERSON": "AUSTNES, ANNIKA"
+    },
+    {
+      "PERSON": "AUSTNES, KRISTIN"
+    },
+    {
+      "PERSON": "AVERY, YOSHUA"
+    },
+    {
+      "PERSON": "AXTELLE, HANNAH"
+    },
+    {
+      "PERSON": "AYMAN, FAHMIDA"
+    },
+    {
+      "PERSON": "AZEEM, FAIZ"
+    },
+    {
+      "PERSON": "BACHMEIER, ALLISON"
+    },
+    {
+      "PERSON": "BAEK, JIEUN"
+    },
+    {
+      "PERSON": "BAILES, JESSICA"
+    },
+    {
+      "PERSON": "BAILEY, BROOKLYNN"
+    },
+    {
+      "PERSON": "BAILEY, MICHAEL"
+    },
+    {
+      "PERSON": "BAISDEN, SKYWISE"
+    },
+    {
+      "PERSON": "BAKER, JOSHUA",
+      "LOCATION": "23332 EDMONDS WAY"
+    },
+    {
+      "PERSON": "BAKKEN, TRAVIS",
+      "LOCATION": "10616 ROBINHOOD DR"
+    },
+    {
+      "PERSON": "BALIKCI, EBRU"
+    },
+    {
+      "PERSON": "BALIVET-BROWN, ALEXANDRIA"
+    },
+    {
+      "PERSON": "BALLARD, TAYLOR"
+    },
+    {
+      "PERSON": "BALTAZAR, JORGE"
+    },
+    {
+      "PERSON": "BALTUTH, AZIZA"
+    },
+    {
+      "PERSON": "BANDARY-SHALABY, YOUSSEF"
+    },
+    {
+      "PERSON": "BANEZ, TALYN"
+    },
+    {
+      "PERSON": "BANSEMER, LAINEY",
+      "LOCATION": "933 MAPLE ST"
+    }
+  ]
+}

@@ -1,0 +1,275 @@
+{
+  "results": [
+    {
+      "total_records": 6,
+      "fields": {
+        "PERSON": 5,
+        "PHONE_NUMBER": 2,
+        "EMAIL_ADDRESS": 2,
+        "LOCATION": 1
+      },
+      "extraction_mode": "email_body",
+      "metadata": {
+        "subject": "Fw: Drug-screen registration Ronald A. Bailey\u0000",
+        "sender": "Ann Maynard <amaynard@jswallacegroup.com>",
+        "date": "2022-11-08 00:46:07+05:30"
+      },
+      "body_chars": 3116,
+      "filename": "Vamp0000066511.msg",
+      "extension": ".msg",
+      "size_bytes": 114688,
+      "time_seconds": 0.01
+    },
+    {
+      "total_records": 21,
+      "fields": {
+        "PERSON": 21,
+        "PHONE_NUMBER": 2,
+        "EMAIL_ADDRESS": 5
+      },
+      "extraction_mode": "email_body",
+      "metadata": {
+        "subject": "Re: Alexandrea Malley - 02960-001016000\t60940144\tJOHNSTONE SUPPLY\u0000",
+        "sender": "Ann Maynard <amaynard@jswallacegroup.com>",
+        "date": "2022-11-08 01:46:41+05:30"
+      },
+      "body_chars": 2069,
+      "filename": "Vamp0000066652.msg",
+      "extension": ".msg",
+      "size_bytes": 109568,
+      "time_seconds": 0.0
+    },
+    {
+      "total_records": 10,
+      "fields": {
+        "PERSON": 9,
+        "PHONE_NUMBER": 2,
+        "EMAIL_ADDRESS": 3,
+        "LOCATION": 1
+      },
+      "extraction_mode": "email_body",
+      "metadata": {
+        "subject": "Re: [EXTERNAL] Re: New Tax ID, Setup Information for BRI\u0000",
+        "sender": "Ann Maynard <amaynard@jswallacegroup.com>",
+        "date": "2022-09-20 03:34:11+05:30"
+      },
+      "body_chars": 7474,
+      "filename": "Vamp0000068289.msg",
+      "extension": ".msg",
+      "size_bytes": 171520,
+      "time_seconds": 0.01
+    },
+    {
+      "total_records": 6,
+      "fields": {
+        "PERSON": 5,
+        "PHONE_NUMBER": 2,
+        "EMAIL_ADDRESS": 2,
+        "LOCATION": 1
+      },
+      "extraction_mode": "email_body",
+      "metadata": {
+        "subject": "FW: Drug-screen registration Elanie Rodriguez\u0000",
+        "sender": "Ann Maynard <amaynard@jswallacegroup.com>",
+        "date": "2022-09-20 20:09:37+05:30"
+      },
+      "body_chars": 3475,
+      "filename": "Vamp0000068368.msg",
+      "extension": ".msg",
+      "size_bytes": 155648,
+      "time_seconds": 0.0
+    },
+    {
+      "total_records": 6,
+      "fields": {
+        "PERSON": 5,
+        "PHONE_NUMBER": 2,
+        "EMAIL_ADDRESS": 2
+      },
+      "extraction_mode": "email_body",
+      "metadata": {
+        "subject": "FW: Drug-screen registration Marcelo Figueroa\u0000",
+        "sender": "Ann Maynard <amaynard@jswallacegroup.com>",
+        "date": "2022-09-20 20:12:00+05:30"
+      },
+      "body_chars": 3030,
+      "filename": "Vamp0000068375.msg",
+      "extension": ".msg",
+      "size_bytes": 122368,
+      "time_seconds": 0.0
+    }
+  ],
+  "total_records": 49,
+  "records_sample": [
+    {
+      "PERSON": "Ann Maynard"
+    },
+    {
+      "PERSON": "Johnstone Supply"
+    },
+    {
+      "PERSON": "Group Rochester",
+      "PHONE_NUMBER": "(585) 482-8000",
+      "EMAIL_ADDRESS": "amaynard@jswallacegroup.com"
+    },
+    {
+      "PERSON": "Ronald A. Bailey",
+      "EMAIL_ADDRESS": "support@etbservices.com"
+    },
+    {
+      "PERSON": "Drug Test"
+    },
+    {
+      "LOCATION": "1071 CARE WAY",
+      "PHONE_NUMBER": "(540)373-9673"
+    },
+    {
+      "PERSON": "Ann Ann"
+    },
+    {
+      "PERSON": "Maynard Johnstone"
+    },
+    {
+      "PERSON": "Group Rochester",
+      "PHONE_NUMBER": "(585) 482-8000",
+      "EMAIL_ADDRESS": "amaynard@jswallacegroup.com"
+    },
+    {
+      "PERSON": "Robert Half"
+    },
+    {
+      "PERSON": "Credit Department",
+      "EMAIL_ADDRESS": "RobertHalfCreditDepartment@roberthalf.com"
+    },
+    {
+      "PERSON": "Ann Maynard"
+    },
+    {
+      "PERSON": "Alexandrea Malley"
+    },
+    {
+      "PERSON": "Johnstone Supply",
+      "EMAIL_ADDRESS": "support@etbservices.com"
+    },
+    {
+      "PERSON": "Portal Check"
+    },
+    {
+      "PERSON": "Payments Electronic"
+    },
+    {
+      "PERSON": "Fund Transfer"
+    },
+    {
+      "PERSON": "Make Online"
+    },
+    {
+      "PERSON": "Pay Mail"
+    },
+    {
+      "PERSON": "Los Angeles"
+    },
+    {
+      "PERSON": "Use Electronic"
+    },
+    {
+      "PERSON": "International Inc"
+    },
+    {
+      "PERSON": "Swift Code",
+      "EMAIL_ADDRESS": "PLScashremit@roberthalf.com"
+    },
+    {
+      "PERSON": "Nancy Varady",
+      "EMAIL_ADDRESS": "nancy.varady@roberthalf.com"
+    },
+    {
+      "PERSON": "Credit Manager"
+    },
+    {
+      "PERSON": "Inc Perm"
+    },
+    {
+      "PERSON": "Placement Division",
+      "PHONE_NUMBER": "800 356-1994"
+    },
+    {
+      "PERSON": "Mary Beth"
+    },
+    {
+      "PERSON": "Ann Maynard"
+    },
+    {
+      "PERSON": "Johnstone Supply"
+    },
+    {
+      "PERSON": "Group Rochester",
+      "PHONE_NUMBER": "(585) 482-8000",
+      "EMAIL_ADDRESS": "amaynard@jswallacegroup.com"
+    },
+    {
+      "PERSON": "Jennifer Atseff",
+      "EMAIL_ADDRESS": "jatseff@benefitresource.com"
+    },
+    {
+      "PERSON": "New Tax"
+    },
+    {
+      "EMAIL_ADDRESS": "support@etbservices.com",
+      "PHONE_NUMBER": "(866) 996-5200",
+      "LOCATION": "245 Kenneth Drive"
+    },
+    {
+      "PERSON": "Direct Bill"
+    },
+    {
+      "PERSON": "Consumer Directed"
+    },
+    {
+      "PERSON": "Benefits Renewal"
+    },
+    {
+      "PERSON": "Ann Maynard"
+    },
+    {
+      "PERSON": "Johnstone Supply"
+    },
+    {
+      "PERSON": "Group Rochester",
+      "PHONE_NUMBER": "(585) 482-8000",
+      "EMAIL_ADDRESS": "amaynard@jswallacegroup.com"
+    },
+    {
+      "PERSON": "Elanie Rodriguez",
+      "EMAIL_ADDRESS": "support@etbservices.com"
+    },
+    {
+      "PERSON": "Drug Test"
+    },
+    {
+      "LOCATION": "2535 William Penn Hwy",
+      "PHONE_NUMBER": "(610)827-5127"
+    },
+    {
+      "PERSON": "Ann Maynard"
+    },
+    {
+      "PERSON": "Johnstone Supply"
+    },
+    {
+      "PERSON": "Group Rochester",
+      "PHONE_NUMBER": "(585) 482-8000",
+      "EMAIL_ADDRESS": "amaynard@jswallacegroup.com"
+    },
+    {
+      "PERSON": "Marcelo Figueroa",
+      "EMAIL_ADDRESS": "support@etbservices.com"
+    },
+    {
+      "PERSON": "Drug Test"
+    },
+    {
+      "PHONE_NUMBER": "(717)200-8030"
+    }
+  ]
+}

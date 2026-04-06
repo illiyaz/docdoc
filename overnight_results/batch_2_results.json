@@ -1,0 +1,353 @@
+{
+  "results": [
+    {
+      "total_pages": 50,
+      "extraction_mode": "quick_regex",
+      "total_records": 137,
+      "filename": "AWIR-DOC.00000001.00000038.00000806.pdf",
+      "extension": ".pdf",
+      "size_bytes": 294406,
+      "time_seconds": 0.15
+    },
+    {
+      "total_pages": 100,
+      "extraction_mode": "quick_regex",
+      "total_records": 51,
+      "filename": "AWIR-DOC.00000001.00000098.00000939.pdf",
+      "extension": ".pdf",
+      "size_bytes": 2377063,
+      "time_seconds": 0.25
+    },
+    {
+      "total_pages": 581,
+      "extraction_mode": "quick_regex",
+      "total_records": 33,
+      "filename": "AWIR-DOC.00000001.00000103.00000993.pdf",
+      "extension": ".pdf",
+      "size_bytes": 2149685,
+      "time_seconds": 0.19
+    },
+    {
+      "total_pages": 316,
+      "extraction_mode": "quick_regex",
+      "total_records": 21,
+      "filename": "AWIR-DOC.00000001.00000124.00000482.pdf",
+      "extension": ".pdf",
+      "size_bytes": 580184,
+      "time_seconds": 0.27
+    },
+    {
+      "total_pages": 15,
+      "extraction_mode": "quick_regex",
+      "total_records": 49,
+      "filename": "AWIR-DOC.00000038.15.pdf",
+      "extension": ".pdf",
+      "size_bytes": 95347,
+      "time_seconds": 0.04
+    }
+  ],
+  "total_records": 291,
+  "records_sample": [
+    {
+      "LOCATION": "000\nTotal DR"
+    },
+    {
+      "LOCATION": "9755 PLANK ROAD"
+    },
+    {
+      "LOCATION": "8387 FAIRFAX DR"
+    },
+    {
+      "LOCATION": "1320 WADSWORTH RD"
+    },
+    {
+      "LOCATION": "6141 MAYFIELD RD"
+    },
+    {
+      "LOCATION": "8 LIGHTENSTONE CT"
+    },
+    {
+      "LOCATION": "900 AQUA ISLE BLVD"
+    },
+    {
+      "LOCATION": "163 SW HANCOCK CT"
+    },
+    {
+      "LOCATION": "1830 RADIUS DR",
+      "PERSON": "DR, APT"
+    },
+    {
+      "LOCATION": "1900 HOWLAND WILSON RD"
+    },
+    {
+      "LOCATION": "19065 NELSON LEDGE RD"
+    },
+    {
+      "LOCATION": "62 EAST JEFFERSON ST"
+    },
+    {
+      "LOCATION": "8925 NORTH GIRDLE RD"
+    },
+    {
+      "LOCATION": "13609 WESTOVER DR"
+    },
+    {
+      "LOCATION": "16302 HUNTER PL"
+    },
+    {
+      "LOCATION": "15373 PENNY LANE"
+    },
+    {
+      "LOCATION": "14835 HILLCREST AVE"
+    },
+    {
+      "LOCATION": "3550 LESTER CT"
+    },
+    {
+      "LOCATION": "560 HARTVILLE RD"
+    },
+    {
+      "LOCATION": "1533 HOLMDEN RD"
+    },
+    {
+      "LOCATION": "3983 TENNYSON LANE"
+    },
+    {
+      "LOCATION": "30 LOUISE DR"
+    },
+    {
+      "LOCATION": "4156 CARROLL BLVD"
+    },
+    {
+      "LOCATION": "7 LITTLE FALL WAY"
+    },
+    {
+      "LOCATION": "14054 MADISON RD"
+    },
+    {
+      "LOCATION": "2931 WOODS HOLLOW LANE"
+    },
+    {
+      "LOCATION": "16135 BURTON WINDSOR RD"
+    },
+    {
+      "LOCATION": "5565 YOUNG RD"
+    },
+    {
+      "LOCATION": "4934 KINSMAN RD"
+    },
+    {
+      "LOCATION": "92 DELLENBERGER AVENUE"
+    },
+    {
+      "LOCATION": "286 BEELER DR"
+    },
+    {
+      "LOCATION": "16523 OLD STATE RD"
+    },
+    {
+      "LOCATION": "1405 MAXWELL AVE"
+    },
+    {
+      "LOCATION": "253 HIGH ST"
+    },
+    {
+      "LOCATION": "11935 PARKMAN RD"
+    },
+    {
+      "LOCATION": "11424 SHELDON RD"
+    },
+    {
+      "LOCATION": "15838 WEST HIGH STREET"
+    },
+    {
+      "LOCATION": "14472 BROADWOOD DR"
+    },
+    {
+      "LOCATION": "7400 FARAWAY TRAIL"
+    },
+    {
+      "LOCATION": "15510 GEORGIA RD"
+    },
+    {
+      "LOCATION": "15851 WEST HIGH ST"
+    },
+    {
+      "LOCATION": "14920 CRESTWOOD DRIVE"
+    },
+    {
+      "LOCATION": "970 WHISPERWOOD LN"
+    },
+    {
+      "LOCATION": "8855 FOX HILL DR"
+    },
+    {
+      "LOCATION": "4988 EDSAL DR"
+    },
+    {
+      "LOCATION": "8855 FOX HILL DRIVE"
+    },
+    {
+      "LOCATION": "7170 WELLS RD"
+    },
+    {
+      "LOCATION": "15758 OLD STATE RD"
+    },
+    {
+      "LOCATION": "336 TARR RD"
+    },
+    {
+      "LOCATION": "15784 OLD STATE ROAD"
+    },
+    {
+      "LOCATION": "20560 STAFFORD ST"
+    },
+    {
+      "LOCATION": "14245 AQUILLA RD"
+    },
+    {
+      "LOCATION": "13187 KINSMAN RD"
+    },
+    {
+      "LOCATION": "982 JAEGER ST"
+    },
+    {
+      "LOCATION": "6209 OAK HILL DRIVE"
+    },
+    {
+      "LOCATION": "15800 WEST HIGH ST"
+    },
+    {
+      "LOCATION": "55 SEMINOLE DR"
+    },
+    {
+      "LOCATION": "11115 CROSS STATION RD"
+    },
+    {
+      "LOCATION": "127 CHAPEL HILL DR"
+    },
+    {
+      "LOCATION": "7055 HARNESSFIELD LANE"
+    },
+    {
+      "LOCATION": "15995 JOHNSON ST"
+    },
+    {
+      "LOCATION": "16617 OLD STATE RD"
+    },
+    {
+      "LOCATION": "17185 HUNTLEY RD"
+    },
+    {
+      "LOCATION": "57 TRACY LANE"
+    },
+    {
+      "LOCATION": "14857 STANDISH AVE"
+    },
+    {
+      "LOCATION": "9990 HAWTHORNE DRIVE"
+    },
+    {
+      "LOCATION": "7292 BARRAGAN RD"
+    },
+    {
+      "LOCATION": "16315 HUNTLEY RD"
+    },
+    {
+      "LOCATION": "4873 PARKMAN RD"
+    },
+    {
+      "LOCATION": "5635 SAINT THOMAS LANE"
+    },
+    {
+      "LOCATION": "2755 JOSEPH LANE"
+    },
+    {
+      "LOCATION": "8013 CHERRYBARK DR"
+    },
+    {
+      "LOCATION": "221 ALLYND BLVD"
+    },
+    {
+      "LOCATION": "13634 SPRING ST"
+    },
+    {
+      "LOCATION": "9425 RAVENNA RD"
+    },
+    {
+      "LOCATION": "1065 MANOR VUE DR"
+    },
+    {
+      "LOCATION": "400 SOUTH FIFTH STREET"
+    },
+    {
+      "LOCATION": "17739 BURROWS RD"
+    },
+    {
+      "LOCATION": "111 ERIE ROAD"
+    },
+    {
+      "LOCATION": "2895 STRATFORD WAY"
+    },
+    {
+      "LOCATION": "7963 AUGUSTA LANE"
+    },
+    {
+      "LOCATION": "5 WEST WENGER ROAD"
+    },
+    {
+      "LOCATION": "12598 HOTCHKISS RD"
+    },
+    {
+      "LOCATION": "14500 BROADWOOD DR"
+    },
+    {
+      "LOCATION": "7830 MOUNTAIN ASH DRIVE"
+    },
+    {
+      "LOCATION": "12150 ZROLKA DR"
+    },
+    {
+      "LOCATION": "14209 OLD STATE RD"
+    },
+    {
+      "LOCATION": "1314 MIRHEATH DR"
+    },
+    {
+      "LOCATION": "15865 KENWOOD ST"
+    },
+    {
+      "LOCATION": "256 NORTH MAIN STREET"
+    },
+    {
+      "LOCATION": "9104 LINKS DRIVE"
+    },
+    {
+      "LOCATION": "4242 ROCKSPRING RD"
+    },
+    {
+      "LOCATION": "15073 CRESTWOOD DR"
+    },
+    {
+      "LOCATION": "1169 PARK LEDGE DR"
+    },
+    {
+      "LOCATION": "12671 PEARL RD"
+    },
+    {
+      "LOCATION": "202 OXFORD DRIVE"
+    },
+    {
+      "LOCATION": "5624 BRIANNA LANE"
+    },
+    {
+      "LOCATION": "5633 MECHANICSVILLE RD"
+    },
+    {
+      "LOCATION": "7849 WRENWOOD DR"
+    },
+    {
+      "LOCATION": "13065 OLD STATE RD"
+    }
+  ]
+}
