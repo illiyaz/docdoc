@@ -3,11 +3,12 @@ import { useQuery } from "@tanstack/react-query"
 import { useNavigate, Link } from "react-router-dom"
 import {
   Loader2, CheckCircle, Upload, FolderOpen, Server,
-  X, FileText, Circle, AlertCircle,
+  X, FileText, Circle, AlertCircle, Clock, Play, XCircle,
+  ChevronDown, ChevronUp,
 } from "lucide-react"
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
-import { getProtocols, uploadFiles, submitJobStreaming, listProjects } from "@/api/client"
-import type { JobResult, UploadResult, PipelineProgress } from "@/api/client"
+import { getProtocols, uploadFiles, submitJobStreaming, listProjects, getRecentJobs } from "@/api/client"
+import type { JobResult, UploadResult, PipelineProgress, JobSummary } from "@/api/client"
 import { JobIdSetterContext } from "@/App"
 
 const SUPPORTED_EXTENSIONS = new Set([
@@ -87,6 +88,155 @@ function PipelineStepper({ stages }: { stages: Record<string, StageState> }) {
         )
       })}
     </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Job List component (C1)
+// ---------------------------------------------------------------------------
+
+type StatusFilter = "all" | "running" | "completed" | "failed" | "analyze_complete"
+
+function statusBadge(status: string) {
+  const s = status.toLowerCase()
+  if (s === "running" || s === "extracting")
+    return <span className="inline-flex items-center gap-1 text-xs font-medium text-blue-700 bg-blue-50 rounded-full px-2 py-0.5"><Loader2 className="h-3 w-3 animate-spin" />Running</span>
+  if (s === "completed" || s === "complete")
+    return <span className="inline-flex items-center gap-1 text-xs font-medium text-green-700 bg-green-50 rounded-full px-2 py-0.5"><CheckCircle className="h-3 w-3" />Complete</span>
+  if (s === "failed" || s === "error")
+    return <span className="inline-flex items-center gap-1 text-xs font-medium text-red-700 bg-red-50 rounded-full px-2 py-0.5"><XCircle className="h-3 w-3" />Failed</span>
+  if (s === "analyze_complete" || s === "awaiting_review")
+    return <span className="inline-flex items-center gap-1 text-xs font-medium text-amber-700 bg-amber-50 rounded-full px-2 py-0.5"><Clock className="h-3 w-3" />Review</span>
+  if (s === "analyzing")
+    return <span className="inline-flex items-center gap-1 text-xs font-medium text-purple-700 bg-purple-50 rounded-full px-2 py-0.5"><Loader2 className="h-3 w-3 animate-spin" />Analyzing</span>
+  return <span className="text-xs text-muted-foreground">{status}</span>
+}
+
+function timeAgo(dateStr: string | null): string {
+  if (!dateStr) return ""
+  const d = new Date(dateStr)
+  const now = Date.now()
+  const diffMs = now - d.getTime()
+  if (diffMs < 0) return "just now"
+  const mins = Math.floor(diffMs / 60000)
+  if (mins < 1) return "just now"
+  if (mins < 60) return `${mins}m ago`
+  const hrs = Math.floor(mins / 60)
+  if (hrs < 24) return `${hrs}h ago`
+  const days = Math.floor(hrs / 24)
+  return `${days}d ago`
+}
+
+function formatDuration(seconds: number | null): string {
+  if (seconds === null || seconds === undefined) return ""
+  if (seconds < 60) return `${Math.round(seconds)}s`
+  const mins = Math.floor(seconds / 60)
+  const secs = Math.round(seconds % 60)
+  if (mins < 60) return `${mins}m ${secs}s`
+  const hrs = Math.floor(mins / 60)
+  return `${hrs}h ${mins % 60}m`
+}
+
+function JobList({ onJobSelect }: { onJobSelect: (jobId: string) => void }) {
+  const [filter, setFilter] = useState<StatusFilter>("all")
+  const [expanded, setExpanded] = useState(true)
+
+  const { data: jobs, isLoading } = useQuery({
+    queryKey: ["recentJobs"],
+    queryFn: () => getRecentJobs(false, 50),
+    refetchInterval: 5000, // Poll every 5s for live updates
+  })
+
+  const filtered = (jobs ?? []).filter((j) => {
+    if (filter === "all") return true
+    const s = j.status.toLowerCase()
+    if (filter === "running") return s === "running" || s === "extracting" || s === "analyzing"
+    if (filter === "completed") return s === "completed" || s === "complete"
+    if (filter === "failed") return s === "failed" || s === "error"
+    if (filter === "analyze_complete") return s === "analyze_complete" || s === "awaiting_review"
+    return true
+  })
+
+  const counts = {
+    all: (jobs ?? []).length,
+    running: (jobs ?? []).filter((j) => ["running", "extracting", "analyzing"].includes(j.status.toLowerCase())).length,
+    completed: (jobs ?? []).filter((j) => ["completed", "complete"].includes(j.status.toLowerCase())).length,
+    failed: (jobs ?? []).filter((j) => ["failed", "error"].includes(j.status.toLowerCase())).length,
+    analyze_complete: (jobs ?? []).filter((j) => ["analyze_complete", "awaiting_review"].includes(j.status.toLowerCase())).length,
+  }
+
+  return (
+    <Card className="mb-6">
+      <CardHeader className="pb-3 cursor-pointer" onClick={() => setExpanded(!expanded)}>
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-base flex items-center gap-2">
+            Recent Jobs
+            {counts.running > 0 && (
+              <span className="inline-flex items-center gap-1 text-xs font-medium text-blue-700 bg-blue-50 rounded-full px-2 py-0.5">
+                <Loader2 className="h-3 w-3 animate-spin" />{counts.running} running
+              </span>
+            )}
+          </CardTitle>
+          {expanded ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
+        </div>
+      </CardHeader>
+      {expanded && (
+        <CardContent className="pt-0">
+          {/* Filter tabs */}
+          <div className="flex gap-1 mb-3 flex-wrap">
+            {(["all", "running", "analyze_complete", "completed", "failed"] as StatusFilter[]).map((f) => (
+              <button
+                key={f}
+                onClick={() => setFilter(f)}
+                className={`text-xs px-2.5 py-1 rounded-full font-medium transition-colors ${
+                  filter === f
+                    ? "bg-primary text-primary-foreground"
+                    : "bg-muted text-muted-foreground hover:bg-muted/80"
+                }`}
+              >
+                {f === "all" ? "All" : f === "analyze_complete" ? "Review" : f.charAt(0).toUpperCase() + f.slice(1)}
+                {counts[f] > 0 && <span className="ml-1 opacity-75">({counts[f]})</span>}
+              </button>
+            ))}
+          </div>
+
+          {isLoading ? (
+            <div className="flex items-center justify-center py-6 text-muted-foreground text-sm">
+              <Loader2 className="h-4 w-4 animate-spin mr-2" /> Loading jobs...
+            </div>
+          ) : filtered.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-4">
+              {filter === "all" ? "No jobs yet. Submit a dataset below to get started." : `No ${filter} jobs.`}
+            </p>
+          ) : (
+            <div className="max-h-64 overflow-y-auto rounded-md border divide-y">
+              {filtered.map((job) => (
+                <button
+                  key={job.id}
+                  onClick={() => onJobSelect(job.id)}
+                  className="w-full flex items-center justify-between px-3 py-2.5 text-left hover:bg-accent/50 transition-colors"
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium truncate">
+                        {job.first_file_name ?? job.source_path ?? job.id.slice(0, 8)}
+                      </span>
+                      {statusBadge(job.status)}
+                    </div>
+                    <div className="flex items-center gap-3 mt-0.5 text-xs text-muted-foreground">
+                      <span>{job.document_count} doc{job.document_count !== 1 ? "s" : ""}</span>
+                      {job.duration_seconds != null && <span>{formatDuration(job.duration_seconds)}</span>}
+                      <span>{timeAgo(job.started_at ?? job.created_at)}</span>
+                    </div>
+                  </div>
+                  <Play className="h-3.5 w-3.5 text-muted-foreground shrink-0 ml-2" />
+                </button>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      )}
+    </Card>
   )
 }
 
@@ -410,8 +560,15 @@ export function JobSubmit() {
 
   // ---- Main form ----
 
+  // Job list navigation
+  const handleJobSelect = useCallback((jobId: string) => {
+    setJobId?.(jobId)
+    navigate(`/review`)
+  }, [navigate, setJobId])
+
   return (
     <div className="max-w-2xl mx-auto mt-8">
+      <JobList onJobSelect={handleJobSelect} />
       <Card>
         <CardHeader>
           <CardTitle>Submit Breach Dataset for Analysis</CardTitle>
