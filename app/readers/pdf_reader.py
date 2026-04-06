@@ -130,55 +130,146 @@ class PDFReader(BaseReader):
         doc.close()
         return all_blocks
 
+    _LARGE_DOC_THRESHOLD = 500  # pages
+
     def read(self) -> list[ExtractedBlock]:
         """Process all pages from onset_page onward and return blocks.
 
         Streams pages one at a time; doc._forget_page is called after each
         page to release memory immediately (CLAUDE.md § 2 memory rule).
 
-        For docs >500 pages, skips per-page OCR (too expensive — 13GB+ RAM).
-        Text layer is extracted as-is; truly scanned pages produce empty blocks
-        and are handled later by the extraction selector or vision path.
+        For large docs (>500 pages), uses sampled approach:
+        1. Sample 10 pages to check if text layer exists
+        2. If text layer present: fast text-only path (no OCR, no pdfplumber)
+        3. If scanned (no text): bounded OCR on sampled pages only
+           (every Nth page to stay under memory budget)
         """
         doc = fitz.open(str(self.path))
         onset_page = find_data_onset(doc)
         stitcher = PageStitcher()
-        # OCR engine created lazily on first scanned/corrupted page
-        # DISABLED for large docs — per-page OCR is too expensive
         ocr_engine = None
-        _skip_ocr = doc.page_count > 500
-        if _skip_ocr:
-            logger.info(
-                "Large PDF (%d pages): skipping per-page OCR in reader, text layer only",
-                doc.page_count,
-            )
         document_id = str(self.path)
         all_blocks: list[ExtractedBlock] = []
+        is_large = doc.page_count > self._LARGE_DOC_THRESHOLD
 
-        # For large docs, skip pdfplumber (table extraction) — text layer only
-        _plumber_ctx = pdfplumber.open(str(self.path)) if not _skip_ocr else None
-        try:
-            plumber_doc = _plumber_ctx.__enter__() if _plumber_ctx else None
+        if is_large:
+            # --- Sampled read for large docs ---
+            text_layer_ratio = self._sample_text_layer(doc, onset_page)
+            logger.info(
+                "Large PDF (%d pages): text layer on %.0f%% of sampled pages",
+                doc.page_count, text_layer_ratio * 100,
+            )
+
+            if text_layer_ratio >= 0.5:
+                # Majority text — fast path: PyMuPDF text only, no OCR/pdfplumber
+                all_blocks = self._read_text_only(doc, onset_page, stitcher, document_id)
+            else:
+                # Mostly scanned — bounded OCR: every Nth page to cap at ~100 pages
+                stride = max(1, doc.page_count // 100)
+                logger.info(
+                    "Scanned large PDF: OCR every %d pages (~%d pages total)",
+                    stride, doc.page_count // stride,
+                )
+                all_blocks = self._read_sampled_ocr(
+                    doc, onset_page, stitcher, document_id, stride,
+                )
+            doc.close()
+            return all_blocks
+
+        # --- Standard read for normal docs ---
+        with pdfplumber.open(str(self.path)) as plumber_doc:
             for page_num in range(onset_page, len(doc)):
                 page = doc.load_page(page_num)
-                if _skip_ocr:
-                    # Fast path: text extraction only, no tables, no OCR
-                    prose_blocks = self._extract_prose(page, page_num, set())
-                    page_text = "\n".join(b.text for b in prose_blocks)
-                    stitcher.stitch(page_num, page_text)
-                    page_blocks = prose_blocks
-                else:
-                    page_blocks, ocr_engine = self._process_page(
-                        page, page_num, plumber_doc, stitcher, ocr_engine,
-                    )
+                page_blocks, ocr_engine = self._process_page(
+                    page, page_num, plumber_doc, stitcher, ocr_engine,
+                )
                 all_blocks.extend(page_blocks)
                 doc._forget_page(page_num)
                 self._write_checkpoint(document_id, page_num, all_blocks)
-        finally:
-            if _plumber_ctx:
-                _plumber_ctx.__exit__(None, None, None)
 
         doc.close()
+        return all_blocks
+
+    def _sample_text_layer(self, doc: object, onset_page: int, n: int = 10) -> float:
+        """Sample N pages to check what fraction has a text layer.
+
+        Returns ratio (0.0–1.0) of sampled pages with ≥50 words.
+        """
+        total_pages = doc.page_count
+        sample_pages = []
+        stride = max(1, (total_pages - onset_page) // n)
+        for i in range(n):
+            pg = onset_page + i * stride
+            if pg < total_pages:
+                sample_pages.append(pg)
+
+        if not sample_pages:
+            return 1.0
+
+        text_count = 0
+        for pg in sample_pages:
+            page = doc[pg]
+            words = page.get_text("words")
+            if len(words) >= 50:
+                text_count += 1
+            doc._forget_page(pg)
+
+        return text_count / len(sample_pages)
+
+    def _read_text_only(
+        self, doc: object, onset_page: int,
+        stitcher: PageStitcher, document_id: str,
+    ) -> list[ExtractedBlock]:
+        """Fast path: extract text layer only via PyMuPDF. No OCR, no pdfplumber."""
+        all_blocks: list[ExtractedBlock] = []
+        for page_num in range(onset_page, doc.page_count):
+            page = doc.load_page(page_num)
+            prose_blocks = self._extract_prose(page, page_num, set())
+            page_text = "\n".join(b.text for b in prose_blocks)
+            stitcher.stitch(page_num, page_text)
+            all_blocks.extend(prose_blocks)
+            doc._forget_page(page_num)
+        return all_blocks
+
+    def _read_sampled_ocr(
+        self, doc: object, onset_page: int,
+        stitcher: PageStitcher, document_id: str, stride: int,
+    ) -> list[ExtractedBlock]:
+        """Bounded OCR for large scanned docs: every Nth page.
+
+        Caps total OCR'd pages at ~100 to stay under memory budget.
+        Text pages (if any) are still extracted via fast path.
+        """
+        all_blocks: list[ExtractedBlock] = []
+        ocr_engine = None
+        source = str(self.path)
+
+        for page_num in range(onset_page, doc.page_count):
+            page = doc.load_page(page_num)
+            label = classify_page(page)
+
+            if label == "digital":
+                # Has text — extract it regardless of stride
+                prose_blocks = self._extract_prose(page, page_num, set())
+                all_blocks.extend(prose_blocks)
+            elif (page_num - onset_page) % stride == 0:
+                # Scanned page on stride boundary — OCR it
+                try:
+                    if ocr_engine is None:
+                        from app.readers.ocr import OCREngine
+                        ocr_engine = OCREngine()
+                    mat = fitz.Matrix(2, 2)
+                    pix = page.get_pixmap(matrix=mat)
+                    ocr_blocks = ocr_engine.ocr_page_image(pix, page_num, source)
+                    all_blocks.extend(ocr_blocks)
+                except Exception:
+                    pass  # Skip page on OCR failure
+            # else: scanned page not on stride — skip (sampled)
+
+            page_text = "\n".join(b.text for b in all_blocks if b.page_or_sheet == page_num)
+            stitcher.stitch(page_num, page_text)
+            doc._forget_page(page_num)
+
         return all_blocks
 
     # ------------------------------------------------------------------

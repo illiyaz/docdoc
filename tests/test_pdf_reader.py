@@ -67,6 +67,7 @@ def _make_fitz_mock(num_pages: int = 1, page_dict: dict | None = None):
     mock_fitz = MagicMock(name="fitz")
     mock_doc = MagicMock()
     mock_doc.__len__ = Mock(return_value=num_pages)
+    mock_doc.page_count = num_pages
     mock_page = MagicMock()
     if page_dict is not None:
         mock_page.get_text.return_value = page_dict
@@ -266,6 +267,7 @@ def test_scanned_page_get_pixmap_receives_matrix():
     mock_fitz = MagicMock(name="fitz")
     mock_doc = MagicMock()
     mock_doc.__len__ = Mock(return_value=1)
+    mock_doc.page_count = 1
     mock_page = MagicMock()
     mock_doc.load_page.return_value = mock_page
     mock_fitz.open.return_value = mock_doc
