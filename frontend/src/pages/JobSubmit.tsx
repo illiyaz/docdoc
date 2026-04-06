@@ -435,6 +435,11 @@ export function JobSubmit() {
       setResult(res)
       setJobId(res.job_id)
       setPhase("complete")
+
+      // C4: Auto-navigate to project detail after 2s so user sees results
+      if (selectedProjectId) {
+        setTimeout(() => navigate(`/projects/${selectedProjectId}`), 2000)
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Job submission failed")
       // Mark current running stage as error

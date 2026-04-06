@@ -84,7 +84,12 @@ class ExcelReader(BaseReader):
         return all_blocks
 
     def _read_xls(self) -> list[ExtractedBlock]:
-        """Read legacy .xls files using xlrd."""
+        """Read legacy .xls files using xlrd.
+
+        D3 enhancement: Smart header detection.  Scans first 10 rows for
+        the most likely header row (highest ratio of non-empty, non-numeric
+        short strings).  Handles title rows, blank rows, and merged headers.
+        """
         import xlrd
 
         source = str(self.path)
@@ -100,10 +105,13 @@ class ExcelReader(BaseReader):
             sheet_name = ws.name
             table_id = str(uuid.uuid4())
 
-            # Row 0 = headers
+            # D3: Smart header detection — find the actual header row
+            header_row_idx = self._find_header_row_xls(ws)
+
+            # Emit header blocks
             headers: dict[int, str] = {}
             for col in range(ws.ncols):
-                val = ws.cell_value(0, col)
+                val = ws.cell_value(header_row_idx, col)
                 header_text = str(val) if val else ""
                 headers[col] = header_text
                 all_blocks.append(ExtractedBlock(
@@ -113,15 +121,15 @@ class ExcelReader(BaseReader):
                     file_type=file_type,
                     block_type="table_header",
                     bbox=None,
-                    row=1,
+                    row=header_row_idx + 1,
                     column=col + 1,
                     table_id=table_id,
                     col_header=header_text,
                     row_index=0,
                 ))
 
-            # Rows 1+ = data
-            for row_idx in range(1, ws.nrows):
+            # Data rows start after header
+            for row_idx in range(header_row_idx + 1, ws.nrows):
                 for col in range(ws.ncols):
                     val = ws.cell_value(row_idx, col)
                     text = str(val) if val else ""
@@ -136,10 +144,46 @@ class ExcelReader(BaseReader):
                         column=col + 1,
                         table_id=table_id,
                         col_header=headers.get(col, ""),
-                        row_index=row_idx,
+                        row_index=row_idx - header_row_idx,
                     ))
 
         return all_blocks
+
+    def _find_header_row_xls(self, ws: object) -> int:
+        """Find the most likely header row in an XLS sheet.
+
+        Heuristic: scan first 10 rows, score each by the ratio of non-empty
+        cells that are short text (not numbers, not dates).  The row with
+        the highest score AND at least 3 non-empty cells is the header.
+        Falls back to row 0 if no clear winner.
+        """
+        best_row = 0
+        best_score = -1
+
+        scan_limit = min(getattr(ws, "nrows", 10), 10)
+
+        for row_idx in range(scan_limit):
+            non_empty = 0
+            text_like = 0
+            ncols = getattr(ws, "ncols", 0)
+
+            for col in range(ncols):
+                val = ws.cell_value(row_idx, col)
+                if val is None or (isinstance(val, str) and not val.strip()):
+                    continue
+                non_empty += 1
+                s = str(val).strip()
+                # Header-like: short text, not purely numeric, not a date
+                if len(s) <= 50 and not s.replace(".", "").replace("-", "").isdigit():
+                    text_like += 1
+
+            if non_empty >= 3:
+                score = text_like / max(non_empty, 1)
+                if score > best_score:
+                    best_score = score
+                    best_row = row_idx
+
+        return best_row
 
     # ------------------------------------------------------------------
     # Private helpers
@@ -164,8 +208,9 @@ class ExcelReader(BaseReader):
 
         table_id = str(uuid.uuid4())
 
-        # ---- Row 1: column headers ----------------------------------------
-        header_row = rows[0]
+        # ---- D3: Smart header detection ------------------------------------
+        header_row_idx = self._find_header_row_xlsx(rows)
+        header_row = rows[header_row_idx]
         # Map 1-based column index → header text for use on data cells
         headers: dict[int, str] = {}
         header_blocks: list[ExtractedBlock] = []
@@ -188,9 +233,9 @@ class ExcelReader(BaseReader):
                 row_index=0,
             ))
 
-        # ---- Rows 2+: data cells ------------------------------------------
+        # ---- Rows after header: data cells ----------------------------------
         data_blocks: list[ExtractedBlock] = []
-        for row_offset, row in enumerate(rows[1:], 2):
+        for row_offset, row in enumerate(rows[header_row_idx + 1:], header_row_idx + 2):
             for col_idx, cell in enumerate(row, 1):
                 col_num = getattr(cell, "column", col_idx)
                 row_num = getattr(cell, "row", row_offset)
@@ -229,6 +274,40 @@ class ExcelReader(BaseReader):
                 block.col_header = f"[REVIEW] {block.col_header}"
 
         return header_blocks + data_blocks
+
+    def _find_header_row_xlsx(self, rows: list) -> int:
+        """Find the most likely header row in an XLSX sheet.
+
+        Same heuristic as _find_header_row_xls but operates on openpyxl rows.
+        """
+        best_row = 0
+        best_score = -1
+
+        scan_limit = min(len(rows), 10)
+
+        for row_idx in range(scan_limit):
+            row = rows[row_idx]
+            non_empty = 0
+            text_like = 0
+
+            for cell in row:
+                val = cell.value
+                if val is None:
+                    continue
+                s = str(val).strip()
+                if not s:
+                    continue
+                non_empty += 1
+                if len(s) <= 50 and not s.replace(".", "").replace("-", "").isdigit():
+                    text_like += 1
+
+            if non_empty >= 3:
+                score = text_like / max(non_empty, 1)
+                if score > best_score:
+                    best_score = score
+                    best_row = row_idx
+
+        return best_row
 
     def _is_structured_id_column(self, column_values: list[str], pattern: str) -> bool:
         """Return True if strictly more than 80% of non-empty values match pattern.
