@@ -1814,6 +1814,17 @@ def _count_valid_names(records: list) -> int:
     return count
 
 
+# --- Per-doc timeout (A7: thread resilience) ---
+# Hard upper bound on how long a single document can take.
+# Even if the doc IS making progress, kill it after this many seconds.
+# Prevents a single large doc from blocking the entire queue.
+_DOC_HARD_TIMEOUT_SECONDS = 1800  # 30 minutes max per document
+
+
+class _DocTimeoutError(Exception):
+    """Raised when a single document exceeds the hard timeout."""
+
+
 class _DocStallDetector:
     """Detect if per-doc extraction has stalled (no progress for N seconds).
 
@@ -2096,6 +2107,9 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
             except Exception:
                 pass
 
+        # A7: Track failed docs for end-of-run summary
+        _failed_docs: list[dict] = []
+
         # Build per-document selected entity types
         doc_selected_types: dict[UUID, list[str] | None] = {}
         for doc in approved_docs:
@@ -2138,6 +2152,9 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                 detail={"total": len(approved_docs), "current": i, "status": "running",
                         "doc_name": doc.file_name, "recommended_path": _vr.get("recommended_path", "none")},
             )
+
+            records: list[PIIRecord] = []  # A7: init before try so except can always reference it
+            extraction_path = "?"
 
             try:
                 doc_targets = doc_selected_types.get(doc.id) or target_entities
@@ -2237,6 +2254,112 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                 extraction_path = "3"
 
                 # ============================================================
+                # A0: FEEDBACK-DRIVEN EXTRACTION SELECTOR (feature-flagged)
+                # When enabled, replaces the Path 0/1/2/3 chain with a
+                # sample-test-scale loop.  Set USE_EXTRACTION_SELECTOR=true.
+                # ============================================================
+                _use_selector = settings.use_extraction_selector
+                if _use_selector:
+                    try:
+                        from app.pipeline.extraction_selector import (
+                            build_document_profile, pick_sample_pages,
+                        )
+                        from app.pipeline.extraction_methods import compete_methods
+                        from app.pipeline.content_onset import find_verified_onset
+
+                        # Phase 1: UNDERSTAND
+                        _onset = doc.metadata_json.get("verified_onset", 0) if doc.metadata_json else 0
+                        _profile = build_document_profile(
+                            doc_path=doc.source_path,
+                            blocks=blocks,
+                            file_type=doc.file_type or "pdf",
+                            file_name=doc.file_name,
+                            onset_page=_onset,
+                            engine=engine,
+                        )
+
+                        # Phase 2: COMPETE
+                        _sample_pages = pick_sample_pages(_profile, blocks, n=5)
+
+                        # Gather field map from analysis phase if available
+                        _field_map = None
+                        _doc_meta_sel = doc.metadata_json or {}
+                        _vr_sel = _doc_meta_sel.get("vision_routing", {})
+                        if _vr_sel.get("field_map"):
+                            _field_map = _vr_sel["field_map"]
+
+                        _schema = None
+                        _schema_dict = _doc_meta_sel.get("document_schema")
+                        if _schema_dict:
+                            try:
+                                from app.structure.document_schema import DocumentSchema as _SelDS
+                                _schema = _SelDS.from_dict(_schema_dict)
+                            except Exception:
+                                pass
+
+                        _llm_client = None
+                        if settings.llm_assist_enabled:
+                            try:
+                                from app.llm.client import OllamaClient
+                                _llm_client = OllamaClient()
+                            except Exception:
+                                pass
+
+                        _winner, _results = compete_methods(
+                            profile=_profile,
+                            blocks=blocks,
+                            sample_pages=_sample_pages,
+                            schema=_schema,
+                            field_map=_field_map,
+                            engine=engine,
+                            llm_client=_llm_client,
+                            target_entities=doc_targets,
+                        )
+
+                        if _winner is not None:
+                            # Phase 3: SCALE — apply winner to all data pages
+                            _all_data_pages = sorted(doc_pages)
+                            if isinstance(_profile.onset_page, int):
+                                _all_data_pages = [p for p in _all_data_pages if p >= _profile.onset_page]
+
+                            logger.info(
+                                "[%d/%d] SELECTOR: %s | winner=%s | scaling to %d pages",
+                                i, len(approved_docs), doc.file_name,
+                                _winner.name, len(_all_data_pages),
+                            )
+                            extraction_path = f"selector:{_winner.name}"
+                            records = _winner.extract(
+                                pages=_all_data_pages,
+                                blocks=blocks,
+                                profile=_profile,
+                                schema=_schema,
+                            )
+                            logger.info(
+                                "[%d/%d] SELECTOR DONE: %s | %d records via %s",
+                                i, len(approved_docs), doc.file_name,
+                                len(records), _winner.name,
+                            )
+                        else:
+                            logger.warning(
+                                "[%d/%d] SELECTOR: No winner for %s — falling through to legacy paths",
+                                i, len(approved_docs), doc.file_name,
+                            )
+                            _use_selector = False  # Fall through to legacy
+
+                    except Exception as sel_err:
+                        logger.warning(
+                            "[%d/%d] SELECTOR FAILED for %s: %s — falling through to legacy paths",
+                            i, len(approved_docs), doc.file_name, sel_err,
+                            exc_info=True,
+                        )
+                        _use_selector = False  # Fall through to legacy
+
+                # ============================================================
+                # LEGACY PATH SELECTION (when selector is off or failed)
+                # ============================================================
+                _selector_produced_records = _use_selector and len(records) > 0
+
+                # ============================================================
                 # LARGE DOC FAST-PATH (>500 pages)
                 # Skip LLM-heavy paths (1, 2a, 2b). Instead:
                 # 1. LLM reads pages 0-20 to learn the pattern (~1 min)
@@ -2244,7 +2367,7 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                 # 3. Fall back to Presidio smart-group (30s for 3000 pages)
                 # ============================================================
                 _is_large_doc = total_pg > 500
-                if _is_large_doc:
+                if _is_large_doc and not _selector_produced_records:
                     logger.info(
                         "[%d/%d] LARGE DOC: %s (%d pages) — using fast-path (LLM sample + coordinate/Presidio)",
                         i, len(approved_docs), doc.file_name, total_pg,
@@ -2417,11 +2540,18 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                         else:
                             instances = schema.template.get_instance_pages(total_pg)
 
-                # Heartbeat callback — keeps SSE relay alive + stall detection
+                # Heartbeat callback — keeps SSE relay alive + stall detection + hard timeout
                 class _StallError(Exception):
                     """Raised when per-doc extraction stalls (no progress for 5 min)."""
 
                 def _heartbeat_cb(batch_idx: int, total_batches: int, records_so_far: int) -> None:
+                    # Hard timeout check (A7) — absolute wall-clock limit per doc
+                    _elapsed = time.time() - _doc_start
+                    if _elapsed > _DOC_HARD_TIMEOUT_SECONDS:
+                        raise _DocTimeoutError(
+                            f"Hard timeout after {_elapsed:.0f}s "
+                            f"at batch {batch_idx}/{total_batches} ({records_so_far} records)"
+                        )
                     _stall_detector.update(records_so_far, batch_idx, total_batches)
                     if _stall_detector.is_stalled():
                         raise _StallError(
@@ -2504,7 +2634,7 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                                 doc.file_name, total_pg,
                             )
 
-                if is_coordinate_path:
+                if is_coordinate_path and not _selector_produced_records:
                     try:
                         from app.pipeline.coordinate_extractor import CoordinateExtractor
                         from app.pipeline.reconciliation import ExtractionReconciler
@@ -3059,33 +3189,99 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                     detail=audit_detail,
                 )
 
-            except Exception as e:
+            except (Exception, MemoryError) as e:
+                # A7: Robust per-doc error handling — NEVER let one doc kill the queue
                 _doc_elapsed = time.time() - _doc_start
-                logger.warning(
-                    "[%d/%d] FAILED: %s | error=%s | time=%.1fs | records_so_far=%d",
+                _is_timeout = isinstance(e, _DocTimeoutError)
+                _is_oom = isinstance(e, MemoryError)
+                _severity = "ERROR" if (_is_timeout or _is_oom) else "WARNING"
+                logger.log(
+                    logging.ERROR if _severity == "ERROR" else logging.WARNING,
+                    "[%d/%d] FAILED: %s | error=%s | time=%.1fs | records_so_far=%d | timeout=%s | oom=%s",
                     i, len(approved_docs), doc.file_name,
                     type(e).__name__, _doc_elapsed, len(records),
+                    _is_timeout, _is_oom,
                     exc_info=True,
                 )
-                # Save partial results + resume info for retry
-                if records:
-                    try:
-                        _partial_meta = dict(doc.metadata_json or {})
+                # Track failed docs for end-of-run summary
+                _failed_docs.append({
+                    "file_name": doc.file_name,
+                    "doc_id": str(doc.id),
+                    "error": type(e).__name__,
+                    "elapsed_s": round(_doc_elapsed, 1),
+                    "records_before_fail": len(records),
+                    "is_timeout": _is_timeout,
+                    "is_oom": _is_oom,
+                })
+                # Save partial results + mark status appropriately
+                try:
+                    _partial_meta = dict(doc.metadata_json or {})
+                    if records:
                         _partial_meta["extracted_records"] = [_serialize_pii_record(r) for r in records]
                         _partial_meta["extraction_status"] = "partial"
-                        _partial_meta["extraction_path_used"] = extraction_path
                         _partial_meta["last_record_count"] = len(records)
-                        doc.metadata_json = _partial_meta
-                        flag_modified(doc, "metadata_json")
                         all_records.extend(records)
                         completed_doc_ids.append(str(doc.id))
-                        db.commit()
-                        logger.info(
-                            "[%d/%d] PARTIAL: %s | %d records saved for retry",
-                            i, len(approved_docs), doc.file_name, len(records),
-                        )
+                    else:
+                        _partial_meta["extraction_status"] = "failed"
+                    _partial_meta["extraction_path_used"] = extraction_path
+                    _partial_meta["extraction_error"] = type(e).__name__
+                    _partial_meta["extraction_error_time"] = _doc_elapsed
+                    doc.metadata_json = _partial_meta
+                    flag_modified(doc, "metadata_json")
+                    db.commit()
+                    logger.info(
+                        "[%d/%d] %s: %s | %d records saved | continuing to next doc",
+                        i, len(approved_docs),
+                        "PARTIAL" if records else "FAILED",
+                        doc.file_name, len(records),
+                    )
+                except Exception:
+                    # DB save failed too — rollback and move on
+                    try:
+                        db.rollback()
                     except Exception:
                         pass
+                # Update SSE so UI shows the failure
+                try:
+                    _update_extraction_progress(
+                        db, run,
+                        stage="detection",
+                        message=f"{'Timed out' if _is_timeout else 'Failed'}: {doc.file_name} ({type(e).__name__}) — continuing...",
+                        completed_doc_ids=completed_doc_ids,
+                        total_docs=len(approved_docs), current_doc=i,
+                        records_found=len(all_records),
+                        detail={"total": len(approved_docs), "current": i,
+                                "status": "doc_failed", "doc_name": doc.file_name,
+                                "error": type(e).__name__},
+                    )
+                except Exception:
+                    pass
+                continue  # A7: ALWAYS continue to next document
+
+        # --- End-of-extraction summary (A7) ---
+        if _failed_docs:
+            logger.warning(
+                "EXTRACTION SUMMARY: %d/%d docs failed | failures: %s",
+                len(_failed_docs), len(approved_docs),
+                ", ".join(f"{d['file_name']}({d['error']}, {d['elapsed_s']}s)" for d in _failed_docs),
+            )
+            # Persist failure summary in run metrics for API access
+            try:
+                _metrics = dict(run.metrics or {})
+                _metrics["failed_docs"] = _failed_docs
+                _metrics["docs_succeeded"] = len(approved_docs) - len(_failed_docs)
+                _metrics["docs_failed"] = len(_failed_docs)
+                run.metrics = _metrics
+                flag_modified(run, "metrics")
+                db.commit()
+            except Exception:
+                pass
+        else:
+            logger.info(
+                "EXTRACTION SUMMARY: %d/%d docs succeeded | %d total records",
+                len(approved_docs), len(approved_docs), len(all_records),
+            )
 
         if _is_cancelled():
             return

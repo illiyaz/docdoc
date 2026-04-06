@@ -38,6 +38,8 @@ class Settings(BaseSettings):
     vision_page_dpi: int = Field(default=150, alias="VISION_PAGE_DPI")
     vision_routing_workers: int = Field(default=4, alias="VISION_ROUTING_WORKERS")
     ollama_understanding_model: str | None = Field(default=None, alias="OLLAMA_UNDERSTANDING_MODEL")
+    use_extraction_selector: bool = Field(default=False, alias="USE_EXTRACTION_SELECTOR")
+    doc_hard_timeout_s: int = Field(default=1800, alias="DOC_HARD_TIMEOUT_S")
 
 
 @lru_cache(maxsize=1)
