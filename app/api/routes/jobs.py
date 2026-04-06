@@ -19,6 +19,9 @@ from __future__ import annotations
 import json
 import logging
 import shutil
+import threading
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Generator
 from uuid import UUID, uuid4
@@ -30,6 +33,11 @@ from sqlalchemy import func as sqla_func, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db, get_protocol_registry
+
+def get_db_session():
+    """Create a standalone DB session for background threads."""
+    from app.api.deps import _get_session_factory
+    return _get_session_factory()()
 from app.core.settings import get_settings
 from app.db.models import Document, Extraction, IngestionRun, NotificationList, NotificationSubject, Project
 from app.notification.list_builder import build_notification_list, get_notification_subjects
@@ -999,14 +1007,165 @@ def run_job(
     }
 
 
+_pipeline_threads: dict[str, threading.Thread] = {}
+
+
+def _run_pipeline_background(body: CreateJobBody, registry: ProtocolRegistry) -> None:
+    """Run _pipeline_generator in a background thread.
+
+    Captures SSE events and writes progress to IngestionRun.metrics["pipeline_progress"].
+    Survives browser disconnects.
+    """
+    db = get_db_session()
+    run = None
+
+    try:
+        gen = _pipeline_generator(body, db, registry)
+        job_uuid = None
+
+        for sse_line in gen:
+            if not sse_line.startswith("data: "):
+                continue
+            try:
+                event = json.loads(sse_line[6:].strip())
+            except (json.JSONDecodeError, ValueError):
+                continue
+
+            # Find the run if we don't have it yet
+            if job_uuid is None:
+                run = db.execute(
+                    select(IngestionRun)
+                    .where(IngestionRun.pipeline_mode == "full")
+                    .order_by(IngestionRun.created_at.desc())
+                ).scalars().first()
+                if run:
+                    job_uuid = run.id
+
+            # Write progress to metrics
+            if run is not None:
+                try:
+                    db.expire(run)
+                    metrics = dict(run.metrics or {})
+                    metrics["pipeline_progress"] = {
+                        "stage": event.get("stage", ""),
+                        "message": event.get("message", ""),
+                        "status": event.get("status", "running"),
+                        "detail": event.get("detail", {}),
+                        "result": event.get("result"),
+                        "heartbeat": datetime.now(timezone.utc).isoformat(),
+                    }
+                    run.metrics = metrics
+                    from sqlalchemy.orm.attributes import flag_modified
+                    flag_modified(run, "metrics")
+                    db.commit()
+                except Exception:
+                    try:
+                        db.rollback()
+                    except Exception:
+                        pass
+
+    except Exception as exc:
+        logger.error("Pipeline background thread failed: %s", type(exc).__name__, exc_info=True)
+        if run is not None:
+            try:
+                run.status = "failed"
+                run.error_summary = str(type(exc).__name__)
+                db.commit()
+            except Exception:
+                pass
+    finally:
+        db.close()
+
+
+def _pipeline_relay_generator(job_id: str, body: CreateJobBody, registry: ProtocolRegistry):
+    """SSE relay for full pipeline — polls background thread progress."""
+    db = get_db_session()
+
+    try:
+        job_uuid = UUID(job_id)
+    except (ValueError, AttributeError):
+        yield _sse({"stage": "error", "message": f"Invalid job_id: {job_id!r}"})
+        db.close()
+        return
+
+    last_message = ""
+    for _ in range(5400):  # Max 3 hours (5400 × 2s)
+        time.sleep(2)
+
+        try:
+            db.expire_all()
+            run = db.execute(
+                select(IngestionRun).where(IngestionRun.id == job_uuid)
+            ).scalar_one_or_none()
+        except Exception:
+            continue
+
+        if run is None:
+            # Job not created yet — background thread still starting
+            # Also check latest full pipeline run
+            run = db.execute(
+                select(IngestionRun)
+                .where(IngestionRun.pipeline_mode == "full")
+                .order_by(IngestionRun.created_at.desc())
+            ).scalars().first()
+            if run is None:
+                continue
+
+        progress = (run.metrics or {}).get("pipeline_progress", {})
+        message = progress.get("message", "")
+
+        if message and message != last_message:
+            event = {
+                "stage": progress.get("stage", ""),
+                "message": message,
+                "status": progress.get("status", "running"),
+            }
+            detail = progress.get("detail")
+            if detail:
+                event["detail"] = detail
+            result = progress.get("result")
+            if result:
+                event["result"] = result
+            yield _sse(event)
+            last_message = message
+
+        if run.status == "completed":
+            final = progress.get("result") or {"job_id": str(run.id), "status": "COMPLETE"}
+            yield _sse({"stage": "complete", "result": final})
+            break
+        if run.status == "failed":
+            yield _sse({"stage": "error", "message": progress.get("message", "Pipeline failed")})
+            break
+
+    db.close()
+
+
 @router.post("/run/stream", summary="Submit job with streaming progress (SSE)")
 def run_job_stream(
     body: CreateJobBody,
     registry: ProtocolRegistry = Depends(get_protocol_registry),
 ):
-    """Run the full pipeline with SSE streaming progress events."""
+    """Run the full pipeline with SSE streaming progress events.
+
+    Pipeline runs in a background thread that survives browser disconnects.
+    The SSE response is a thin relay that polls progress from the DB.
+    """
+    job_id = str(uuid4())
+    body.job_id = job_id
+
+    t = threading.Thread(
+        target=_run_pipeline_background,
+        args=(body, registry),
+        daemon=True,
+        name=f"pipeline-{job_id[:8]}",
+    )
+    _pipeline_threads[job_id] = t
+    t.start()
+
+    time.sleep(1)
+
     return StreamingResponse(
-        _pipeline_generator(body, None, registry),
+        _pipeline_relay_generator(job_id, body, registry),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
