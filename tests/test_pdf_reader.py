@@ -677,3 +677,263 @@ def test_db_checkpoint_updated_per_page():
 
     assert mock_session.flush.call_count == 3
     assert mock_doc_record.metadata_json["last_completed_page"] == 2
+
+
+# ---------------------------------------------------------------------------
+# 11. _sample_tables — lightweight table header sampling
+# ---------------------------------------------------------------------------
+
+def _make_reader_for_unit(path: str = "test.pdf") -> PDFReader:
+    """Create a PDFReader instance without running read()."""
+    with patch("app.readers.pdf_reader.fitz"):
+        reader = PDFReader(path)
+    return reader
+
+
+def test_sample_tables_returns_headers():
+    """When pdfplumber finds tables on sample pages, returns lowercased headers."""
+    reader = _make_reader_for_unit()
+    mock_doc = MagicMock()
+    mock_doc.page_count = 1000
+
+    plumber_page = MagicMock()
+    plumber_page.extract_tables.return_value = [
+        [["Name", "DOB", "SSN"], ["Alice", "1990-01-01", "123-45-6789"]],
+    ]
+    plumber_doc = MagicMock()
+    plumber_doc.pages = [MagicMock()] * 1000
+    for i in range(1000):
+        plumber_doc.pages[i] = plumber_page
+
+    with patch("app.readers.pdf_reader.pdfplumber") as mock_plumber:
+        mock_plumber.open.return_value.__enter__.return_value = plumber_doc
+        headers = reader._sample_tables(mock_doc, onset_page=0, n=3)
+
+    assert "name" in headers
+    assert "dob" in headers
+    assert "ssn" in headers
+
+
+def test_sample_tables_empty_when_no_tables():
+    """If pdfplumber finds no tables, returns empty list."""
+    reader = _make_reader_for_unit()
+    mock_doc = MagicMock()
+    mock_doc.page_count = 1000
+
+    plumber_page = MagicMock()
+    plumber_page.extract_tables.return_value = []
+    plumber_doc = MagicMock()
+    plumber_doc.pages = [plumber_page] * 1000
+
+    with patch("app.readers.pdf_reader.pdfplumber") as mock_plumber:
+        mock_plumber.open.return_value.__enter__.return_value = plumber_doc
+        headers = reader._sample_tables(mock_doc, onset_page=0, n=3)
+
+    assert headers == []
+
+
+def test_sample_tables_handles_pdfplumber_exception():
+    """If pdfplumber raises, returns empty list — never crashes."""
+    reader = _make_reader_for_unit()
+    mock_doc = MagicMock()
+    mock_doc.page_count = 1000
+
+    with patch("app.readers.pdf_reader.pdfplumber") as mock_plumber:
+        mock_plumber.open.side_effect = RuntimeError("corrupted PDF")
+        headers = reader._sample_tables(mock_doc, onset_page=0, n=3)
+
+    assert headers == []
+
+
+def test_sample_tables_skips_short_headers():
+    """Headers shorter than 2 chars are excluded (noise)."""
+    reader = _make_reader_for_unit()
+    mock_doc = MagicMock()
+    mock_doc.page_count = 1000
+
+    plumber_page = MagicMock()
+    plumber_page.extract_tables.return_value = [
+        [["A", "Name", "", None, "ID"], ["x", "Alice", "y", "z", "42"]],
+    ]
+    plumber_doc = MagicMock()
+    plumber_doc.pages = [plumber_page] * 1000
+
+    with patch("app.readers.pdf_reader.pdfplumber") as mock_plumber:
+        mock_plumber.open.return_value.__enter__.return_value = plumber_doc
+        headers = reader._sample_tables(mock_doc, onset_page=0, n=3)
+
+    assert "a" not in headers  # too short
+    assert "name" in headers
+    assert "id" in headers
+
+
+def test_sample_tables_deduplicates():
+    """Same header on multiple pages is returned only once."""
+    reader = _make_reader_for_unit()
+    mock_doc = MagicMock()
+    mock_doc.page_count = 1000
+
+    plumber_page = MagicMock()
+    plumber_page.extract_tables.return_value = [
+        [["Name", "Name"], ["Alice", "Bob"]],
+    ]
+    plumber_doc = MagicMock()
+    plumber_doc.pages = [plumber_page] * 1000
+
+    with patch("app.readers.pdf_reader.pdfplumber") as mock_plumber:
+        mock_plumber.open.return_value.__enter__.return_value = plumber_doc
+        headers = reader._sample_tables(mock_doc, onset_page=0, n=3)
+
+    assert headers.count("name") == 1
+
+
+def test_sample_tables_only_samples_n_pages():
+    """Should only open N pages, not all 1000."""
+    reader = _make_reader_for_unit()
+    mock_doc = MagicMock()
+    mock_doc.page_count = 1000
+
+    access_log = []
+
+    class TrackingPage:
+        def __init__(self, idx):
+            self.idx = idx
+
+        def extract_tables(self):
+            access_log.append(self.idx)
+            return []
+
+    plumber_doc = MagicMock()
+    plumber_doc.pages = [TrackingPage(i) for i in range(1000)]
+
+    with patch("app.readers.pdf_reader.pdfplumber") as mock_plumber:
+        mock_plumber.open.return_value.__enter__.return_value = plumber_doc
+        reader._sample_tables(mock_doc, onset_page=0, n=3)
+
+    assert len(access_log) == 3
+
+
+# ---------------------------------------------------------------------------
+# 12. _tag_table_context — tagging prose blocks with column header context
+# ---------------------------------------------------------------------------
+
+def test_tag_table_context_exact_match():
+    """Block whose text exactly matches a header gets block_type='table_header'."""
+    from app.readers.base import ExtractedBlock
+    reader = _make_reader_for_unit()
+
+    blocks = [
+        ExtractedBlock(text="Name", page_or_sheet=0, source_path="t.pdf",
+                       file_type="pdf", block_type="prose"),
+    ]
+    tagged = reader._tag_table_context(blocks, ["name", "dob"])
+    assert tagged[0].block_type == "table_header"
+    assert tagged[0].col_header == "Name"
+
+
+def test_tag_table_context_prefix_colon():
+    """Block like 'Name: Alice' gets col_header='name' but keeps block_type."""
+    from app.readers.base import ExtractedBlock
+    reader = _make_reader_for_unit()
+
+    blocks = [
+        ExtractedBlock(text="Name: Alice Smith", page_or_sheet=0,
+                       source_path="t.pdf", file_type="pdf", block_type="prose"),
+    ]
+    tagged = reader._tag_table_context(blocks, ["name", "dob"])
+    assert tagged[0].col_header == "name"
+    assert tagged[0].block_type == "prose"  # not changed to table_header
+
+
+def test_tag_table_context_prefix_tab():
+    """Tab-separated prefix matches."""
+    from app.readers.base import ExtractedBlock
+    reader = _make_reader_for_unit()
+
+    blocks = [
+        ExtractedBlock(text="DOB\t1990-01-01", page_or_sheet=0,
+                       source_path="t.pdf", file_type="pdf", block_type="prose"),
+    ]
+    tagged = reader._tag_table_context(blocks, ["name", "dob"])
+    assert tagged[0].col_header == "dob"
+
+
+def test_tag_table_context_no_match():
+    """Unmatched block passes through unchanged."""
+    from app.readers.base import ExtractedBlock
+    reader = _make_reader_for_unit()
+
+    blocks = [
+        ExtractedBlock(text="Random paragraph text", page_or_sheet=0,
+                       source_path="t.pdf", file_type="pdf", block_type="prose"),
+    ]
+    tagged = reader._tag_table_context(blocks, ["name", "dob"])
+    assert tagged[0].col_header is None
+    assert tagged[0].block_type == "prose"
+
+
+def test_tag_table_context_empty_headers():
+    """Empty header list returns blocks unchanged."""
+    from app.readers.base import ExtractedBlock
+    reader = _make_reader_for_unit()
+
+    blocks = [
+        ExtractedBlock(text="Name", page_or_sheet=0, source_path="t.pdf",
+                       file_type="pdf", block_type="prose"),
+    ]
+    tagged = reader._tag_table_context(blocks, [])
+    assert tagged[0].block_type == "prose"
+    assert tagged[0].col_header is None
+
+
+def test_tag_table_context_preserves_bbox():
+    """Bbox and other fields are preserved through tagging."""
+    from app.readers.base import ExtractedBlock
+    reader = _make_reader_for_unit()
+
+    blocks = [
+        ExtractedBlock(text="Name: Bob", page_or_sheet=5, source_path="t.pdf",
+                       file_type="pdf", block_type="prose",
+                       bbox=(10.0, 20.0, 200.0, 40.0)),
+    ]
+    tagged = reader._tag_table_context(blocks, ["name"])
+    assert tagged[0].bbox == (10.0, 20.0, 200.0, 40.0)
+    assert tagged[0].page_or_sheet == 5
+    assert tagged[0].source_path == "t.pdf"
+
+
+def test_read_text_only_calls_sample_tables():
+    """_read_text_only must call _sample_tables before iterating pages."""
+    reader = _make_reader_for_unit()
+    mock_doc = MagicMock()
+    mock_doc.page_count = 2
+    mock_page = MagicMock()
+    mock_page.get_text.return_value = {"blocks": [_PROSE_DICT_BLOCK]}
+    mock_doc.load_page.return_value = mock_page
+    mock_stitcher = MagicMock()
+
+    with patch.object(reader, "_sample_tables", return_value=[]) as mock_st:
+        reader._read_text_only(mock_doc, 0, mock_stitcher, "doc-1")
+        mock_st.assert_called_once_with(mock_doc, 0)
+
+
+def test_read_text_only_tags_blocks_when_headers_found():
+    """When _sample_tables returns headers, blocks get tagged."""
+    reader = _make_reader_for_unit()
+    mock_doc = MagicMock()
+    mock_doc.page_count = 1
+    mock_page = MagicMock()
+    # A page with a block whose text starts with a header
+    name_block = {
+        "type": 0,
+        "bbox": (10.0, 20.0, 200.0, 40.0),
+        "lines": [{"spans": [{"text": "Name: Alice"}]}],
+    }
+    mock_page.get_text.return_value = {"blocks": [name_block]}
+    mock_doc.load_page.return_value = mock_page
+    mock_stitcher = MagicMock()
+
+    with patch.object(reader, "_sample_tables", return_value=["name", "dob"]):
+        blocks = reader._read_text_only(mock_doc, 0, mock_stitcher, "doc-1")
+
+    assert blocks[0].col_header == "name"

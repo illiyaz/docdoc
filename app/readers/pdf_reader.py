@@ -216,20 +216,153 @@ class PDFReader(BaseReader):
 
         return text_count / len(sample_pages)
 
+    def _sample_tables(
+        self, doc: object, onset_page: int, n: int = 3,
+    ) -> list[str]:
+        """Sample N pages with pdfplumber to detect table column headers.
+
+        Opens pdfplumber briefly on a few pages, extracts column headers
+        from any tables found, then closes.  Returns a deduplicated list
+        of header strings (lowercased).  Returns empty list if no tables
+        found or pdfplumber fails.
+
+        This is lightweight — pdfplumber only processes 3 pages, not 3000.
+        """
+        total_pages = doc.page_count
+        stride = max(1, (total_pages - onset_page) // n)
+        sample_pages = []
+        for i in range(n):
+            pg = onset_page + i * stride
+            if pg < total_pages:
+                sample_pages.append(pg)
+
+        if not sample_pages:
+            return []
+
+        headers: set[str] = set()
+        try:
+            with pdfplumber.open(str(self.path)) as plumber_doc:
+                for pg in sample_pages:
+                    if pg >= len(plumber_doc.pages):
+                        continue
+                    plumber_page = plumber_doc.pages[pg]
+                    tables = plumber_page.extract_tables()
+                    for rows in tables:
+                        if not rows or not rows[0]:
+                            continue
+                        for cell in rows[0]:
+                            if cell and isinstance(cell, str) and len(cell.strip()) >= 2:
+                                headers.add(cell.strip().lower())
+        except Exception:
+            logger.debug("Table sampling failed for %s", self.path, exc_info=True)
+            return []
+
+        if headers:
+            logger.info(
+                "Large PDF table sampling: found %d column headers on %d sample pages: %s",
+                len(headers), len(sample_pages),
+                ", ".join(sorted(headers)[:10]),  # log first 10
+            )
+        return sorted(headers)
+
     def _read_text_only(
         self, doc: object, onset_page: int,
         stitcher: PageStitcher, document_id: str,
     ) -> list[ExtractedBlock]:
-        """Fast path: extract text layer only via PyMuPDF. No OCR, no pdfplumber."""
+        """Fast path: extract text layer only via PyMuPDF. No OCR, no pdfplumber.
+
+        If table column headers were detected during sampling, tags prose
+        blocks with col_header context by matching header text against each
+        block's content.  This preserves field classification context for
+        downstream PII detection without running pdfplumber on every page.
+        """
+        # Sample for tables first (lightweight — 3 pages only)
+        table_headers = self._sample_tables(doc, onset_page)
+
         all_blocks: list[ExtractedBlock] = []
         for page_num in range(onset_page, doc.page_count):
             page = doc.load_page(page_num)
             prose_blocks = self._extract_prose(page, page_num, set())
+
+            # If table headers found, tag blocks with matching col_header
+            if table_headers:
+                prose_blocks = self._tag_table_context(prose_blocks, table_headers)
+
             page_text = "\n".join(b.text for b in prose_blocks)
             stitcher.stitch(page_num, page_text)
             all_blocks.extend(prose_blocks)
             doc._forget_page(page_num)
         return all_blocks
+
+    def _tag_table_context(
+        self,
+        blocks: list[ExtractedBlock],
+        headers: list[str],
+    ) -> list[ExtractedBlock]:
+        """Tag prose blocks whose text matches a known table column header.
+
+        When a block's text (lowercased, stripped) exactly matches a learned
+        column header, set its col_header field.  When a block's text
+        contains a header as a prefix label (e.g. "Name: John Smith"),
+        set col_header to the header portion.
+
+        This gives downstream PII detection the same field-classification
+        context that pdfplumber table extraction would provide, but without
+        the per-page cost.
+        """
+        if not headers:
+            return blocks
+
+        header_set = frozenset(headers)
+        tagged: list[ExtractedBlock] = []
+        for block in blocks:
+            text_lower = block.text.strip().lower()
+
+            # Exact match: the block IS a header label
+            if text_lower in header_set:
+                tagged.append(ExtractedBlock(
+                    text=block.text,
+                    page_or_sheet=block.page_or_sheet,
+                    source_path=block.source_path,
+                    file_type=block.file_type,
+                    block_type="table_header",
+                    bbox=block.bbox,
+                    col_header=block.text.strip(),
+                    row=block.row,
+                    column=block.column,
+                    table_id=block.table_id,
+                    row_index=block.row_index,
+                ))
+                continue
+
+            # Prefix match: "Name: John Smith" → col_header="name"
+            matched_header = None
+            for h in headers:
+                if text_lower.startswith(h) and len(text_lower) > len(h):
+                    # Check delimiter after header (colon, tab, 2+ spaces)
+                    rest = block.text.strip()[len(h):]
+                    if rest and rest[0] in (":", "\t", " "):
+                        matched_header = h
+                        break
+
+            if matched_header:
+                tagged.append(ExtractedBlock(
+                    text=block.text,
+                    page_or_sheet=block.page_or_sheet,
+                    source_path=block.source_path,
+                    file_type=block.file_type,
+                    block_type=block.block_type,
+                    bbox=block.bbox,
+                    col_header=matched_header,
+                    row=block.row,
+                    column=block.column,
+                    table_id=block.table_id,
+                    row_index=block.row_index,
+                ))
+            else:
+                tagged.append(block)
+
+        return tagged
 
     def _read_sampled_ocr(
         self, doc: object, onset_page: int,
