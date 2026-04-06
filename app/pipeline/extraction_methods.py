@@ -155,33 +155,28 @@ class PresidioSmartGroupMethod(ExtractionMethod):
         schema: DocumentSchema | None = None,
         **kwargs: Any,
     ) -> list[PIIRecord]:
-        from app.pipeline.smart_grouping import smart_group_detections
-        from app.pipeline.record_mapper import detections_to_pii_records
+        from app.pipeline.smart_grouping import group_detections_to_records
 
         page_set = set(pages)
         sample_blocks = [b for b in blocks if b.page_or_sheet in page_set]
 
-        # Run Presidio on each block
-        all_detections = []
-        for block in sample_blocks:
-            try:
-                detections = self._engine.analyze(
-                    block.text,
-                    entities=self._target_entities,
-                )
-                for d in detections:
-                    d.page_or_sheet = block.page_or_sheet
-                    d.source_path = block.source_path
-                all_detections.extend(detections)
-            except Exception:
-                continue
+        if not sample_blocks:
+            return []
+
+        # Run Presidio on all blocks at once (batched, not per-block)
+        all_detections = self._engine.analyze(
+            sample_blocks,
+            target_entity_types=self._target_entities,
+        )
 
         if not all_detections:
             return []
 
-        # Group detections into records
-        groups = smart_group_detections(all_detections, sample_blocks)
-        return detections_to_pii_records(groups, source_document_id="")
+        doc_id = sample_blocks[0].source_path if sample_blocks else ""
+        return group_detections_to_records(
+            all_detections, doc_id,
+            schema=schema, doc_path=profile.source_path if profile else None,
+        )
 
 
 class LLMTemplateMethod(ExtractionMethod):
