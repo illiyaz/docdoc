@@ -3107,6 +3107,119 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                             before_name_val, len(records), doc.file_name,
                         )
 
+                # --- B2/B3: Email sender + label deny list filters ---
+                if records:
+                    _before_fp = len(records)
+                    _fp_filtered: list[PIIRecord] = []
+                    for rec in records:
+                        _drop = False
+
+                        # B3: Label deny list — reject "PERSON" names that are labels
+                        if rec.raw_name:
+                            try:
+                                from app.pii.context_deny_list import is_label_as_person
+                                _is_label, _label_reason = is_label_as_person(rec.raw_name)
+                                if _is_label:
+                                    if rec.raw_government_id:
+                                        # Keep record but remove the fake name
+                                        object.__setattr__(rec, "raw_name", None)
+                                        object.__setattr__(rec, "normalized_value", rec.raw_government_id)
+                                    else:
+                                        _drop = True
+                                        continue
+                            except ImportError:
+                                pass
+
+                        # B2: Email sender context — skip records near "From:" etc.
+                        # Only applies to MSG/EML-sourced docs or docs with email-like text
+                        if rec.raw_name and rec.entity_role in (None, "unknown"):
+                            try:
+                                from app.pii.context_deny_list import is_email_sender_context
+                                # Build a context window from blocks on the same page
+                                _page_key = rec.page_or_sheet
+                                _ctx_blocks = [b for b in blocks if b.page_or_sheet == _page_key]
+                                _ctx_text = " ".join(b.text for b in _ctx_blocks[:5])  # first 5 blocks
+                                _is_sender, _sender_reason = is_email_sender_context(
+                                    rec.raw_name, "PERSON", _ctx_text,
+                                )
+                                if _is_sender:
+                                    if rec.raw_government_id:
+                                        object.__setattr__(rec, "raw_name", None)
+                                        object.__setattr__(rec, "normalized_value", rec.raw_government_id)
+                                    else:
+                                        _drop = True
+                                        continue
+                            except ImportError:
+                                pass
+
+                        if not _drop:
+                            _fp_filtered.append(rec)
+
+                    if len(_fp_filtered) < _before_fp:
+                        logger.info(
+                            "FP filters (B2+B3): %d → %d records for %s",
+                            _before_fp, len(_fp_filtered), doc.file_name,
+                        )
+                    records = _fp_filtered
+
+                # --- B1: ValueFrequencyFilter — suppress org metadata ---
+                if records and total_pg >= 5:
+                    try:
+                        from app.pii.schema_filter import ValueFrequencyFilter
+
+                        # Adapt PIIRecords to the interface VFF expects
+                        # (pii_type, evidence_page, detected_text)
+                        class _VFFAdapter:
+                            __slots__ = ("pii_type", "evidence_page", "detected_text", "hashed_value")
+                            def __init__(self, pt: str, pg: int | str, txt: str):
+                                self.pii_type = pt
+                                self.evidence_page = pg
+                                self.detected_text = txt
+                                self.hashed_value = None
+
+                        _vff_items: list = []
+                        for _r in records:
+                            _pg = _r.page_or_sheet
+                            if _r.raw_name:
+                                _vff_items.append(_VFFAdapter("PERSON", _pg, _r.raw_name))
+                            if _r.raw_phone:
+                                _vff_items.append(_VFFAdapter("PHONE_NUMBER", _pg, _r.raw_phone))
+                            if _r.raw_email:
+                                _vff_items.append(_VFFAdapter("EMAIL_ADDRESS", _pg, _r.raw_email))
+
+                        vff = ValueFrequencyFilter.from_extractions(_vff_items, total_pg)
+                        if vff.flagged_values:
+                            _before_vff = len(records)
+                            _vff_kept: list[PIIRecord] = []
+                            for rec in records:
+                                _suppressed = False
+                                for field_name, pii_type in [
+                                    ("raw_name", "PERSON"),
+                                    ("raw_phone", "PHONE_NUMBER"),
+                                    ("raw_email", "EMAIL_ADDRESS"),
+                                ]:
+                                    val = getattr(rec, field_name, None)
+                                    if val:
+                                        _is_org, _ = vff.is_org_metadata(val, pii_type)
+                                        if _is_org:
+                                            object.__setattr__(rec, field_name, None)
+                                            _suppressed = True
+                                # Drop record if it lost all identifying info
+                                if not (rec.raw_name or rec.raw_government_id or rec.raw_email):
+                                    continue
+                                _vff_kept.append(rec)
+
+                            if len(_vff_kept) < _before_vff:
+                                logger.info(
+                                    "ValueFrequencyFilter (B1): %d → %d records for %s",
+                                    _before_vff, len(_vff_kept), doc.file_name,
+                                )
+                            records = _vff_kept
+                    except ImportError:
+                        pass
+                    except Exception:
+                        logger.debug("ValueFrequencyFilter failed for %s", doc.file_name, exc_info=True)
+
                 # --- Persist records immediately (before validation) ---
                 all_records.extend(records)
 
