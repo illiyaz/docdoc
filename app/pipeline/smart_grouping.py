@@ -165,7 +165,13 @@ def _group_by_boundaries(
 
 
 def _group_one_per_page(detections: list, doc_id: str) -> list[PIIRecord]:
-    """One composite record per page. Best for 1-person-per-page docs."""
+    """One composite record per page. Best for 1-person-per-page docs.
+
+    Even if no PERSON detection is present on a page, we still build a single
+    composite record when there are 2+ detections — this keeps SSN, email, and
+    phone on the same page linked into one subject instead of creating orphan
+    records.  The subject may lack a name but will carry the other PII fields.
+    """
     page_dets: dict = defaultdict(list)
     for d in detections:
         pg = d.block.page_or_sheet if hasattr(d, "block") and d.block else 0
@@ -173,11 +179,12 @@ def _group_one_per_page(detections: list, doc_id: str) -> list[PIIRecord]:
 
     records: list[PIIRecord] = []
     for group in page_dets.values():
-        has_person = any(d.entity_type in _PERSON_TYPES for d in group)
-        if has_person:
+        if len(group) >= 2:
+            # Always build a composite when multiple detections on the same page,
+            # even without a PERSON detection — keeps related PII together.
             records.append(build_composite_record(group, doc_id))
-        else:
-            records.extend(detection_to_pii_record(d, doc_id) for d in group)
+        elif len(group) == 1:
+            records.append(detection_to_pii_record(group[0], doc_id))
     return records
 
 
@@ -328,8 +335,10 @@ def _group_per_person(detections: list, doc_id: str) -> list[PIIRecord]:
         non_persons = [d for d in group if d.entity_type not in _PERSON_TYPES]
 
         if len(persons) <= 1:
-            # Single person or none — standard composite
-            if persons:
+            # Single person or none — standard composite.
+            # Even without a PERSON detection, build a composite when there are
+            # 2+ detections on the same row/page so related PII stays linked.
+            if persons or len(group) >= 2:
                 records.append(build_composite_record(group, doc_id))
             else:
                 records.extend(detection_to_pii_record(d, doc_id) for d in group)

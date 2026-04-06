@@ -395,20 +395,56 @@ LABEL_DENY_LIST = frozenset({
     "legal guardian", "power of attorney", "billing address",
     "shipping address", "mailing address", "home address",
     "work address", "physical address", "permanent address",
+    # From production run analysis (April 2026)
+    "inquiry name", "inquiry type", "inquiry date",
+    "password expired", "ssword ex",
+    "gray venture partners llc", "venture partners",
+})
+
+# Road/street suffix patterns that indicate an address, not a person name
+_ROAD_SUFFIXES = frozenset({
+    "rd", "st", "ave", "blvd", "dr", "ln", "way", "ct", "pl", "cir",
+    "pkwy", "hwy", "road", "street", "avenue", "boulevard", "drive",
+    "lane", "court", "place", "circle", "parkway", "highway",
+    "trail", "trl", "terrace", "ter",
 })
 
 
 def is_label_as_person(detected_text: str) -> tuple[bool, str]:
-    """Check if detected PERSON text is actually a label or category name.
+    """Check if detected PERSON text is actually a label, address, or truncated fragment.
+
+    Catches:
+    1. Known labels ("inquiry name", "emergency contact", etc.)
+    2. Road/street names ("Burton Windsor Rd", "Dodgeville Rd")
+    3. Truncated single-initial names ("James L", "Amanda L")
+    4. Very short names (< 4 chars)
 
     Returns
     -------
     tuple[bool, str]
         (is_label, reason)
     """
-    text_lower = detected_text.strip().lower()
+    text = detected_text.strip()
+    text_lower = text.lower()
+
+    # 1. Direct deny list match
     if text_lower in LABEL_DENY_LIST:
-        return True, f"label_as_person: '{detected_text}' is a label/category, not a person name"
+        return True, f"label_as_person: '{text}' is a label/category, not a person name"
+
+    # 2. Road/street name detection — last word is a road suffix
+    words = text_lower.split()
+    if len(words) >= 2 and words[-1] in _ROAD_SUFFIXES:
+        return True, f"road_name: '{text}' ends with road suffix '{words[-1]}'"
+
+    # 3. Truncated single-initial names ("James L", "Amanda L", "Ssword Ex")
+    #    Real names have a last name with 2+ chars
+    if len(words) == 2 and len(words[-1]) <= 2 and words[-1].isalpha():
+        return True, f"truncated_name: '{text}' has single-char last component"
+
+    # 4. Very short — likely a fragment
+    if len(text) < 4:
+        return True, f"too_short: '{text}' is too short to be a person name"
+
     return False, ""
 
 

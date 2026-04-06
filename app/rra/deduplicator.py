@@ -30,7 +30,8 @@ logger = logging.getLogger(__name__)
 # PLUS one of these corroborating PII types.  Name-only records are noise
 # and should not generate notification subjects.
 _CORROBORATING_PII_TYPES = frozenset({
-    "US_SSN", "CREDIT_CARD", "BANK_ACCOUNT", "US_BANK_ROUTING",
+    "US_SSN", "CREDIT_CARD", "BANK_ACCOUNT", "US_BANK_NUMBER",
+    "US_BANK_ROUTING",
     "US_DRIVER_LICENSE", "US_PASSPORT", "NI_NUMBER", "AADHAAR",
     "PAN_CARD", "TAX_ID", "NATIONAL_INSURANCE_UK", "UK_NINO",
     "NATIONAL_ID", "DATE_OF_BIRTH", "DATE_OF_BIRTH_MDY",
@@ -38,6 +39,14 @@ _CORROBORATING_PII_TYPES = frozenset({
     "PHONE_NUMBER", "PHONE_US", "PHONE_INTL",
     "LOCATION", "ADDRESS", "PHI_MRN", "PHI_NPI",
     "MEDICAL_LICENSE", "BIOMETRIC",
+})
+
+# Entity types that are NOT meaningful on their own — they need either a name
+# or at least one PII type from _CORROBORATING_PII_TYPES to form a valid subject.
+# URL, US_BANK_NUMBER (matches any 8-17 digit string), and IP_ADDRESS are too
+# noisy to justify a notification subject by themselves.
+_LOW_VALUE_ENTITY_TYPES = frozenset({
+    "URL", "US_BANK_NUMBER", "IP_ADDRESS", "LOCATION",
 })
 
 
@@ -105,22 +114,31 @@ class Deduplicator:
             # no corroborating PII (SSN, DOB, email, phone, address, etc.).
             # These are noise — headers, labels, or orphan PERSON detections.
             has_corroboration = False
+            has_name = False
+            all_entity_types: set[str] = set()
             for r in group.records:
+                if r.raw_name:
+                    has_name = True
                 if r.raw_email or r.raw_phone or r.raw_dob or r.raw_address or r.raw_government_id:
                     has_corroboration = True
-                    break
-                # Also check entity_types_found for corroborating types
+                # Collect all entity types for low-value check
                 if r.entity_types_found:
+                    all_entity_types.update(et.upper() for et in r.entity_types_found)
                     for et in r.entity_types_found:
                         if et.upper() in _CORROBORATING_PII_TYPES:
                             has_corroboration = True
-                            break
-                if has_corroboration:
-                    break
 
             if not has_corroboration:
                 skipped_thin += 1
                 continue
+
+            # Second filter: if no name and ALL entity types are low-value,
+            # skip — these are noise (URL-only, IP-only, bank-number-only).
+            if not has_name:
+                meaningful_types = all_entity_types - _LOW_VALUE_ENTITY_TYPES - {"PERSON"}
+                if not meaningful_types:
+                    skipped_thin += 1
+                    continue
 
             ns = self._build_one(group)
             existing = self._find_existing(ns)
