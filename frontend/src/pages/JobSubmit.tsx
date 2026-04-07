@@ -105,8 +105,8 @@ function statusBadge(status: string) {
     return <span className="inline-flex items-center gap-1 text-xs font-medium text-green-700 bg-green-50 rounded-full px-2 py-0.5"><CheckCircle className="h-3 w-3" />Complete</span>
   if (s === "failed" || s === "error")
     return <span className="inline-flex items-center gap-1 text-xs font-medium text-red-700 bg-red-50 rounded-full px-2 py-0.5"><XCircle className="h-3 w-3" />Failed</span>
-  if (s === "analyze_complete" || s === "awaiting_review")
-    return <span className="inline-flex items-center gap-1 text-xs font-medium text-amber-700 bg-amber-50 rounded-full px-2 py-0.5"><Clock className="h-3 w-3" />Review</span>
+  if (s === "analyze_complete" || s === "awaiting_review" || s === "analyzed")
+    return <span className="inline-flex items-center gap-1 text-xs font-medium text-amber-700 bg-amber-50 rounded-full px-2 py-0.5"><Clock className="h-3 w-3" />Ready to Extract</span>
   if (s === "analyzing")
     return <span className="inline-flex items-center gap-1 text-xs font-medium text-purple-700 bg-purple-50 rounded-full px-2 py-0.5"><Loader2 className="h-3 w-3 animate-spin" />Analyzing</span>
   return <span className="text-xs text-muted-foreground">{status}</span>
@@ -137,7 +137,7 @@ function formatDuration(seconds: number | null): string {
   return `${hrs}h ${mins % 60}m`
 }
 
-function JobList({ onJobSelect }: { onJobSelect: (jobId: string) => void }) {
+function JobList({ onJobSelect, onGoToProject }: { onJobSelect: (jobId: string) => void; onGoToProject?: (projectId: string) => void }) {
   const [filter, setFilter] = useState<StatusFilter>("all")
   const [expanded, setExpanded] = useState(true)
 
@@ -153,7 +153,7 @@ function JobList({ onJobSelect }: { onJobSelect: (jobId: string) => void }) {
     if (filter === "running") return s === "running" || s === "extracting" || s === "analyzing"
     if (filter === "completed") return s === "completed" || s === "complete"
     if (filter === "failed") return s === "failed" || s === "error"
-    if (filter === "analyze_complete") return s === "analyze_complete" || s === "awaiting_review"
+    if (filter === "analyze_complete") return s === "analyze_complete" || s === "awaiting_review" || s === "analyzed"
     return true
   })
 
@@ -162,7 +162,7 @@ function JobList({ onJobSelect }: { onJobSelect: (jobId: string) => void }) {
     running: (jobs ?? []).filter((j) => ["running", "extracting", "analyzing"].includes(j.status.toLowerCase())).length,
     completed: (jobs ?? []).filter((j) => ["completed", "complete"].includes(j.status.toLowerCase())).length,
     failed: (jobs ?? []).filter((j) => ["failed", "error"].includes(j.status.toLowerCase())).length,
-    analyze_complete: (jobs ?? []).filter((j) => ["analyze_complete", "awaiting_review"].includes(j.status.toLowerCase())).length,
+    analyze_complete: (jobs ?? []).filter((j) => ["analyze_complete", "awaiting_review", "analyzed"].includes(j.status.toLowerCase())).length,
   }
 
   return (
@@ -210,28 +210,44 @@ function JobList({ onJobSelect }: { onJobSelect: (jobId: string) => void }) {
             </p>
           ) : (
             <div className="max-h-64 overflow-y-auto rounded-md border divide-y">
-              {filtered.map((job) => (
-                <button
-                  key={job.id}
-                  onClick={() => onJobSelect(job.id)}
-                  className="w-full flex items-center justify-between px-3 py-2.5 text-left hover:bg-accent/50 transition-colors"
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium truncate">
-                        {job.first_file_name ?? job.source_path ?? job.id.slice(0, 8)}
+              {filtered.map((job) => {
+                const isAnalyzed = job.status.toLowerCase() === "analyzed"
+                const hasProject = !!job.project_id
+                return (
+                  <div
+                    key={job.id}
+                    className="w-full flex items-center justify-between px-3 py-2.5 text-left hover:bg-accent/50 transition-colors cursor-pointer"
+                    onClick={() => {
+                      if (isAnalyzed && hasProject && onGoToProject) {
+                        onGoToProject(job.project_id!)
+                      } else {
+                        onJobSelect(job.id)
+                      }
+                    }}
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium truncate">
+                          {job.first_file_name ?? job.source_path ?? job.id.slice(0, 8)}
+                        </span>
+                        {statusBadge(job.status)}
+                      </div>
+                      <div className="flex items-center gap-3 mt-0.5 text-xs text-muted-foreground">
+                        <span>{job.document_count} doc{job.document_count !== 1 ? "s" : ""}</span>
+                        {job.duration_seconds != null && <span>{formatDuration(job.duration_seconds)}</span>}
+                        <span>{timeAgo(job.started_at ?? job.created_at)}</span>
+                      </div>
+                    </div>
+                    {isAnalyzed && hasProject ? (
+                      <span className="text-xs font-medium text-amber-700 bg-amber-50 rounded px-2 py-1 shrink-0 ml-2">
+                        Extract
                       </span>
-                      {statusBadge(job.status)}
-                    </div>
-                    <div className="flex items-center gap-3 mt-0.5 text-xs text-muted-foreground">
-                      <span>{job.document_count} doc{job.document_count !== 1 ? "s" : ""}</span>
-                      {job.duration_seconds != null && <span>{formatDuration(job.duration_seconds)}</span>}
-                      <span>{timeAgo(job.started_at ?? job.created_at)}</span>
-                    </div>
+                    ) : (
+                      <Play className="h-3.5 w-3.5 text-muted-foreground shrink-0 ml-2" />
+                    )}
                   </div>
-                  <Play className="h-3.5 w-3.5 text-muted-foreground shrink-0 ml-2" />
-                </button>
-              ))}
+                )
+              })}
             </div>
           )}
         </CardContent>
@@ -571,9 +587,13 @@ export function JobSubmit() {
     navigate(`/review`)
   }, [navigate, setJobId])
 
+  const handleGoToProject = useCallback((projectId: string) => {
+    navigate(`/projects/${projectId}?tab=jobs`)
+  }, [navigate])
+
   return (
     <div className="max-w-2xl mx-auto mt-8">
-      <JobList onJobSelect={handleJobSelect} />
+      <JobList onJobSelect={handleJobSelect} onGoToProject={handleGoToProject} />
       <Card>
         <CardHeader>
           <CardTitle>Submit Breach Dataset for Analysis</CardTitle>

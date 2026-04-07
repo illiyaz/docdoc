@@ -1,5 +1,5 @@
 import { useState, useCallback, useMemo, useRef, useEffect } from "react"
-import { useParams, Link } from "react-router-dom"
+import { useParams, useSearchParams, Link } from "react-router-dom"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   ArrowLeft,
@@ -2388,7 +2388,7 @@ function JobsTab({
         page: currentPage,
         per_page: perPage,
       }),
-    refetchInterval: 10_000,
+    refetchInterval: 5_000,
   })
 
   const jobs = jobsData?.jobs ?? []
@@ -3030,6 +3030,11 @@ function CatalogTab({
     setIsRunning(true)
     setRunError(null)
     setRunResult(null)
+    // Invalidate jobs shortly after submit so the new running job appears in the Jobs tab
+    // (the backend creates the run ~1-2s after the POST)
+    setTimeout(() => {
+      queryClient.invalidateQueries({ queryKey: ["project-jobs", projectId] })
+    }, 3000)
 
     try {
       const body: Record<string, string> = {
@@ -4379,7 +4384,9 @@ export function ProjectDetail() {
   const { id } = useParams<{ id: string }>()
   const projectId = id ?? ""
   const queryClient = useQueryClient()
-  const [activeTab, setActiveTab] = useState<TabId>("overview")
+  const [searchParams] = useSearchParams()
+  const initialTab = (searchParams.get("tab") as TabId) || "overview"
+  const [activeTab, setActiveTab] = useState<TabId>(initialTab)
 
   const { data: project, isLoading, isError } = useQuery({
     queryKey: ["project", projectId],
