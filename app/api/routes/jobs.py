@@ -1015,13 +1015,70 @@ def _run_pipeline_background(body: CreateJobBody, registry: ProtocolRegistry) ->
 
     Captures SSE events and writes progress to IngestionRun.metrics["pipeline_progress"].
     Survives browser disconnects.
+
+    IMPORTANT: Uses fresh sessions for heartbeat writes — the generator's
+    internal session may be closed/replaced by _refresh_session().
     """
-    db = get_db_session()
-    run = None
+    from app.api.deps import _get_session_factory
+    from sqlalchemy.orm.attributes import flag_modified
+
+    SessionFactory = _get_session_factory()
+    gen_db = SessionFactory()
+    job_uuid = None
+
+    def _write_heartbeat(event: dict) -> None:
+        if job_uuid is None:
+            return
+        hb_db = SessionFactory()
+        try:
+            run = hb_db.get(IngestionRun, job_uuid)
+            if run is None:
+                return
+            metrics = dict(run.metrics or {})
+            metrics["pipeline_progress"] = {
+                "stage": event.get("stage", ""),
+                "message": event.get("message", ""),
+                "status": event.get("status", "running"),
+                "detail": event.get("detail", {}),
+                "result": event.get("result"),
+                "heartbeat": datetime.now(timezone.utc).isoformat(),
+            }
+            run.metrics = metrics
+            flag_modified(run, "metrics")
+            hb_db.commit()
+        except Exception:
+            try:
+                hb_db.rollback()
+            except Exception:
+                pass
+        finally:
+            hb_db.close()
+
+    def _update_run_status(status: str, error: str | None = None) -> None:
+        if job_uuid is None:
+            return
+        st_db = SessionFactory()
+        try:
+            run = st_db.get(IngestionRun, job_uuid)
+            if run is None:
+                return
+            run.status = status
+            if error:
+                run.error_summary = error
+            if status == "completed":
+                run.completed_at = datetime.now(timezone.utc)
+            st_db.commit()
+            logger.info("Pipeline background: set job %s → %s", str(job_uuid)[:8], status)
+        except Exception:
+            try:
+                st_db.rollback()
+            except Exception:
+                pass
+        finally:
+            st_db.close()
 
     try:
-        gen = _pipeline_generator(body, db, registry)
-        job_uuid = None
+        gen = _pipeline_generator(body, gen_db, registry)
 
         for sse_line in gen:
             if not sse_line.startswith("data: "):
@@ -1031,50 +1088,30 @@ def _run_pipeline_background(body: CreateJobBody, registry: ProtocolRegistry) ->
             except (json.JSONDecodeError, ValueError):
                 continue
 
-            # Find the run if we don't have it yet
+            # Find the run UUID from the first events
             if job_uuid is None:
-                run = db.execute(
-                    select(IngestionRun)
-                    .where(IngestionRun.pipeline_mode == "full")
-                    .order_by(IngestionRun.created_at.desc())
-                ).scalars().first()
-                if run:
-                    job_uuid = run.id
-
-            # Write progress to metrics
-            if run is not None:
+                find_db = SessionFactory()
                 try:
-                    db.expire(run)
-                    metrics = dict(run.metrics or {})
-                    metrics["pipeline_progress"] = {
-                        "stage": event.get("stage", ""),
-                        "message": event.get("message", ""),
-                        "status": event.get("status", "running"),
-                        "detail": event.get("detail", {}),
-                        "result": event.get("result"),
-                        "heartbeat": datetime.now(timezone.utc).isoformat(),
-                    }
-                    run.metrics = metrics
-                    from sqlalchemy.orm.attributes import flag_modified
-                    flag_modified(run, "metrics")
-                    db.commit()
-                except Exception:
-                    try:
-                        db.rollback()
-                    except Exception:
-                        pass
+                    run = find_db.execute(
+                        select(IngestionRun)
+                        .where(IngestionRun.pipeline_mode == "full")
+                        .order_by(IngestionRun.created_at.desc())
+                    ).scalars().first()
+                    if run:
+                        job_uuid = run.id
+                finally:
+                    find_db.close()
+
+            _write_heartbeat(event)
 
     except Exception as exc:
         logger.error("Pipeline background thread failed: %s", type(exc).__name__, exc_info=True)
-        if run is not None:
-            try:
-                run.status = "failed"
-                run.error_summary = str(type(exc).__name__)
-                db.commit()
-            except Exception:
-                pass
+        _update_run_status("failed", error=type(exc).__name__)
     finally:
-        db.close()
+        try:
+            gen_db.close()
+        except Exception:
+            pass
 
 
 def _pipeline_relay_generator(job_id: str, body: CreateJobBody, registry: ProtocolRegistry):

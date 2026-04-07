@@ -3124,10 +3124,12 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                     valid_records = []
                     for rec in records:
                         if rec.raw_name and not _is_likely_name(rec.raw_name):
-                            # Null out the bad name but keep record if it has gov ID
-                            if rec.raw_government_id:
+                            # Null out the bad name but keep record if it has
+                            # any other identifying info (gov ID, email, phone)
+                            if rec.raw_government_id or rec.raw_email or rec.raw_phone:
                                 object.__setattr__(rec, "raw_name", None)
-                                object.__setattr__(rec, "normalized_value", rec.raw_government_id)
+                                object.__setattr__(rec, "normalized_value",
+                                    rec.raw_government_id or rec.raw_email or rec.raw_phone)
                                 valid_records.append(rec)
                             # else: drop the record entirely
                         else:
@@ -3163,26 +3165,33 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                                 pass
 
                         # B2: Email sender context — skip records near "From:" etc.
-                        # Only applies to MSG/EML-sourced docs or docs with email-like text
+                        # Only applies to MSG/EML-sourced docs or docs with email-like text.
+                        # IMPORTANT: Do NOT drop records that have corroborating PII
+                        # (email, phone, DOB, address) — those are real subjects, not noise.
                         if rec.raw_name and rec.entity_role in (None, "unknown"):
-                            try:
-                                from app.pii.context_deny_list import is_email_sender_context
-                                # Build a context window from blocks on the same page
-                                _page_key = rec.page_or_sheet
-                                _ctx_blocks = [b for b in blocks if b.page_or_sheet == _page_key]
-                                _ctx_text = " ".join(b.text for b in _ctx_blocks[:5])  # first 5 blocks
-                                _is_sender, _sender_reason = is_email_sender_context(
-                                    rec.raw_name, "PERSON", _ctx_text,
-                                )
-                                if _is_sender:
-                                    if rec.raw_government_id:
-                                        object.__setattr__(rec, "raw_name", None)
-                                        object.__setattr__(rec, "normalized_value", rec.raw_government_id)
-                                    else:
-                                        _drop = True
-                                        continue
-                            except ImportError:
-                                pass
+                            _has_corroborating = bool(
+                                rec.raw_email or rec.raw_phone or rec.raw_dob
+                                or rec.raw_address or rec.raw_government_id
+                            )
+                            if not _has_corroborating:
+                                try:
+                                    from app.pii.context_deny_list import is_email_sender_context
+                                    # Build a context window from blocks on the same page
+                                    _page_key = rec.page_or_sheet
+                                    _ctx_blocks = [b for b in blocks if b.page_or_sheet == _page_key]
+                                    _ctx_text = " ".join(b.text for b in _ctx_blocks[:5])  # first 5 blocks
+                                    _is_sender, _sender_reason = is_email_sender_context(
+                                        rec.raw_name, "PERSON", _ctx_text,
+                                    )
+                                    if _is_sender:
+                                        if rec.raw_government_id:
+                                            object.__setattr__(rec, "raw_name", None)
+                                            object.__setattr__(rec, "normalized_value", rec.raw_government_id)
+                                        else:
+                                            _drop = True
+                                            continue
+                                except ImportError:
+                                    pass
 
                         if not _drop:
                             _fp_filtered.append(rec)

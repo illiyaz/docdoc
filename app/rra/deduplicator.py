@@ -39,6 +39,10 @@ _CORROBORATING_PII_TYPES = frozenset({
     "PHONE_NUMBER", "PHONE_US", "PHONE_INTL",
     "LOCATION", "ADDRESS", "PHI_MRN", "PHI_NPI",
     "MEDICAL_LICENSE", "BIOMETRIC",
+    # Account/membership IDs — common in CSV/XLSX payroll and HR data.
+    # These are meaningful identifiers that corroborate a person exists.
+    "ACCOUNT_NUMBER", "MEMBER_ID", "EMPLOYEE_ID",
+    "IBAN_CODE", "NPI_NUMBER",
 })
 
 # Entity types that are NOT meaningful on their own — they need either a name
@@ -129,8 +133,18 @@ class Deduplicator:
                             has_corroboration = True
 
             if not has_corroboration:
-                skipped_thin += 1
-                continue
+                # Relaxation: if the group has 2+ records, the entity resolver
+                # already decided they belong together.  If the group has a name
+                # and ANY non-trivial entity type, keep it — the pipeline
+                # intentionally merged them.  This prevents losing subjects from
+                # EML/MSG docs where name + email were on the same page.
+                if has_name and len(group.records) >= 2:
+                    non_person_types = all_entity_types - {"PERSON", "PERSON_NAME"}
+                    if non_person_types:
+                        has_corroboration = True  # entity resolver merged them
+                if not has_corroboration:
+                    skipped_thin += 1
+                    continue
 
             # Second filter: if no name and ALL entity types are low-value,
             # skip — these are noise (URL-only, IP-only, bank-number-only).
