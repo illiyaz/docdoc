@@ -4,9 +4,11 @@
 **Test run:** Phase 1 — 13 small PDFs (<200 pages), 72 minutes
 **Result:** 268 subjects extracted out of ~4,244 expected (6.3% capture rate)
 
+**Status:** ALL 7 FIXES IMPLEMENTED — commit `43d838e` (2026-04-08)
+
 ---
 
-## Critical Fixes (must do before Phase 2)
+## Critical Fixes (must do before Phase 2) — ALL DONE
 
 ### Fix 1: Tabular docs mis-routed to coordinate path (~2,400 missing records)
 
