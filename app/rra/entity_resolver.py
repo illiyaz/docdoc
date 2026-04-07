@@ -449,7 +449,12 @@ class EntityResolver:
         *,
         active_anchors: list[str] | frozenset[str] | None = None,
     ) -> list[ResolvedGroup]:
-        """Group *records* by individual identity using Union-Find.
+        """Group *records* by individual identity using index-based Union-Find.
+
+        Instead of O(n^2) pairwise comparison, builds hash indexes on anchor
+        keys (gov ID, email, phone, normalized name) and only compares records
+        that share at least one key.  This is O(n) for indexing + O(k^2) for
+        each small candidate group, making it practical for 10K+ records.
 
         Parameters
         ----------
@@ -463,7 +468,6 @@ class EntityResolver:
         Returns one ``ResolvedGroup`` per unique individual (including
         single-record groups for unmatched records).
         """
-        # Validate once, reuse the resolved frozenset for all pair comparisons
         anchors = _resolve_anchors(active_anchors)
 
         n = len(records)
@@ -471,18 +475,98 @@ class EntityResolver:
             return []
 
         uf = _UnionFind(n)
-        # Store pairwise confidences for pairs that were merged
         pair_conf: dict[tuple[int, int], float] = {}
 
-        for i in range(n):
-            for j in range(i + 1, n):
-                conf = build_confidence(
-                    records[i], records[j], active_anchors=anchors,
-                )
-                if conf >= self.MERGE_THRESHOLD:
-                    uf.union(i, j)
-                    key = (min(i, j), max(i, j))
-                    pair_conf[key] = conf
+        # --- Build anchor indexes: key → list of record indices ---
+        # Records sharing any anchor key are candidates for comparison.
+        candidate_pairs: set[tuple[int, int]] = set()
+
+        # Index 1: Government ID (SSN, driver license, etc.)
+        if "ssn" in anchors:
+            gov_index: dict[str, list[int]] = {}
+            for i, r in enumerate(records):
+                key = None
+                if r.entity_type.upper() in _GOV_ID_TYPES and r.normalized_value:
+                    key = r.normalized_value.strip().lower()
+                elif r.raw_government_id:
+                    key = r.raw_government_id.strip().lower()
+                if key:
+                    gov_index.setdefault(key, []).append(i)
+            for indices in gov_index.values():
+                if len(indices) > 1:
+                    for a_idx in range(len(indices)):
+                        for b_idx in range(a_idx + 1, len(indices)):
+                            candidate_pairs.add((indices[a_idx], indices[b_idx]))
+
+        # Index 2: Email
+        if "email" in anchors:
+            email_index: dict[str, list[int]] = {}
+            for i, r in enumerate(records):
+                if r.raw_email:
+                    key = normalize_email(r.raw_email)
+                    if key:
+                        email_index.setdefault(key, []).append(i)
+            for indices in email_index.values():
+                if len(indices) > 1:
+                    for a_idx in range(len(indices)):
+                        for b_idx in range(a_idx + 1, len(indices)):
+                            candidate_pairs.add((indices[a_idx], indices[b_idx]))
+
+        # Index 3: Phone
+        if "phone" in anchors:
+            phone_index: dict[str, list[int]] = {}
+            for i, r in enumerate(records):
+                if r.raw_phone:
+                    phone_index.setdefault(r.raw_phone.strip(), []).append(i)
+            for indices in phone_index.values():
+                if len(indices) > 1:
+                    for a_idx in range(len(indices)):
+                        for b_idx in range(a_idx + 1, len(indices)):
+                            candidate_pairs.add((indices[a_idx], indices[b_idx]))
+
+        # Index 4: Normalized name (for name, name_dob, name_address anchors)
+        has_name_anchors = anchors & {"name", "name_dob", "name_address"}
+        if has_name_anchors:
+            name_index: dict[str, list[int]] = {}
+            for i, r in enumerate(records):
+                if r.raw_name:
+                    key = " ".join(r.raw_name.lower().split())
+                    if key:
+                        name_index.setdefault(key, []).append(i)
+            for indices in name_index.values():
+                if len(indices) > 1:
+                    for a_idx in range(len(indices)):
+                        for b_idx in range(a_idx + 1, len(indices)):
+                            candidate_pairs.add((indices[a_idx], indices[b_idx]))
+
+        # Index 5: Same doc + same page_range (same-instance merging)
+        doc_page_index: dict[str, list[int]] = {}
+        for i, r in enumerate(records):
+            if r.source_document_id and len(r.source_document_id) >= 8:
+                key = f"{r.source_document_id}:{r.page_range or '*'}"
+                doc_page_index.setdefault(key, []).append(i)
+        for indices in doc_page_index.values():
+            if len(indices) > 1:
+                for a_idx in range(len(indices)):
+                    for b_idx in range(a_idx + 1, len(indices)):
+                        candidate_pairs.add((indices[a_idx], indices[b_idx]))
+
+        import logging
+        _log = logging.getLogger(__name__)
+        _log.info(
+            "Entity resolution: %d records, %d candidate pairs (indexed, was %d if O(n^2))",
+            n, len(candidate_pairs), n * (n - 1) // 2,
+        )
+
+        # --- Compare only candidate pairs ---
+        for i, j in candidate_pairs:
+            conf = build_confidence(
+                records[i], records[j], active_anchors=anchors,
+            )
+            if conf >= self.MERGE_THRESHOLD:
+                uf.union(i, j)
+                key = (min(i, j), max(i, j))
+                pair_conf[key] = conf
 
         # Collect groups by root
         groups: dict[int, list[int]] = {}
@@ -502,7 +586,7 @@ class EntityResolver:
                 ))
                 continue
 
-            # min pairwise confidence + explanations for merged pairs
+            # min pairwise confidence + explanations for directly merged pairs
             min_conf = 1.0
             explanations: list[MergeExplanation] = []
             for a in indices:
@@ -512,17 +596,9 @@ class EntityResolver:
                     key = (min(a, b), max(a, b))
                     if key in pair_conf:
                         min_conf = min(min_conf, pair_conf[key])
-                        # Capture explanation for directly merged pairs
                         explanations.append(build_confidence_explained(
                             records[a], records[b], active_anchors=anchors,
                         ))
-                    else:
-                        # Pair not directly merged but transitively linked
-                        c = build_confidence(
-                            records[a], records[b],
-                            active_anchors=anchors,
-                        )
-                        min_conf = min(min_conf, c)
 
             result.append(ResolvedGroup(
                 records=group_records,
