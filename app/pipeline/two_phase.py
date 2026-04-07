@@ -2247,6 +2247,14 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                     and schema.records_per_page_estimate > 1
                 )
 
+                doc_pages = set(b.page_or_sheet for b in blocks)
+                # For scanned PDFs with no text blocks (OCR may also have
+                # failed or not been available), populate from PDF page count
+                # so Vision path has page numbers to process.
+                if not doc_pages and scanned_page_count > 0:
+                    doc_pages = set(range(scanned_page_count))
+                total_pg = len(doc_pages)
+
                 # Secondary tabular detection: even if schema missed it,
                 # count SSN/name patterns on a sample page.  If >1 found,
                 # the doc is tabular and coordinate path would miss records.
@@ -2269,14 +2277,6 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                             doc.file_name, _detected_rpp, _sample_pg,
                             _ssn_count, _name_count,
                         )
-
-                doc_pages = set(b.page_or_sheet for b in blocks)
-                # For scanned PDFs with no text blocks (OCR may also have
-                # failed or not been available), populate from PDF page count
-                # so Vision path has page numbers to process.
-                if not doc_pages and scanned_page_count > 0:
-                    doc_pages = set(range(scanned_page_count))
-                total_pg = len(doc_pages)
 
                 records: list[PIIRecord] = []
                 extraction_path = "3"
