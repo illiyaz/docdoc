@@ -163,10 +163,12 @@ def test_keyword_all_caps_ssn_triggers():
 # Highest score wins — scoring scans all pages to find the best
 # ---------------------------------------------------------------------------
 
-def test_highest_score_wins():
-    # Page 4 has SSN + SSN_LABEL (highest score) → returns page 4
+def test_first_data_page_wins():
+    # Page 2 has NAME_LABEL (first page above threshold) → returns page 2
+    # Even though page 4 has SSN + SSN_LABEL (higher score), we want the
+    # FIRST data page to avoid skipping valid records on earlier pages.
     pages = ["p0", "p1", "Name: Alice", "p3", "SSN: 123-45-6789"]
-    assert find_data_onset(_doc(pages)) == 4
+    assert find_data_onset(_doc(pages)) == 2
 
 
 def test_all_pages_scanned_for_scoring():

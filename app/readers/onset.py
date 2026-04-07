@@ -118,13 +118,18 @@ def find_data_onset(doc: object, max_scan: int = 30) -> int:
     
     if not scores:
         return 0
-    
-    # Find page with highest score, minimum threshold of 20
-    best_page, best_score = max(scores, key=lambda x: x[1])
-    
-    if best_score >= 20:
-        return best_page
-    
+
+    # Find the FIRST page that meets the data threshold (score >= 20).
+    # Previous logic picked the HIGHEST scoring page, which could be
+    # page 11 in a doc where ALL pages have data — skipping pages 0-10.
+    for page_num, score in scores:
+        if score >= 20:
+            return page_num
+
+    # No page met threshold — fall through to legacy signal matching.
+    # (Don't use positive-score fallback here — volume-bonus alone can
+    # produce misleading low scores like 2 on blank-ish pages.)
+
     # Fallback: legacy signal matching (backward compatible)
     for page_num in range(min(len(doc), max_scan)):
         text = doc.load_page(page_num).get_text()

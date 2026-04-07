@@ -233,7 +233,25 @@ def _try_schema_skip(schema, doc_total_pages: int = 0):
     layout_type = getattr(schema, "layout_type", "variable")
     field_map = getattr(schema, "layout_field_map", None)
 
-    # Fixed/template_with_drift + has field map → coordinate path
+    # Tabular check MUST come BEFORE fixed-layout check.
+    # A doc can be "fixed" layout (every page looks the same) but also
+    # tabular (multiple records per page).  Coordinate extraction only
+    # handles 1 record/page, so tabular docs MUST go to llm_table.
+    is_tabular = getattr(schema, "is_tabular", False)
+    rpp = getattr(schema, "records_per_page_estimate", 1)
+    if is_tabular and rpp > 1:
+        return {
+            "structure_type": "table",
+            "structure_confidence": getattr(schema, "schema_confidence", 0.7),
+            "pii_fields": [],
+            "records_per_page": rpp,
+            "cross_page_data": False,
+            "pages_per_instance": 1,
+            "recommended_path": "llm_table",
+        }, None
+
+    # Fixed/template_with_drift + has field map + single-record → coordinate path
+    # (Only reached if NOT tabular — tabular check above takes priority)
     if layout_type in ("fixed", "template_with_drift") and field_map:
         fm_dicts = [
             {
@@ -256,20 +274,6 @@ def _try_schema_skip(schema, doc_total_pages: int = 0):
             "pages_per_instance": 1,
             "recommended_path": "coordinate",
         }, fm_dicts
-
-    # Tabular doc with multi-record pages → llm_table path
-    is_tabular = getattr(schema, "is_tabular", False)
-    rpp = getattr(schema, "records_per_page_estimate", 1)
-    if is_tabular and rpp > 1:
-        return {
-            "structure_type": "table",
-            "structure_confidence": getattr(schema, "schema_confidence", 0.7),
-            "pii_fields": [],
-            "records_per_page": rpp,
-            "cross_page_data": False,
-            "pages_per_instance": 1,
-            "recommended_path": "llm_table",
-        }, None
 
     # Multi-page template → llm_template path
     template = getattr(schema, "template", None)
@@ -2242,6 +2246,30 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                     and schema.is_tabular
                     and schema.records_per_page_estimate > 1
                 )
+
+                # Secondary tabular detection: even if schema missed it,
+                # count SSN/name patterns on a sample page.  If >1 found,
+                # the doc is tabular and coordinate path would miss records.
+                if not is_tabular and blocks and total_pg > 5:
+                    import re as _re_tab
+                    _sample_pg = min(b.page_or_sheet for b in blocks if isinstance(b.page_or_sheet, int))
+                    _sample_text = "\n".join(
+                        b.text for b in blocks if b.page_or_sheet == _sample_pg
+                    )
+                    _ssn_count = len(_re_tab.findall(r'\d{3}-\d{2}-\d{4}', _sample_text))
+                    _name_count = len(_re_tab.findall(
+                        r'(?:^|\n)\s*[A-Z][a-z]+[, ]+[A-Z][a-z]+', _sample_text,
+                    ))
+                    _detected_rpp = max(_ssn_count, _name_count)
+                    if _detected_rpp > 1:
+                        is_tabular = True
+                        logger.info(
+                            "Auto-detected tabular layout for %s: %d records on sample page %d "
+                            "(SSNs=%d, names=%d)",
+                            doc.file_name, _detected_rpp, _sample_pg,
+                            _ssn_count, _name_count,
+                        )
+
                 doc_pages = set(b.page_or_sheet for b in blocks)
                 # For scanned PDFs with no text blocks (OCR may also have
                 # failed or not been available), populate from PDF page count
@@ -2600,11 +2628,13 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
 
                 # Coordinate path eligibility:
                 # - Must have a field map and not be overridden to AI
+                # - Must NOT be tabular (multiple records per page)
                 # - Either vision recommended "coordinate", OR auditor explicitly set field map,
                 #   OR legacy LLM schema says "fixed"/"template_with_drift"
                 is_coordinate_path = (
                     effective_field_map is not None
                     and use_coordinate
+                    and not is_tabular  # tabular docs MUST use llm_table, not coordinate
                     and doc.source_path
                     and (
                         recommended_path == "coordinate"
@@ -2886,7 +2916,9 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                     extraction_path = ""
 
                 # --- Path 2b: Text + LLM template ---
-                _MAX_LLM_BATCHES = 100  # Cap: 100 batches ≈ 10 minutes
+                # Scale budget with doc size: min 100, max 500.
+                # A 158-page doc with 6 records/page needs ~158 batches.
+                _MAX_LLM_BATCHES = min(500, max(100, total_pg * 2))
 
                 if not records and settings.llm_assist_enabled and is_template and instances:
                     try:
@@ -3985,16 +4017,76 @@ def run_analysis_background(body, registry: ProtocolRegistry) -> None:
 
     Captures each SSE event and writes it to IngestionRun.metrics["analysis_progress"].
     The SSE relay polls this and forwards to the browser.
+
+    IMPORTANT: The generator's internal session may be closed/replaced by
+    _refresh_session().  This wrapper must use its OWN short-lived sessions
+    for heartbeat writes so it never touches the generator's session.
     """
     from app.api.deps import _get_session_factory
 
-    db = _get_session_factory()()
-    run = None
+    SessionFactory = _get_session_factory()
+    # The generator gets its own session that it manages internally
+    gen_db = SessionFactory()
+    job_uuid = None
+
+    def _write_heartbeat(event: dict) -> None:
+        """Write progress to IngestionRun.metrics using a fresh session."""
+        if job_uuid is None:
+            return
+        hb_db = SessionFactory()
+        try:
+            run = hb_db.get(IngestionRun, job_uuid)
+            if run is None:
+                return
+            metrics = dict(run.metrics or {})
+            metrics["analysis_progress"] = {
+                "stage": event.get("stage", ""),
+                "message": event.get("message", ""),
+                "status": event.get("status", "running"),
+                "detail": event.get("detail", {}),
+                "result": event.get("result"),
+                "heartbeat": datetime.now(timezone.utc).isoformat(),
+            }
+            run.metrics = metrics
+            flag_modified(run, "metrics")
+            hb_db.commit()
+        except Exception:
+            try:
+                hb_db.rollback()
+            except Exception:
+                pass
+        finally:
+            hb_db.close()
+
+    def _update_run_status(status: str, error: str | None = None) -> None:
+        """Update IngestionRun status using a fresh session."""
+        if job_uuid is None:
+            return
+        st_db = SessionFactory()
+        try:
+            run = st_db.get(IngestionRun, job_uuid)
+            if run is None:
+                return
+            if status == "analyzed":
+                if run.status != "running":
+                    return
+                run.status = "analyzed"
+                run.analysis_completed_at = datetime.now(timezone.utc)
+            elif status == "failed":
+                run.status = "failed"
+                run.error_summary = error
+            st_db.commit()
+            logger.info("Analysis background: set job %s → %s", str(job_uuid)[:8], status)
+        except Exception:
+            try:
+                st_db.rollback()
+            except Exception:
+                pass
+        finally:
+            st_db.close()
 
     try:
-        gen = analyze_generator(body, db, registry)
-        last_event = {}
-        job_uuid = None
+        gen = analyze_generator(body, gen_db, registry)
 
         for sse_line in gen:
             # Parse SSE event
@@ -4005,61 +4097,33 @@ def run_analysis_background(body, registry: ProtocolRegistry) -> None:
             except (json.JSONDecodeError, ValueError):
                 continue
 
-            last_event = event
-
-            # Find the run if we don't have it yet
-            if job_uuid is None and run is None:
-                # The run is created inside analyze_generator — find the latest
-                run = db.execute(
-                    select(IngestionRun)
-                    .where(IngestionRun.pipeline_mode == "two_phase")
-                    .order_by(IngestionRun.created_at.desc())
-                ).scalars().first()
-                if run:
-                    job_uuid = run.id
-
-            # Write progress to metrics
-            if run is not None:
+            # Find the run UUID from the first events
+            if job_uuid is None:
+                find_db = SessionFactory()
                 try:
-                    db.expire(run)
-                    metrics = dict(run.metrics or {})
-                    metrics["analysis_progress"] = {
-                        "stage": event.get("stage", ""),
-                        "message": event.get("message", ""),
-                        "status": event.get("status", "running"),
-                        "detail": event.get("detail", {}),
-                        "result": event.get("result"),
-                        "heartbeat": datetime.now(timezone.utc).isoformat(),
-                    }
-                    run.metrics = metrics
-                    flag_modified(run, "metrics")
-                    db.commit()
-                except Exception:
-                    try:
-                        db.rollback()
-                    except Exception:
-                        pass
+                    run = find_db.execute(
+                        select(IngestionRun)
+                        .where(IngestionRun.pipeline_mode == "two_phase")
+                        .order_by(IngestionRun.created_at.desc())
+                    ).scalars().first()
+                    if run:
+                        job_uuid = run.id
+                finally:
+                    find_db.close()
 
-        # Generator finished — mark as analyzed if not already
-        if run is not None:
-            db.expire(run)
-            if run.status == "running":
-                run.status = "analyzed"
-                run.analysis_completed_at = datetime.now(timezone.utc)
-                db.commit()
-                logger.info("Analysis background thread completed for job %s", str(job_uuid)[:8])
+            _write_heartbeat(event)
+
+        # Generator finished successfully
+        _update_run_status("analyzed")
 
     except Exception as exc:
         logger.error("Analysis background thread failed: %s", type(exc).__name__, exc_info=True)
-        if run is not None:
-            try:
-                run.status = "failed"
-                run.error_summary = str(type(exc).__name__)
-                db.commit()
-            except Exception:
-                pass
+        _update_run_status("failed", error=type(exc).__name__)
     finally:
-        db.close()
+        try:
+            gen_db.close()
+        except Exception:
+            pass
 
 
 def analysis_relay_generator(

@@ -49,7 +49,8 @@ ENTITY_EXTRACTION_GUIDE: dict[str, str] = {
     ),
     "DATE_OF_BIRTH": (
         "Date of birth in original format. "
-        "Look for labels like 'Date of Birth', 'DOB', 'Born'."
+        "Look for labels like 'Date of Birth', 'DOB', 'Born'. "
+        "Also extract dates that appear next to 'Age:' — the date before the age is the DOB."
     ),
     "US_SSN": "Social Security Number (XXX-XX-XXXX format)",
     "NI_NUMBER": (

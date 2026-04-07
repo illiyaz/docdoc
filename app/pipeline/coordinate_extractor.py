@@ -59,6 +59,71 @@ def _normalize_field_type(field_type: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Phone format validation (Fix 4: reject dollar amounts, SSNs in phone field)
+# ---------------------------------------------------------------------------
+
+_PHONE_RE = re.compile(
+    r"^[\s(]*"                         # optional leading space/paren
+    r"(?:\+?1[\s.-]*)?"                # optional country code
+    r"(?:\(?\d{3}\)?[\s.-]*)"          # area code
+    r"\d{3}[\s.-]*\d{4}"              # subscriber number
+    r"(?:\s*(?:x|ext|extension)[\s.]*\d{1,6})?"  # optional extension
+    r"\s*$",
+    re.IGNORECASE,
+)
+
+# Common non-phone patterns that slip through
+_NOT_PHONE_RE = re.compile(
+    r"\d+\.\d{2}\s",                   # dollar amounts like "526.56 "
+)
+
+
+def _is_valid_phone(value: str) -> bool:
+    """Check if a string looks like a real phone number.
+
+    Rejects dollar amounts, SSNs, and random digit sequences that get
+    mis-mapped to the phone field by coordinate extraction.
+    """
+    if not value or not isinstance(value, str):
+        return False
+    v = value.strip()
+    if not v:
+        return False
+    # Reject obvious non-phone patterns
+    if _NOT_PHONE_RE.search(v):
+        return False
+    # Must have 10-11 digits (US phone)
+    digits = re.sub(r"\D", "", v)
+    if len(digits) < 10 or len(digits) > 15:
+        return False
+    # SSN pattern (9 digits with dashes) — not a phone
+    if re.fullmatch(r"\d{3}-\d{2}-\d{4}", v):
+        return False
+    return True
+
+
+# ---------------------------------------------------------------------------
+# Name cleanup (Fix 5: strip leading commas, reject truncated names)
+# ---------------------------------------------------------------------------
+
+def _clean_name(name: str) -> str | None:
+    """Clean and validate an extracted name.
+
+    Strips leading/trailing commas and whitespace.  Returns None if the
+    result is too short or obviously broken.
+    """
+    if not name or not isinstance(name, str):
+        return None
+    cleaned = name.strip().strip(",").strip()
+    if len(cleaned) < 3:
+        return None
+    # If name still has a leading comma after strip (shouldn't happen), fix it
+    if cleaned.startswith(","):
+        cleaned = cleaned[1:].strip()
+    return cleaned if len(cleaned) >= 3 else None
+
+
+# ---------------------------------------------------------------------------
 # Entity type → PIIRecord field mapping (matches llm_template_extractor)
 # ---------------------------------------------------------------------------
 
@@ -626,6 +691,13 @@ class CoordinateExtractor:
                     entity_types_found.append("LOCATION")
 
             raw_name = fields.get("raw_name")
+
+            # Fix 5: Clean name — strip leading commas, reject truncated
+            if raw_name and isinstance(raw_name, str):
+                raw_name = _clean_name(raw_name)
+                if raw_name:
+                    fields["raw_name"] = raw_name
+
             # Inline name validation: reject header text, single words,
             # digits, and blocklisted words before creating a record.
             if raw_name and isinstance(raw_name, str) and not _is_likely_name(raw_name):
@@ -634,6 +706,14 @@ class CoordinateExtractor:
                 )
                 raw_name = None
                 success = False
+
+            # Fix 4: Validate phone — reject dollar amounts, SSNs
+            raw_phone = fields.get("raw_phone")
+            if raw_phone and isinstance(raw_phone, str) and not _is_valid_phone(raw_phone):
+                logger.debug(
+                    "Phone validation rejected '%s' on page %d", raw_phone, page_num,
+                )
+                fields["raw_phone"] = None
 
             if success and raw_name and isinstance(raw_name, str):
                 rec = PIIRecord(
