@@ -186,20 +186,37 @@ def get_project_intelligence(project_id: str, db: Session = Depends(get_db)):
     if not runs:
         return {"documents": [], "job_count": 0}
 
-    # Gather all documents across all jobs
+    # Gather all documents across all jobs, newest first
     run_ids = [r.id for r in runs]
     docs = db.query(Document).filter(
         Document.ingestion_run_id.in_(run_ids)
-    ).order_by(Document.file_name).all()
+    ).order_by(Document.updated_at.desc()).all()
+
+    # Build run lookup for job-level info
+    run_map = {r.id: r for r in runs}
 
     documents = []
     for doc in docs:
         try:
             intel = _build_doc_intelligence(doc, db)
-            # Add job info
-            run = next((r for r in runs if r.id == doc.ingestion_run_id), None)
+            # Add job info + timestamps
+            run = run_map.get(doc.ingestion_run_id)
             intel["job_id"] = str(doc.ingestion_run_id)
             intel["job_status"] = run.status if run else "unknown"
+            intel["job_started_at"] = (
+                run.started_at.isoformat() if run and run.started_at else None
+            )
+            intel["analyzed_at"] = (
+                doc.updated_at.isoformat() if doc.updated_at else
+                doc.created_at.isoformat() if doc.created_at else None
+            )
+            intel["created_at"] = (
+                doc.created_at.isoformat() if doc.created_at else None
+            )
+            # Job doc count for grouping display
+            intel["job_doc_count"] = sum(
+                1 for d in docs if d.ingestion_run_id == doc.ingestion_run_id
+            )
             documents.append(intel)
         except Exception as e:
             logger.warning("Failed to build intelligence for %s: %s", doc.file_name, e)
@@ -208,6 +225,10 @@ def get_project_intelligence(project_id: str, db: Session = Depends(get_db)):
                 "file_name": doc.file_name,
                 "file_type": doc.file_type,
                 "error": str(e),
+                "job_id": str(doc.ingestion_run_id),
+                "analyzed_at": (
+                    doc.updated_at.isoformat() if doc.updated_at else None
+                ),
             })
 
     # Summary stats

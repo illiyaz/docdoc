@@ -28,7 +28,10 @@ import {
   Table,
   Layers,
   ArrowRight,
+  Clock,
+  Briefcase,
 } from "lucide-react"
+import { formatDistanceToNow, parseISO, format } from "date-fns"
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -152,7 +155,7 @@ function DocListItem({
   return (
     <button
       onClick={onClick}
-      className={`w-full text-left px-3 py-3 border-b transition-colors ${
+      className={`w-full text-left px-3 py-2.5 border-b transition-colors ${
         isSelected
           ? "bg-primary/5 border-l-2 border-l-primary"
           : "hover:bg-muted/50 border-l-2 border-l-transparent"
@@ -177,6 +180,39 @@ function DocListItem({
         <ChevronRight className={`h-4 w-4 mt-1 flex-shrink-0 ${isSelected ? "text-primary" : "text-muted-foreground"}`} />
       </div>
     </button>
+  )
+}
+
+
+/** Group header for a batch of documents from the same job. */
+function JobGroupHeader({ jobId, docs }: { jobId: string; docs: DocIntelligence[] }) {
+  const first = docs[0]
+  const analyzedAt = first?.job_started_at || first?.analyzed_at
+  const totalPages = docs.reduce((s, d) => s + (d.page_count || 0), 0)
+
+  return (
+    <div className="px-3 py-2 bg-muted/60 border-b flex items-center gap-2 sticky top-0 z-10">
+      <Briefcase className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
+      <div className="min-w-0 flex-1">
+        <div className="text-[11px] font-medium text-foreground">
+          {docs.length} document{docs.length !== 1 ? "s" : ""} · {totalPages.toLocaleString()} pages
+        </div>
+        <div className="text-[10px] text-muted-foreground flex items-center gap-1">
+          <Clock className="h-2.5 w-2.5" />
+          {analyzedAt
+            ? formatDistanceToNow(parseISO(analyzedAt), { addSuffix: true })
+            : "unknown"}
+          <span className="ml-1">· Job {jobId.slice(0, 8)}</span>
+        </div>
+      </div>
+      <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${
+        first?.job_status === "completed" || first?.job_status === "analyzed"
+          ? "bg-green-50 text-green-700"
+          : "bg-gray-50 text-gray-600"
+      }`}>
+        {first?.job_status || "unknown"}
+      </Badge>
+    </div>
   )
 }
 
@@ -432,6 +468,17 @@ function DocumentDetail({
           <span>·</span>
           <span>Onset page {doc.onset_page ?? 0}</span>
         </div>
+        {doc.analyzed_at && (
+          <div className="flex items-center gap-1.5 mt-1.5 text-xs text-muted-foreground">
+            <Clock className="h-3 w-3" />
+            Analyzed {format(parseISO(doc.analyzed_at), "MMM d, yyyy 'at' h:mm a")}
+            {doc.job_started_at && (
+              <span className="ml-1">
+                · Job started {format(parseISO(doc.job_started_at), "MMM d, yyyy 'at' h:mm a")}
+              </span>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Understanding Card */}
@@ -787,6 +834,21 @@ export function IntelligenceTab({ projectId }: { projectId: string }) {
     return data.documents.filter(d => (d.routing?.recommended_path || "unknown") === filter)
   }, [data, filter])
 
+  /** Group filtered docs by job_id, maintaining desc date order. */
+  const jobGroups = useMemo(() => {
+    const groups: { jobId: string; docs: DocIntelligence[] }[] = []
+    const seen = new Set<string>()
+    for (const doc of filteredDocs) {
+      const jid = doc.job_id || "unknown"
+      if (!seen.has(jid)) {
+        seen.add(jid)
+        groups.push({ jobId: jid, docs: [] })
+      }
+      groups.find(g => g.jobId === jid)!.docs.push(doc)
+    }
+    return groups
+  }, [filteredDocs])
+
   const selectedDoc = useMemo(
     () => filteredDocs.find(d => d.document_id === selectedDocId) || null,
     [filteredDocs, selectedDocId]
@@ -830,13 +892,18 @@ export function IntelligenceTab({ projectId }: { projectId: string }) {
         <div className="w-80 border-r flex flex-col bg-white flex-shrink-0">
           <FilterBar docs={data.documents} activeFilter={filter} onFilter={setFilter} />
           <div className="overflow-y-auto flex-1">
-            {filteredDocs.map(doc => (
-              <DocListItem
-                key={doc.document_id}
-                doc={doc}
-                isSelected={doc.document_id === selectedDocId}
-                onClick={() => setSelectedDocId(doc.document_id)}
-              />
+            {jobGroups.map(group => (
+              <div key={group.jobId}>
+                <JobGroupHeader jobId={group.jobId} docs={group.docs} />
+                {group.docs.map(doc => (
+                  <DocListItem
+                    key={doc.document_id}
+                    doc={doc}
+                    isSelected={doc.document_id === selectedDocId}
+                    onClick={() => setSelectedDocId(doc.document_id)}
+                  />
+                ))}
+              </div>
             ))}
           </div>
         </div>

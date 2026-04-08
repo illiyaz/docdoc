@@ -1257,6 +1257,10 @@ export interface DocIntelligence {
   status: string
   job_id: string
   job_status: string
+  job_started_at: string | null
+  analyzed_at: string | null
+  created_at: string | null
+  job_doc_count: number
   structure: DocIntelligenceStructure
   understanding: DocIntelligenceUnderstanding
   routing: DocIntelligenceRouting
