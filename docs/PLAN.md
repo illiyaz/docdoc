@@ -14,6 +14,7 @@ For detailed per-step implementation notes, see [CLAUDE_HISTORY.md](CLAUDE_HISTO
 | Phase 5 Steps 1-24e (Extraction Engine) | COMPLETE | ~2800 |
 | Phase 5 Steps 26-26d (LiteParse + Auditor Workflow) | COMPLETE | ~2850 |
 | Phase 5 Step 29a (Notification Preview) | COMPLETE | ~2850 |
+| Phase 5 Steps 30a-30c (Intelligence + Quality) | COMPLETE | ~2850 |
 | **Phase 6 (Security + Governance)** | **NEXT** | — |
 | Phase 7 (Workflow Completeness) | Pending | — |
 | Phase 8 (Scale + Polish) | Pending | — |
@@ -26,6 +27,9 @@ For detailed per-step implementation notes, see [CLAUDE_HISTORY.md](CLAUDE_HISTO
 - Notification email/letter preview with masked PII (Step 29a)
 - Delivery status dashboard endpoint (Step 26d)
 - Analysis review filter tabs, dedup summary, extraction progress bar (Step 26d)
+- Intelligence tab: document understanding diagnostic, test-extract, correction memory (Step 30a)
+- Extraction quality: phone validation (5 paths), name quality gate, DL regex (Step 30b)
+- LLM prompt coverage: FERPA/HR docs, PERSON+LOCATION-only field maps (Step 30c)
 
 ---
 

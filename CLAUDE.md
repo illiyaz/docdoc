@@ -86,9 +86,10 @@ project-root/
 │   ├── llm/                       # client.py (OllamaClient), prompts.py, audit.py
 │   ├── core/                      # constants.py, policies.py, security.py, logging.py, settings.py
 │   ├── db/                        # models.py (19 tables), repositories.py
-│   └── api/                       # main.py, middleware/, routes/
+│   └── api/                       # main.py, middleware/, routes/ (incl. intelligence.py)
 ├── frontend/src/                  # api/client.ts, pages/ (Dashboard, Projects, ProjectDetail,
-│                                  # QueueView, SubjectDetail, JobSubmit, Diagnostic), components/, App.tsx
+│                                  # QueueView, SubjectDetail, JobSubmit, Diagnostic,
+│                                  # IntelligenceTab), components/, App.tsx
 ├── alembic/versions/              # 0001–0013
 ├── tests/                         # test_schema, test_repositories, test_policies, test_extraction,
 │                                  # test_safety, test_api, test_two_phase, + many more
@@ -135,7 +136,9 @@ Detailed in [docs/SCHEMA.md](docs/SCHEMA.md). Summary:
 - **Notification:** SMTP email + WeasyPrint postal. Template-driven. Delivery gated on APPROVED.
 - **Background extraction:** Daemon thread, per-doc commit, heartbeat, resume, cancellation. SSE relay with auto-reconnect.
 - **Performance guards (Step 24e):** Onset-aware field map validation, deferred gap-fill (50-call budget), LLM batch cap (100, learn-then-extract hybrid), VisionRouter no-model guard.
-- **Future phases:** Auth (JWT, Phase 6), RBAC (4 roles, Phase 6), access logging (Phase 6), document viewer (Phase 6), deadline tracking (Phase 6), evidence export (Phase 7), notification preview (Phase 7), re-extraction (Phase 7), manual merge/split (Phase 7).
+- **Intelligence tab (Step 30a):** Read-only diagnostic view after analysis — LLM understanding, routing decisions, field maps, entity analysis, sample extractions. Test-extract (Tier 1): extract N pages from onset without persisting. Correction memory: user corrections stored in metadata_json + JSONL for future few-shot prompt injection.
+- **LLM prompt coverage:** UNDERSTAND_DOCUMENT and UNDERSTAND_MULTI_PAGE_DOCUMENT explicitly handle educational docs (FERPA), HR/payroll docs. Field maps with only PERSON+LOCATION are valid. Schema persisted per-doc (not batched) to survive per-doc failures.
+- **Future phases:** Auth (JWT, Phase 6), RBAC (4 roles, Phase 6), access logging (Phase 6), deadline tracking (Phase 6), evidence export (Phase 7), re-extraction (Phase 7), manual merge/split (Phase 7), LLM fine-tuning from correction memory (Phase 8+).
 
 ---
 
@@ -194,8 +197,11 @@ Phase 1 (Deterministic Core), Phase 2 (Normalization + RRA), Phase 3 (Protocols 
 | 26c | COMPLETE | Merge Explanation — build_confidence_explained() with per-anchor signals, migration 0013, MergeExplanation component |
 | 26d | COMPLETE | Auditor Workflow Polish — analysis filter tabs, dedup summary, extraction progress bar, plain-English config, export filtering, delivery dashboard |
 | 29a | COMPLETE | Notification Preview — email/letter preview with masked PII, NotificationPreview component |
+| 30a | COMPLETE | Intelligence Tab — document understanding diagnostic view, test-extract (Tier 1), correction memory for LLM few-shot learning |
+| 30b | COMPLETE | Extraction Quality — phone validation across all 5 paths, DL regex tightened, name quality gate relaxed, schema persistence per-doc |
+| 30c | COMPLETE | LLM Prompt Coverage — school/HR/educational docs recognized (FERPA), PERSON+LOCATION-only field maps valid |
 
-**Key metrics (March 2026):** 78,471 PII records, 34 docs (PDF/XLSX/XLS/MSG/HEIC/JPG), 30-45ms/page coordinate speed, dual-model fallback.
+**Key metrics (April 2026):** 78,471 PII records, 34 docs (PDF/XLSX/XLS/MSG/HEIC/JPG), 30-45ms/page coordinate speed, dual-model fallback. Phone validity 99.5% (was 85.9%). Gov ID coverage 95% (was 85.2%).
 
 **~2850 tests passing.** (19 tables, migration 0013)
 
