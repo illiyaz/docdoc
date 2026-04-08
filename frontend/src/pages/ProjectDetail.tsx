@@ -3949,14 +3949,43 @@ function LiveAnalysisProgress({ jobId, phase = "analysis" }: { jobId: string; ph
   const currentStage = progress?.stage || ""
   const currentIdx = stages.findIndex(s => s.key === currentStage)
 
+  const completedCount = currentIdx >= 0 ? currentIdx : 0
+  const overallPct = stages.length > 0 ? Math.round((completedCount / stages.length) * 100) : 0
+  const activeStageLabel = currentIdx >= 0 ? stages[currentIdx]?.label : null
+
   return (
     <div className="space-y-3">
-      {/* Current activity */}
-      <div className="flex items-center gap-2">
-        <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
-        <span className="text-sm font-medium">
-          {phase === "extraction" ? "Extracting PII..." : "Analyzing documents..."}
-        </span>
+      {/* Overall progress header */}
+      <div className="space-y-1.5">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
+            <span className="text-sm font-medium">
+              {phase === "extraction" ? "Extracting PII..." : "Analyzing documents..."}
+            </span>
+          </div>
+          <span className="text-xs text-muted-foreground tabular-nums">
+            Stage {completedCount + 1} of {stages.length}
+            {overallPct > 0 && ` · ${overallPct}%`}
+          </span>
+        </div>
+        {/* Overall progress bar */}
+        <div className="h-2 rounded-full bg-gray-200">
+          <div
+            className="h-2 rounded-full bg-blue-500 transition-all duration-500"
+            style={{ width: `${Math.max(overallPct, currentIdx >= 0 ? 5 : 0)}%` }}
+          />
+        </div>
+        {activeStageLabel && (
+          <div className="text-xs text-muted-foreground">
+            Current: <span className="font-medium text-foreground">{activeStageLabel}</span>
+            {progress?.detail?.total && progress.detail.total > 0 && (
+              <span className="ml-1">
+                — {progress.detail.current || 0} of {progress.detail.total} docs
+              </span>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Stage stepper */}
@@ -3978,7 +4007,7 @@ function LiveAnalysisProgress({ jobId, phase = "analysis" }: { jobId: string; ph
                 {stage.label}
               </span>
               {isActive && progress?.message && (
-                <span className="text-muted-foreground ml-1">— {progress.message}</span>
+                <span className="text-muted-foreground ml-1 truncate max-w-xs">— {progress.message}</span>
               )}
             </div>
           )
@@ -3994,11 +4023,11 @@ function LiveAnalysisProgress({ jobId, phase = "analysis" }: { jobId: string; ph
                 ? `Processing: ${progress.detail.doc_name}`
                 : `Document ${progress.detail.current || 0} of ${progress.detail.total}`}
             </span>
-            <span>{Math.round(((progress.detail.current || 0) / progress.detail.total) * 100)}%</span>
+            <span className="tabular-nums">{Math.round(((progress.detail.current || 0) / progress.detail.total) * 100)}%</span>
           </div>
           <div className="h-1.5 rounded-full bg-gray-200">
             <div
-              className="h-1.5 rounded-full bg-blue-500 transition-all"
+              className="h-1.5 rounded-full bg-emerald-500 transition-all"
               style={{ width: `${((progress.detail.current || 0) / progress.detail.total) * 100}%` }}
             />
           </div>
