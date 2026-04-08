@@ -867,20 +867,39 @@ def analyze_generator(
 
                         doc.metadata_json["document_schema"] = schema.to_dict()
                         flag_modified(doc, "metadata_json")
+
+                        # Commit schema immediately so it survives per-doc
+                        # failures in SchemaFilter or subsequent docs.
+                        try:
+                            db.commit()
+                        except Exception:
+                            db.rollback()
+                            logger.warning(
+                                "Failed to persist schema for %s", doc.file_name,
+                                exc_info=True,
+                            )
+
                         # Apply SchemaFilter to this doc's detections
                         detections = doc_detections.get(doc.id, [])
                         if detections:
-                            sf = SchemaFilter(schema)
-                            result = sf.filter_detections(detections)
-                            # Replace detections with filtered set
-                            doc_detections[doc.id] = result.kept
-                            # Update confidences to match filtered detections
-                            doc_confidences[doc.id] = [d.score for d in result.kept]
-                            schema_filter_suppressed += len(result.suppressed)
-                            # Update extraction count
-                            doc.sample_extraction_count = len(result.kept)
+                            try:
+                                sf = SchemaFilter(schema)
+                                result = sf.filter_detections(detections)
+                                # Replace detections with filtered set
+                                doc_detections[doc.id] = result.kept
+                                # Update confidences to match filtered detections
+                                doc_confidences[doc.id] = [d.score for d in result.kept]
+                                schema_filter_suppressed += len(result.suppressed)
+                                # Update extraction count
+                                doc.sample_extraction_count = len(result.kept)
+                                db.commit()
+                            except Exception:
+                                db.rollback()
+                                logger.warning(
+                                    "SchemaFilter failed for %s", doc.file_name,
+                                    exc_info=True,
+                                )
 
-                db.commit()
             except Exception as e:
                 logger.warning("Document understanding stage failed: %s", type(e).__name__)
         else:
