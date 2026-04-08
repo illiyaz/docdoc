@@ -250,7 +250,9 @@ def detection_to_pii_record(
     elif et in _EMAIL_TYPES:
         raw_email = detected_text
     elif et in _PHONE_TYPES:
-        raw_phone = detected_text
+        from app.pipeline.coordinate_extractor import _is_valid_phone
+        if _is_valid_phone(detected_text):
+            raw_phone = detected_text
     elif et in _DOB_TYPES:
         raw_dob = detected_text
     elif et in _ADDRESS_TYPES:
@@ -358,7 +360,10 @@ def build_composite_record(
     if emails:
         raw_email = _extract_text(max(emails, key=lambda d: d.score))
     if phones:
-        raw_phone = _extract_text(max(phones, key=lambda d: d.score))
+        _phone_candidate = _extract_text(max(phones, key=lambda d: d.score))
+        from app.pipeline.coordinate_extractor import _is_valid_phone
+        if _is_valid_phone(_phone_candidate):
+            raw_phone = _phone_candidate
     if dobs:
         raw_dob = _extract_text(max(dobs, key=lambda d: d.score))
     if addresses:

@@ -483,7 +483,9 @@ class VisionDocumentExtractor:
                 if validate_email(value_str):
                     raw_email = value_str
             elif raw_field == "raw_phone":
-                raw_phone = value_str
+                from app.pipeline.coordinate_extractor import _is_valid_phone
+                if _is_valid_phone(value_str):
+                    raw_phone = value_str
             elif raw_field == "raw_dob":
                 if validate_dob(value_str):
                     raw_dob = value_str
@@ -494,15 +496,19 @@ class VisionDocumentExtractor:
                 if entity_type in _GOV_ID_TYPES:
                     government_id_type = entity_type
 
-        if not raw_name:
-            return None
-
-        if not _is_likely_name(raw_name):
+        # Validate name if present
+        if raw_name and not _is_likely_name(raw_name):
             logger.debug("Vision extraction rejected name '%s' (failed validation)", raw_name)
+            raw_name = None
+
+        # Must have at least a name OR a government ID/email to be useful
+        if not raw_name and not raw_government_id and not raw_email:
             return None
 
         # Build entity_types_found from actually-populated fields only
-        entity_types_found: list[str] = ["PERSON"]
+        entity_types_found: list[str] = []
+        if raw_name:
+            entity_types_found.append("PERSON")
         if raw_address:
             entity_types_found.append("LOCATION")
         if raw_dob:
@@ -521,10 +527,13 @@ class VisionDocumentExtractor:
         else:
             page_range = f"{pages_1[0]}-{pages_1[-1]}"
 
+        primary_type = "PERSON" if raw_name else (government_id_type or "GOVERNMENT_ID" if raw_government_id else "EMAIL_ADDRESS")
+        normalized = raw_name or raw_government_id or raw_email or ""
+
         return PIIRecord(
             record_id=str(uuid4()),
-            entity_type="PERSON",
-            normalized_value=raw_name,
+            entity_type=primary_type,
+            normalized_value=normalized,
             raw_name=raw_name,
             raw_email=raw_email,
             raw_phone=raw_phone,

@@ -1773,34 +1773,47 @@ def _is_likely_name(name: str) -> bool:
 
 
 def _check_extraction_quality(records: list, path_label: str) -> bool:
-    """Return True if records have acceptable PERSON name quality.
+    """Return True if records have acceptable extraction quality.
 
     Called after each extraction path to decide whether to keep results
-    or discard and try the next path.  If <50% of records have valid
-    names the path produced garbage and should be skipped.
+    or discard and try the next path.
 
-    For small sets (1-2 records), require at least 1 valid name.
+    Non-destructive: records that have gov IDs or emails are meaningful
+    even without names.  Only reject if records are truly empty.
+
+    For small sets (1-2 records), require at least 1 useful record.
     Path 3 (Presidio final fallback) should NOT be gated.
     """
     if not records:
         return False
     total = len(records)
-    valid = sum(1 for r in records if r.raw_name and _is_likely_name(r.raw_name))
+    # Count records with a valid name OR meaningful PII (gov ID, email)
+    useful = sum(1 for r in records if (
+        (r.raw_name and _is_likely_name(r.raw_name))
+        or r.raw_government_id
+        or r.raw_email
+    ))
+    named = sum(1 for r in records if r.raw_name and _is_likely_name(r.raw_name))
     if total <= 2:
-        if valid >= 1:
+        if useful >= 1:
             return True
         logger.warning(
-            "Quality gate (%s): %d/%d valid names — rejecting",
-            path_label, valid, total,
+            "Quality gate (%s): %d/%d useful records — rejecting",
+            path_label, useful, total,
         )
         return False
-    ratio = valid / total
-    if ratio < 0.50:
+    ratio = useful / total
+    if ratio < 0.20:
         logger.warning(
-            "Quality gate (%s): %.0f%% valid (%d/%d) — rejecting",
-            path_label, ratio * 100, valid, total,
+            "Quality gate (%s): %.0f%% useful (%d/%d, %d named) — rejecting",
+            path_label, ratio * 100, useful, total, named,
         )
         return False
+    if named < total * 0.30:
+        logger.info(
+            "Quality gate (%s): low name rate %.0f%% (%d/%d) but %.0f%% useful — keeping",
+            path_label, named / total * 100, named, total, ratio * 100,
+        )
     return True
 
 

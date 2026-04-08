@@ -251,13 +251,14 @@ CUSTOM_PATTERNS: list[PatternDefinition] = [
     ),
     PatternDefinition(
         # Generic — state-specific formats vary widely; Layer 2 context needed.
-        # Tightened (Phase 14a): require at least 7 digits for bare numeric,
-        # or 1-2 letter prefix + 6-8 digits. context_deny_list.py also requires
+        # Tightened: require 1-2 letter prefix + 6-8 digits (state DL formats).
+        # Bare numeric patterns removed — too many false positives with student
+        # IDs, member IDs, account numbers.  Context deny list also requires
         # license-related keywords nearby.
         name="driver_license_us",
         entity_type="DRIVER_LICENSE_US",
-        regex=r"\b(?:[A-Z]{1,2}\d{6,8}|\d{7,9})\b",
-        score=0.65,
+        regex=r"\b[A-Z]{1,2}\d{6,8}\b",
+        score=0.55,
         geography=GEOGRAPHY_US,
         regulatory_framework="DPPA/CCPA",
     ),

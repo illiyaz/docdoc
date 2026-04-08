@@ -219,13 +219,20 @@ class ExtractionReconciler:
             else:
                 fields[raw_field] = val
 
+        # Validate phone before record construction
+        _raw_phone = fields["raw_phone"] if isinstance(fields["raw_phone"], str) else None
+        if _raw_phone:
+            from app.pipeline.coordinate_extractor import _is_valid_phone
+            if not _is_valid_phone(_raw_phone):
+                _raw_phone = None
+
         return PIIRecord(
             record_id=str(uuid4()),
             entity_type="PERSON",
             normalized_value=person_name.strip(),
             raw_name=fields["raw_name"],
             raw_address=fields["raw_address"],
-            raw_phone=fields["raw_phone"] if isinstance(fields["raw_phone"], str) else None,
+            raw_phone=_raw_phone,
             raw_email=fields["raw_email"] if isinstance(fields["raw_email"], str) else None,
             raw_dob=fields["raw_dob"] if isinstance(fields["raw_dob"], str) else None,
             raw_government_id=fields["raw_government_id"] if isinstance(fields["raw_government_id"], str) else None,
