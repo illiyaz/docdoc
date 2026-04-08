@@ -63,6 +63,7 @@ import {
   archiveJob,
 } from "@/api/client"
 import { DocumentViewer } from "@/components/DocumentViewer"
+import { IntelligenceTab } from "@/pages/IntelligenceTab"
 import type {
   ProjectDetail as ProjectDetailType,
   ProtocolConfigSummary,
@@ -81,13 +82,14 @@ import type {
 // Tab type
 // ---------------------------------------------------------------------------
 
-type TabId = "overview" | "protocols" | "catalog" | "jobs" | "subjects" | "density" | "exports"
+type TabId = "overview" | "protocols" | "catalog" | "jobs" | "intelligence" | "subjects" | "density" | "exports"
 
 const TABS: { id: TabId; label: string; icon: typeof FileText }[] = [
   { id: "overview", label: "Overview", icon: FileText },
   { id: "protocols", label: "Protocols", icon: Shield },
   { id: "catalog", label: "Catalog", icon: BarChart3 },
   { id: "jobs", label: "Jobs", icon: Briefcase },
+  { id: "intelligence", label: "Intelligence", icon: Eye },
   { id: "subjects", label: "Subjects", icon: Search },
   { id: "density", label: "Density", icon: BarChart3 },
   { id: "exports", label: "Exports", icon: Download },
@@ -4485,6 +4487,7 @@ export function ProjectDetail() {
           onJobCompleted={handleJobCompleted}
         />
       )}
+      {activeTab === "intelligence" && <IntelligenceTab projectId={projectId} />}
       {activeTab === "subjects" && <SubjectsTab projectId={projectId} />}
       {activeTab === "density" && <DensityTab projectId={projectId} />}
       {activeTab === "exports" && <ExportsTab projectId={projectId} />}

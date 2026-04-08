@@ -1188,3 +1188,144 @@ export function getDocumentPage(
   const qs = params.toString()
   return api(`/documents/${docId}/pages/${pageNumber}${qs ? `?${qs}` : ""}`)
 }
+
+
+// ---------------------------------------------------------------------------
+// Document Intelligence
+// ---------------------------------------------------------------------------
+
+export interface DocIntelligenceStructure {
+  document_type: string
+  document_type_confidence: number
+  detected_by: string
+  sections: Array<{ section_type: string; page_start: number; page_end: number; confidence: number }>
+}
+
+export interface DocIntelligenceUnderstanding {
+  document_type: string | null
+  document_subtype: string | null
+  issuing_entity: string | null
+  schema_confidence: number
+  is_tabular: boolean
+  records_per_page: number
+  layout_type: string
+  layout_confidence: number
+  extraction_notes: string | null
+  suppression_hints: string[]
+  field_map: Array<Record<string, unknown>>
+  people: Array<{ name: string; role: string; context: string; is_pii_subject: boolean }>
+  tables: Array<Record<string, unknown>>
+  template: Record<string, unknown> | null
+}
+
+export interface DocIntelligenceRouting {
+  recommended_path: string
+  structure_type: string
+  pii_field_count: number
+  records_per_page: number
+  schema_skip: boolean
+}
+
+export interface IntelligenceFieldMap {
+  field_type: string
+  anchor_text: string
+  spatial_relationship: string
+  line_count: number
+  value_pattern: string | null
+}
+
+export interface DocIntelligenceEntities {
+  summary: string | null
+  estimated_individuals: number | null
+  guidance: string | null
+  groups: Array<Record<string, unknown>>
+}
+
+export interface IntelligenceCorrection {
+  field: string
+  original_value: unknown
+  corrected_value: unknown
+  reason: string | null
+  corrected_at: string
+}
+
+export interface DocIntelligence {
+  document_id: string
+  file_name: string
+  file_type: string
+  page_count: number | null
+  status: string
+  job_id: string
+  job_status: string
+  structure: DocIntelligenceStructure
+  understanding: DocIntelligenceUnderstanding
+  routing: DocIntelligenceRouting
+  field_map: IntelligenceFieldMap[]
+  entities: DocIntelligenceEntities
+  onset_page: number | null
+  sample_extractions: Array<{
+    pii_type: string
+    masked_value: string
+    confidence: number
+    entity_role: string | null
+    page: number | null
+  }>
+  corrections: IntelligenceCorrection[]
+  error?: string
+}
+
+export interface IntelligenceSummary {
+  total_documents: number
+  total_pages: number
+  routed_documents: number
+  path_distribution: Record<string, number>
+}
+
+export interface ProjectIntelligence {
+  documents: DocIntelligence[]
+  job_count: number
+  summary: IntelligenceSummary
+}
+
+export interface TestExtractResult {
+  document_id: string
+  extraction_path: string
+  onset_page: number
+  pages_tested: number
+  records: Array<Record<string, unknown>>
+  total_records: number
+  error?: string
+}
+
+export function getProjectIntelligence(projectId: string): Promise<ProjectIntelligence> {
+  return api(`/projects/${projectId}/intelligence`)
+}
+
+export function submitCorrection(
+  projectId: string,
+  body: {
+    document_id: string
+    field: string
+    original_value: unknown
+    corrected_value: unknown
+    reason?: string
+  }
+): Promise<{ status: string; document_id: string; correction_count: number }> {
+  return api(`/projects/${projectId}/intelligence/correct`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  })
+}
+
+export function testExtract(body: {
+  document_id: string
+  job_id: string
+  pages?: number
+}): Promise<TestExtractResult> {
+  return api("/intelligence/test-extract", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  })
+}
