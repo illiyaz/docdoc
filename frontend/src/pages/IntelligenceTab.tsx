@@ -182,6 +182,7 @@ function DocListItem({
               </span>
             )}
           </div>
+        </div>
         <ChevronRight className={`h-4 w-4 mt-1 flex-shrink-0 ${isSelected ? "text-primary" : "text-muted-foreground"}`} />
       </div>
     </button>
