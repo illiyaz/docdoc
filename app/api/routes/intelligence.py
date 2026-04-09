@@ -406,7 +406,7 @@ def _test_coordinate_extract(
     if not field_map:
         return [{"error": "No field map available for coordinate extraction"}]
 
-    extractor = CoordinateExtractor(doc.source_path, field_map)
+    extractor = CoordinateExtractor(field_map, doc.source_path, str(doc.id))
     records = []
     for page_num in range(onset, min(onset + n_pages, (doc.page_count or onset + n_pages))):
         try:

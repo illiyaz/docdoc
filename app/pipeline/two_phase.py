@@ -915,6 +915,15 @@ def analyze_generator(
             },
         })
 
+        # Flush any remaining document_schema / metadata changes before
+        # releasing the session — _refresh_session closes the old session,
+        # so uncommitted writes (e.g. schema set at doc.metadata_json) would
+        # be silently lost.
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
+
         # Release session before vision routing (long model calls)
         all_doc_ids = [d.id for d in doc_records]
         db, run, _doc_map = _refresh_session(db, run.id, all_doc_ids)
