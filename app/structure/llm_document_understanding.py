@@ -340,6 +340,31 @@ class LLMDocumentUnderstanding:
         if schema.layout_field_map:
             self._resolve_masked_anchors(schema, blocks, onset_page)
 
+        # Heuristic fallback: if the LLM understood the document semantically
+        # but failed to produce a field map (layout still "variable"), try
+        # building one by comparing pages line-by-line.  This catches
+        # label-less repeating documents (school reports, etc.) that even
+        # large LLMs struggle with for spatial reasoning.
+        if (
+            not schema.layout_field_map
+            and schema.schema_confidence >= 0.5
+            and total_pages > 3
+        ):
+            from app.core.settings import get_settings as _gs
+            if _gs().heuristic_field_map_enabled:
+                from app.structure.heuristic_field_map import build_heuristic_field_map
+                heuristic_map = build_heuristic_field_map(
+                    blocks, onset_page, total_pages,
+                )
+                if heuristic_map:
+                    schema.layout_field_map = heuristic_map
+                    schema.layout_type = "fixed"
+                    schema.layout_confidence = 0.85
+                    logger.info(
+                        "Heuristic field map applied: %d fields (LLM layout was %r)",
+                        len(heuristic_map), "variable",
+                    )
+
         return schema
 
     def _build_page_text(self, blocks: list[ExtractedBlock]) -> str:

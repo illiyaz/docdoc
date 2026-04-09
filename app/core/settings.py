@@ -39,6 +39,7 @@ class Settings(BaseSettings):
     vision_routing_workers: int = Field(default=4, alias="VISION_ROUTING_WORKERS")
     ollama_understanding_model: str | None = Field(default=None, alias="OLLAMA_UNDERSTANDING_MODEL")
     use_extraction_selector: bool = Field(default=False, alias="USE_EXTRACTION_SELECTOR")
+    heuristic_field_map_enabled: bool = Field(default=True, alias="HEURISTIC_FIELD_MAP_ENABLED")
     doc_hard_timeout_s: int = Field(default=1800, alias="DOC_HARD_TIMEOUT_S")
 
 
