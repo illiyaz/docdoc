@@ -175,7 +175,12 @@ function DocListItem({
           <div className="flex items-center gap-3 mt-1 text-[11px] text-muted-foreground">
             <span>{doc.page_count ?? "?"} pages</span>
             <span>{doc.understanding.document_type || doc.structure.document_type || "unknown"}</span>
-          </div>
+            {doc.analyzed_at && (
+              <span className="flex items-center gap-0.5" title={doc.analyzed_at}>
+                <Clock className="h-3 w-3" />
+                {formatDistanceToNow(parseISO(doc.analyzed_at), { addSuffix: true })}
+              </span>
+            )}
         </div>
         <ChevronRight className={`h-4 w-4 mt-1 flex-shrink-0 ${isSelected ? "text-primary" : "text-muted-foreground"}`} />
       </div>
