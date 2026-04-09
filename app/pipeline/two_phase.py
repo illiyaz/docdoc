@@ -796,7 +796,6 @@ def analyze_generator(
 
                     blocks = doc_blocks_cache.get(doc.id, [])
                     onset_page = doc.sample_onset_page or 0
-                    sample_blocks = filter_sample_blocks(blocks, onset_page, doc.file_type or "unknown")
 
                     # Get heuristic doc type from structure analysis
                     heuristic_doc_type = "unknown"
@@ -807,11 +806,14 @@ def analyze_generator(
                     # fall back to distinct block pages (sampled blocks undercount)
                     total_pages = doc_total_pages.get(doc.id, 0)
                     if total_pages == 0:
-                        all_blocks = doc_blocks_cache.get(doc.id, [])
-                        total_pages = len(set(b.page_or_sheet for b in all_blocks)) if all_blocks else 0
+                        total_pages = len(set(b.page_or_sheet for b in blocks)) if blocks else 0
 
+                    # Pass ALL blocks — _build_multi_page_text handles page
+                    # slicing (onset + pages_to_read) and char budget internally.
+                    # Previously filter_sample_blocks capped at onset+2 pages,
+                    # starving the LLM when it needed 9+ pages for large docs.
                     schema = doc_understanding.understand(
-                        sample_blocks,
+                        blocks,
                         heuristic_doc_type=heuristic_doc_type,
                         file_name=doc.file_name or "",
                         file_type=doc.file_type or "",

@@ -22,6 +22,8 @@ from collections import defaultdict
 
 from sqlalchemy.orm import Session
 
+import re
+
 from app.core.constants import DEFAULT_LLM_PAGES_TO_READ, PROTOCOL_LLM_CONFIG
 from app.llm.client import OllamaClient, LLMDisabledError
 from app.llm.prompts import PROMPT_TEMPLATES, SYSTEM_PROMPT
@@ -331,7 +333,14 @@ class LLMDocumentUnderstanding:
             document_id=document_id,
         )
 
-        return self._parse_response(response_text)
+        schema = self._parse_response(response_text)
+
+        # Resolve masked placeholders in anchor_text back to actual values
+        # so the CoordinateExtractor can match them on unmasked page text.
+        if schema.layout_field_map:
+            self._resolve_masked_anchors(schema, blocks, onset_page)
+
+        return schema
 
     def _build_page_text(self, blocks: list[ExtractedBlock]) -> str:
         """Build masked page text from blocks, truncated to _MAX_PAGE_TEXT_CHARS."""
@@ -404,6 +413,80 @@ class LLMDocumentUnderstanding:
                 break
 
         return "\n".join(parts)
+
+    # -- Masked anchor resolution -------------------------------------------
+
+    # Map of masked placeholder → regex to find the original value in raw text
+    _PLACEHOLDER_PATTERNS: dict[str, re.Pattern[str]] = {
+        "[PHONE]": re.compile(
+            r"\b(?:\+?1[\s.-]?)?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}\b"
+        ),
+        "[SSN]": re.compile(r"\b\d{3}-\d{2}-\d{4}\b"),
+        "[EMAIL]": re.compile(
+            r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b"
+        ),
+        "[CREDIT_CARD]": re.compile(
+            r"\b\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}\b"
+        ),
+    }
+
+    def _resolve_masked_anchors(
+        self,
+        schema: DocumentSchema,
+        blocks: list[ExtractedBlock],
+        onset_page: int | str,
+    ) -> None:
+        """Replace masked placeholders in anchor_text with actual values.
+
+        When the LLM sees ``[PHONE]`` (a masked institutional phone number)
+        and uses it as an anchor, the CoordinateExtractor needs the REAL
+        phone number to find the anchor on unmasked PDF pages.  This method
+        scans the onset page's raw text for the first match of each masked
+        pattern and replaces the placeholder in-place.
+        """
+        if not schema.layout_field_map:
+            return
+
+        # Collect unmasked text from the onset page
+        onset_texts: list[str] = []
+        for b in blocks:
+            if b.page_or_sheet == onset_page:
+                onset_texts.append(b.text)
+
+        if not onset_texts:
+            return
+
+        onset_full_text = "\n".join(onset_texts)
+
+        # Cache resolved values so all fields sharing the same placeholder
+        # get the same real value
+        resolved: dict[str, str] = {}
+
+        for fm in schema.layout_field_map:
+            anchor = fm.anchor_text.strip() if fm.anchor_text else ""
+            if anchor not in self._PLACEHOLDER_PATTERNS:
+                continue
+
+            if anchor not in resolved:
+                pattern = self._PLACEHOLDER_PATTERNS[anchor]
+                match = pattern.search(onset_full_text)
+                if match:
+                    resolved[anchor] = match.group(0)
+                    logger.info(
+                        "Resolved masked anchor %s → %r",
+                        anchor,
+                        resolved[anchor],
+                    )
+                else:
+                    logger.warning(
+                        "Could not resolve masked anchor %s on onset page %s",
+                        anchor,
+                        onset_page,
+                    )
+                    continue
+
+            if anchor in resolved:
+                fm.anchor_text = resolved[anchor]
 
     def _parse_response(self, response_text: str) -> DocumentSchema:
         """Parse LLM JSON response into a DocumentSchema.
