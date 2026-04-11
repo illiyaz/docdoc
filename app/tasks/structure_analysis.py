@@ -27,12 +27,16 @@ class StructureAnalysisTask:
     def __init__(self) -> None:
         self._heuristic = HeuristicAnalyzer()
 
+    # Minimum segregation confidence to skip redundant LLM structure call
+    _SEG_CONFIDENCE_THRESHOLD = 0.80
+
     def run(
         self,
         blocks: list[ExtractedBlock],
         document_id: str,
         *,
         db_session=None,
+        segregation_result: dict | None = None,
     ) -> DocumentStructureAnalysis:
         """Analyze document structure and return annotations.
 
@@ -44,19 +48,56 @@ class StructureAnalysisTask:
             UUID string of the document being analyzed.
         db_session:
             Optional SQLAlchemy session for LLM audit logging.
+        segregation_result:
+            Optional dict from Stage 1.7 segregation (LLM vision).
+            When present with high confidence, the LLM structure
+            analysis call is skipped (redundant) and segregation's
+            document type is merged into the heuristic result instead.
+            Saves ~110s per document.
 
         Returns
         -------
         DocumentStructureAnalysis
             Complete analysis with document type, sections, and entity roles.
         """
-        # Always run heuristic
+        # Always run heuristic (fast, produces sections + block roles)
         heuristic_result = self._heuristic.analyze(blocks, document_id)
 
-        # Optionally run LLM
+        # When segregation already classified with high confidence,
+        # skip the LLM structure call — it would produce a redundant
+        # document_type classification.  The heuristic still provides
+        # sections and per-block entity roles that segregation doesn't.
+        seg_confidence = (segregation_result or {}).get("confidence", 0)
+        seg_doc_type = (segregation_result or {}).get("document_type", "")
+        skip_llm = (
+            segregation_result is not None
+            and seg_confidence >= self._SEG_CONFIDENCE_THRESHOLD
+            and seg_doc_type
+            and seg_doc_type != "unknown"
+        )
+
         settings = get_settings()
         llm_result = None
-        if settings.llm_assist_enabled:
+
+        if skip_llm:
+            # Enrich heuristic with segregation's document type
+            if (
+                heuristic_result.document_type_confidence < seg_confidence
+                or heuristic_result.document_type.value == "unknown"
+            ):
+                # Map segregation string to closest DocumentType enum
+                from app.structure.models import DocumentType
+                for dt in DocumentType:
+                    if dt.value == seg_doc_type or seg_doc_type.lower() in dt.value.lower():
+                        heuristic_result.document_type = dt
+                        heuristic_result.document_type_confidence = seg_confidence
+                        break
+                heuristic_result.detected_by = "heuristic+segregation"
+            logger.info(
+                "Structure analysis: skipping LLM (segregation confidence=%.2f, type=%s)",
+                seg_confidence, seg_doc_type,
+            )
+        elif settings.llm_assist_enabled:
             try:
                 llm_analyzer = LLMStructureAnalyzer(db_session=db_session)
                 llm_result = llm_analyzer.analyze(blocks, document_id)

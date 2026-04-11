@@ -728,7 +728,16 @@ def analyze_generator(
 
                 doc_blocks_cache[doc.id] = blocks
 
-                result = structure_task.run(blocks, str(doc.id), db_session=db)
+                # Pass segregation result to skip redundant LLM call
+                seg_dict = None
+                if doc.metadata_json and doc.metadata_json.get("segregation"):
+                    seg_dict = doc.metadata_json["segregation"]
+
+                result = structure_task.run(
+                    blocks, str(doc.id),
+                    db_session=db,
+                    segregation_result=seg_dict,
+                )
                 doc.structure_analysis = result.to_dict()
             except Exception as e:
                 logger.warning("Structure analysis failed for doc %s: %s", doc.file_name, type(e).__name__)
