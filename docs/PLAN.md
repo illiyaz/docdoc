@@ -499,3 +499,41 @@ Surya had catastrophic performance degradation on CMG (batches 131-190 went from
 | `app/export/pdf_report.py` | NEW — WeasyPrint-rendered PDF with header/footer, page numbers, masked data tables |
 | `app/api/routes/exports.py` | Add `format=pdf` parameter |
 | `tests/test_pdf_report.py` | PDF generation, masked data, formatting |
+
+---
+
+### Step 36 — UX Polish + Layman-Friendly Interface
+
+**Goal:** Make the UI usable by non-technical users (paralegals, compliance officers). A layman should understand every screen without training.
+
+#### 36a. Jobs Page Redesign
+
+- **Guided workflow:** Replace raw job list with a step-by-step wizard — Upload → Segregation Review → Analysis → Extraction → QA → Notify
+- **Progress indicators:** Clear visual pipeline (stepper/breadcrumb) showing where each job is in the workflow
+- **Plain-English status:** Replace "Ready to Extract" with "Analysis complete — review results before extracting". Replace "Running" with "Analyzing documents (3 of 12 complete)"
+- **Hide failed/cancelled clutter:** Collapsed by default, accessible via filter. Show only active/recent jobs prominently
+- **One-click actions:** Big primary button for the next logical step (not "Extract" buried in a row)
+- **Time estimates:** "~5 minutes remaining" based on pages/model speed
+
+#### 36b. Dashboard + First-Run Experience
+
+- **Empty state guidance:** When no projects exist, show "Welcome to Forentis AI" with a guided setup flow
+- **Dashboard cards:** Matter summary with traffic-light status (green = on track, amber = approaching deadline, red = overdue)
+- **Notification progress ring:** Visual showing "234 of 500 subjects notified"
+- **Recent activity feed:** "3733050.pdf — 12,450 records extracted 2 hours ago"
+
+#### 36c. Visual Design System
+
+- **Consistent color palette:** Define primary, secondary, success, warning, danger colors
+- **Typography hierarchy:** Clear heading levels, readable body text, monospace only for data
+- **Card-based layouts:** Replace dense tables with scannable cards where appropriate
+- **Loading states:** Skeleton loaders instead of spinners, progress bars with context
+- **Error states:** Friendly messages ("We couldn't read page 47 — it may be a scanned image") not stack traces
+- **Mobile responsive:** At minimum, dashboard and job status should work on tablet
+
+#### 36d. Contextual Help + Tooltips
+
+- **Field-level help:** Hover tooltips explaining what each PII type means, what each status means
+- **Inline documentation:** "What is onset detection?" links/tooltips on the analysis review screen
+- **Protocol explainers:** Plain-English summary of what each regulatory protocol requires
+- **Keyboard shortcuts:** Document and display common actions (approve, reject, next record)
