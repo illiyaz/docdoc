@@ -531,3 +531,176 @@ def _count_value_lines(value_words: list[tuple]) -> int:
         y = round(w[1] / _LINE_TOLERANCE) * _LINE_TOLERANCE
         lines.add(y)
     return len(lines)
+
+
+# ──────────────────────────────────────────────────────────────
+# Auto-correct LLM-produced field maps using real word positions
+# ──────────────────────────────────────────────────────────────
+
+def auto_correct_field_map(
+    field_maps: list[FieldMapping],
+    doc_path: str,
+    onset_page: int = 0,
+) -> list[FieldMapping]:
+    """Correct LLM-produced spatial relationships using actual PyMuPDF words.
+
+    The LLM understands WHAT fields exist and WHAT anchor to use, but
+    guesses the spatial distance (e.g., "line_below" when the real gap
+    is 7 lines).  This function:
+
+    1. Opens the PDF at the onset page
+    2. Finds each anchor in the actual word list
+    3. Finds content lines below the anchor
+    4. Recomputes the real spatial relationship
+    5. Adds accurate sample_bbox from the actual value position
+
+    Returns corrected FieldMappings.  Mappings whose anchor can't be
+    found are returned unchanged (coordinate extractor will handle
+    the miss gracefully on a per-page basis).
+    """
+    if not field_maps or not doc_path:
+        return field_maps
+
+    try:
+        doc = fitz.open(doc_path)
+    except Exception:
+        return field_maps
+
+    try:
+        if onset_page >= len(doc):
+            return field_maps
+        page = doc[onset_page]
+        raw_words = page.get_text("words")
+        rotation = page.rotation
+        page_w = page.rect.width
+        page_h = page.rect.height
+    finally:
+        doc.close()
+
+    words = _derotate_words(raw_words, rotation, page_w, page_h)
+    if not words:
+        return field_maps
+
+    # Build a sorted list of distinct text lines (by y-center)
+    line_ys: list[float] = []
+    seen_y: set[int] = set()
+    for w in sorted(words, key=lambda w: w[1]):
+        y_bucket = round((w[1] + w[3]) / 2 / _LINE_TOLERANCE) * _LINE_TOLERANCE
+        if y_bucket not in seen_y:
+            seen_y.add(y_bucket)
+            line_ys.append((w[1] + w[3]) / 2)
+
+    corrected: list[FieldMapping] = []
+    for fm in field_maps:
+        corrected_fm = _correct_one_field(fm, words, line_ys)
+        corrected.append(corrected_fm)
+
+    return corrected
+
+
+def _correct_one_field(
+    fm: FieldMapping,
+    words: list[tuple],
+    line_ys: list[float],
+) -> FieldMapping:
+    """Correct one FieldMapping's spatial relationship using real word positions."""
+    anchor = fm.anchor_text
+    if not anchor:
+        return fm
+
+    # Find the anchor in the word list
+    anchor_words = FieldMapBuilder._find_text_in_words(words, anchor)
+    if not anchor_words:
+        # Try partial match (anchor might be masked: [PHONE] vs 425-431-6400)
+        anchor_lower = anchor.lower().strip("[]")
+        for w in words:
+            if anchor_lower in w[4].lower() or w[4].lower() in anchor_lower:
+                anchor_words = [w]
+                break
+        # Try matching the unmasked phone pattern
+        if not anchor_words and anchor.startswith("[") and "PHONE" in anchor.upper():
+            import re as _re
+            for w in words:
+                if _re.match(r'\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}', w[4]):
+                    anchor_words = [w]
+                    break
+
+    if not anchor_words:
+        logger.debug("auto_correct: anchor '%s' not found on page", anchor[:30])
+        return fm
+
+    anchor_bbox = _merge_bboxes(anchor_words)
+    anchor_cy = (anchor_bbox[1] + anchor_bbox[3]) / 2
+    anchor_line_height = (anchor_bbox[3] - anchor_bbox[1]) or 12
+
+    # Parse the LLM's intended relationship to understand intent
+    rel = fm.spatial_relationship or "line_below"
+    if rel == "same_line_right":
+        # LLM says value is on the same line — trust it, no correction needed
+        return fm
+
+    # For line_below / lines_below_N — find the actual content lines below anchor
+    # Count how many text lines exist below the anchor
+    lines_below_anchor: list[float] = []
+    for ly in line_ys:
+        if ly > anchor_cy + _LINE_TOLERANCE:
+            lines_below_anchor.append(ly)
+
+    if not lines_below_anchor:
+        return fm
+
+    # Parse which line the LLM intended (line_below=1, lines_below_3=3)
+    intended_line = 1
+    if rel.startswith("lines_below_"):
+        try:
+            intended_line = int(rel.split("_")[-1])
+        except ValueError:
+            intended_line = 2
+    elif rel == "line_below":
+        intended_line = 1
+
+    # The LLM intended "Nth content line below anchor"
+    # Find what the actual Nth content line is at
+    target_idx = min(intended_line - 1, len(lines_below_anchor) - 1)
+    actual_y = lines_below_anchor[target_idx]
+
+    # Compute the real spatial relationship in terms of line_height
+    real_y_diff = actual_y - anchor_cy
+    real_lines = max(1, round(real_y_diff / anchor_line_height))
+
+    if real_lines == 1:
+        new_rel = "line_below"
+    else:
+        new_rel = f"lines_below_{real_lines}"
+
+    # Find words at the target line to get accurate bbox
+    target_words = [
+        w for w in words
+        if abs((w[1] + w[3]) / 2 - actual_y) < _LINE_TOLERANCE
+    ]
+    new_bbox = list(_merge_bboxes(target_words)) if target_words else fm.sample_bbox
+
+    # Count value lines (for multi-line fields like addresses)
+    value_line_count = fm.line_count
+    if value_line_count > 1 and target_idx + value_line_count <= len(lines_below_anchor):
+        # Verify the additional lines exist
+        last_y = lines_below_anchor[target_idx + value_line_count - 1]
+        value_line_count = max(1, round((last_y - actual_y) / anchor_line_height)) + 1
+
+    if new_rel != fm.spatial_relationship:
+        logger.info(
+            "auto_correct: '%s' %s → %s (anchor '%s' at y=%.0f, value at y=%.0f, gap=%.0fpt)",
+            fm.field_type, fm.spatial_relationship, new_rel,
+            anchor[:20], anchor_cy, actual_y, real_y_diff,
+        )
+
+    return FieldMapping(
+        field_type=fm.field_type,
+        anchor_text=fm.anchor_text,
+        spatial_relationship=new_rel,
+        value_pattern=fm.value_pattern,
+        sample_bbox=new_bbox,
+        line_count=value_line_count,
+        skip_pattern=fm.skip_pattern,
+        entity_role=fm.entity_role,
+    )

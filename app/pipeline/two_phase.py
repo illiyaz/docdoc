@@ -1167,6 +1167,46 @@ def analyze_generator(
                                                     fm_d["entity_role"] = seg_role
                                                     break
 
+                            # Auto-correct spatial relationships using actual PDF word positions
+                            if fm_dicts and doc.source_path and routing_dict.get("recommended_path") == "coordinate":
+                                try:
+                                    from app.pipeline.field_map_builder import auto_correct_field_map
+                                    from app.structure.document_schema import FieldMapping
+
+                                    _onset_pg = doc.sample_onset_page or 0
+                                    _fm_objs = [
+                                        FieldMapping(
+                                            field_type=fd.get("field_type", ""),
+                                            anchor_text=fd.get("anchor_text", ""),
+                                            spatial_relationship=fd.get("spatial_relationship", "line_below"),
+                                            value_pattern=fd.get("value_pattern"),
+                                            sample_bbox=fd.get("sample_bbox", []),
+                                            line_count=fd.get("line_count", 1),
+                                            skip_pattern=fd.get("skip_pattern"),
+                                            entity_role=fd.get("entity_role"),
+                                        )
+                                        for fd in fm_dicts
+                                    ]
+                                    _corrected = auto_correct_field_map(_fm_objs, doc.source_path, _onset_pg)
+                                    fm_dicts = [
+                                        {
+                                            "field_type": fm.field_type,
+                                            "anchor_text": fm.anchor_text,
+                                            "spatial_relationship": fm.spatial_relationship,
+                                            "value_pattern": fm.value_pattern,
+                                            "sample_bbox": getattr(fm, "sample_bbox", []),
+                                            "line_count": getattr(fm, "line_count", 1),
+                                            "skip_pattern": getattr(fm, "skip_pattern", None),
+                                            "entity_role": getattr(fm, "entity_role", None),
+                                        }
+                                        for fm in _corrected
+                                    ]
+                                except Exception:
+                                    logger.warning(
+                                        "auto_correct_field_map failed for %s", doc.file_name,
+                                        exc_info=True,
+                                    )
+
                             # Persist routing to metadata (same as vision path)
                             doc_meta = doc.metadata_json or {}
                             doc_meta["vision_routing"] = {
