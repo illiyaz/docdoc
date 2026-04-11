@@ -1181,14 +1181,52 @@ def _pipeline_relay_generator(job_id: str, body: CreateJobBody, registry: Protoc
 def run_job_stream(
     body: CreateJobBody,
     registry: ProtocolRegistry = Depends(get_protocol_registry),
+    db: Session = Depends(get_db),
 ):
     """Run the full pipeline with SSE streaming progress events.
 
     Pipeline runs in a background thread that survives browser disconnects.
     The SSE response is a thin relay that polls progress from the DB.
     """
+    from app.db.models import IngestionRun
+    from datetime import datetime, timezone
+
     job_id = str(uuid4())
     body.job_id = job_id
+
+    # Create IngestionRun HERE to avoid race condition with relay
+    settings = get_settings()
+    source_directory = ""
+    if body.upload_id:
+        source_directory = str(Path(settings.upload_dir) / body.upload_id)
+    elif body.source_directory:
+        source_directory = body.source_directory
+
+    project_uuid = None
+    if body.project_id:
+        try:
+            project_uuid = UUID(body.project_id)
+        except (ValueError, AttributeError):
+            pass
+
+    job_uuid = UUID(job_id)
+    run = IngestionRun(
+        id=job_uuid,
+        project_id=project_uuid,
+        source_path=source_directory,
+        pipeline_mode=body.pipeline_mode or "full",
+        config_hash="",
+        code_version="0.1.0",
+        initiated_by="api",
+        status="running",
+        started_at=datetime.now(timezone.utc),
+        config_snapshot={
+            "protocol_id": body.protocol_id,
+            "protocol_config_id": body.protocol_config_id,
+        },
+    )
+    db.add(run)
+    db.commit()
 
     t = threading.Thread(
         target=_run_pipeline_background,
@@ -1198,8 +1236,6 @@ def run_job_stream(
     )
     _pipeline_threads[job_id] = t
     t.start()
-
-    time.sleep(1)
 
     return StreamingResponse(
         _pipeline_relay_generator(job_id, body, registry),

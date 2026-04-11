@@ -445,7 +445,7 @@ export function JobSubmit() {
         ? { protocol_id: protocolId, upload_id: uploadResult.upload_id }
         : { protocol_id: protocolId, source_directory: sourceDir }
 
-      const body = { ...baseBody, project_id: selectedProjectId }
+      const body = { ...baseBody, project_id: selectedProjectId, pipeline_mode: "two_phase" }
 
       const res = await submitJobStreaming(body, handlePipelineProgress)
       setResult(res)
