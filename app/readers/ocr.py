@@ -16,17 +16,47 @@ PaddleOCR is initialised with use_angle_cls=False and show_log=False.
 Model weights must be pre-staged in the local models/ directory and
 supplied via det_model_dir / rec_model_dir at deployment time so that
 no outbound network call is ever made at runtime.
+
+Performance note
+----------------
+``paddleocr`` import and ``PaddleOCR()`` instantiation are deferred until
+first use.  A module-level singleton (``_default_engine``) is reused across
+all callers within the same process, avoiding the ~1-4 s init cost on every
+job.  Set ``PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True`` in the environment
+to skip the network connectivity check (~1 s savings).
 """
 from __future__ import annotations
 
 import logging
+import threading
 
 import numpy as np
-from paddleocr import PaddleOCR
 
 from app.readers.base import ExtractedBlock
 
 logger = logging.getLogger(__name__)
+
+# Module-level singleton — created on first use, reused across all callers.
+_default_engine: "OCREngine | None" = None
+_engine_lock = threading.Lock()
+
+
+def get_ocr_engine(lang: str = "en") -> "OCREngine":
+    """Return the module-level singleton OCREngine, creating it on first call.
+
+    Thread-safe.  The engine (and the ``paddleocr`` import) is deferred
+    until someone actually needs OCR, so text-PDF pipelines never pay the
+    init cost.
+    """
+    global _default_engine
+    if _default_engine is not None and _default_engine._lang == lang:
+        return _default_engine
+    with _engine_lock:
+        # Double-check inside lock
+        if _default_engine is not None and _default_engine._lang == lang:
+            return _default_engine
+        _default_engine = OCREngine(lang=lang)
+        return _default_engine
 
 
 class OCREngine:
@@ -36,7 +66,8 @@ class OCREngine:
     Re-using a single instance across many pages avoids the significant
     per-call initialisation cost of loading neural network weights.
 
-    Not thread-safe: create one instance per concurrent document worker.
+    Prefer ``get_ocr_engine()`` over direct instantiation to benefit
+    from the module-level singleton.
     """
 
     def __init__(
@@ -60,6 +91,11 @@ class OCREngine:
             If None, PaddleOCR uses its own default cache location.
             Must be set to a local path in air-gap deployments.
         """
+        import os
+        # Skip PaddleOCR's network connectivity check (~1s savings, required for air-gap)
+        os.environ.setdefault("PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK", "True")
+        from paddleocr import PaddleOCR  # deferred import — ~3s saved at server start
+
         self._lang = lang
         kwargs: dict[str, object] = {
             "lang": lang,
@@ -197,7 +233,7 @@ def ocr_pdf_to_blocks(
     """
     import fitz  # PyMuPDF — lazy import to avoid top-level dependency
 
-    engine = OCREngine(lang=lang)
+    engine = get_ocr_engine(lang=lang)
     all_blocks: list[ExtractedBlock] = []
 
     doc = fitz.open(pdf_path)

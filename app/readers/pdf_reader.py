@@ -389,8 +389,8 @@ class PDFReader(BaseReader):
                 # Scanned page on stride boundary — OCR it
                 try:
                     if ocr_engine is None:
-                        from app.readers.ocr import OCREngine
-                        ocr_engine = OCREngine()
+                        from app.readers.ocr import get_ocr_engine
+                        ocr_engine = get_ocr_engine()
                     mat = fitz.Matrix(2, 2)
                     pix = page.get_pixmap(matrix=mat)
                     ocr_blocks = ocr_engine.ocr_page_image(pix, page_num, source)
@@ -438,8 +438,8 @@ class PDFReader(BaseReader):
             # scanned or corrupted: render to raster image and OCR
             try:
                 if ocr_engine is None:
-                    from app.readers.ocr import OCREngine
-                    ocr_engine = OCREngine()
+                    from app.readers.ocr import get_ocr_engine
+                    ocr_engine = get_ocr_engine()
                 mat = fitz.Matrix(2, 2)  # 2× zoom improves OCR accuracy
                 pix = page.get_pixmap(matrix=mat)
                 prose_blocks = ocr_engine.ocr_page_image(pix, page_num, source)
