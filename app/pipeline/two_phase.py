@@ -520,24 +520,34 @@ def analyze_generator(
         except Exception:
             pass  # best-effort; proceed without config
 
-    # --- Create IngestionRun record ---
-    run = IngestionRun(
-        id=job_uuid,
-        project_id=project_uuid,
-        source_path=source_directory,
-        pipeline_mode="two_phase",
-        config_hash="",
-        code_version="0.1.0",
-        initiated_by="api",
-        status="running",
-        started_at=datetime.now(timezone.utc),
-        config_snapshot={
-            "protocol_id": body.protocol_id,
-            "protocol_config_id": body.protocol_config_id,
-        },
-    )
-    db.add(run)
-    db.commit()
+    # --- Create or reuse IngestionRun record ---
+    # The HTTP handler may have already created the run (to avoid race
+    # conditions with the SSE relay).  If so, reuse it.
+    run = db.get(IngestionRun, job_uuid)
+    if run is None:
+        run = IngestionRun(
+            id=job_uuid,
+            project_id=project_uuid,
+            source_path=source_directory,
+            pipeline_mode="two_phase",
+            config_hash="",
+            code_version="0.1.0",
+            initiated_by="api",
+            status="running",
+            started_at=datetime.now(timezone.utc),
+            config_snapshot={
+                "protocol_id": body.protocol_id,
+                "protocol_config_id": body.protocol_config_id,
+            },
+        )
+        db.add(run)
+        db.commit()
+    else:
+        # Ensure status is running (handler created it as running)
+        if run.status != "running":
+            run.status = "running"
+            run.started_at = datetime.now(timezone.utc)
+            db.commit()
 
     try:
         # --- Stage 1: Discovery ---

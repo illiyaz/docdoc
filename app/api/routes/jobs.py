@@ -1212,18 +1212,62 @@ def run_job_stream(
 def analyze_stream(
     body: CreateJobBody,
     registry: ProtocolRegistry = Depends(get_protocol_registry),
+    db: Session = Depends(get_db),
 ):
     """Run the analysis phase of the two-phase pipeline with SSE streaming.
 
     Analysis runs in a background thread that survives browser disconnects.
     The SSE response is a thin relay that polls progress from the DB.
+
+    The IngestionRun record is created HERE (in the HTTP handler) so the
+    relay can always find it — eliminates the race condition where the
+    background thread hadn't committed yet.
     """
     from app.pipeline.two_phase import run_analysis_background, analysis_relay_generator, _analysis_threads
+    from app.db.models import IngestionRun
+    from datetime import datetime, timezone
     import threading
 
     # Generate a job_id and pass it in the body so analyze_generator uses it
     job_id = str(uuid4())
     body.job_id = job_id
+
+    # Resolve source directory for the IngestionRun record
+    settings = get_settings()
+    source_directory = ""
+    if body.upload_id:
+        upload_path = Path(settings.upload_dir) / body.upload_id
+        source_directory = str(upload_path)
+    elif body.source_directory:
+        source_directory = body.source_directory
+
+    # Resolve project_id
+    project_uuid = None
+    if body.project_id:
+        try:
+            project_uuid = UUID(body.project_id)
+        except (ValueError, AttributeError):
+            pass
+
+    # Create IngestionRun HERE so the relay can always find it
+    job_uuid = UUID(job_id)
+    run = IngestionRun(
+        id=job_uuid,
+        project_id=project_uuid,
+        source_path=source_directory,
+        pipeline_mode="two_phase",
+        config_hash="",
+        code_version="0.1.0",
+        initiated_by="api",
+        status="running",
+        started_at=datetime.now(timezone.utc),
+        config_snapshot={
+            "protocol_id": body.protocol_id,
+            "protocol_config_id": body.protocol_config_id,
+        },
+    )
+    db.add(run)
+    db.commit()
 
     # Start background analysis thread
     t = threading.Thread(
@@ -1234,10 +1278,6 @@ def analyze_stream(
     )
     _analysis_threads[job_id] = t
     t.start()
-
-    # Give the thread a moment to create the IngestionRun
-    import time
-    time.sleep(1)
 
     return StreamingResponse(
         analysis_relay_generator(job_id, body, registry),
