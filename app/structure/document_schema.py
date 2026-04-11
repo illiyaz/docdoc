@@ -428,6 +428,17 @@ class DocumentSchema:
                 if not isinstance(bbox, list):
                     bbox = []
                 bbox = [float(v) for v in bbox[:4]]
+                # Parse entity_role — filter out institutional/provider fields
+                raw_role = item.get("entity_role")
+                entity_role = None
+                if raw_role and isinstance(raw_role, str):
+                    role_lower = raw_role.lower().strip()
+                    if role_lower in ("primary_subject", "guardian", "secondary_contact"):
+                        entity_role = role_lower
+                    elif role_lower in ("institutional", "provider"):
+                        # Skip institutional/provider fields — they're not PII subjects
+                        continue
+
                 mappings.append(FieldMapping(
                     field_type=str(item.get("field_type", "")),
                     anchor_text=str(item.get("anchor_text", "")),
@@ -436,6 +447,7 @@ class DocumentSchema:
                     sample_bbox=bbox,
                     line_count=int(item.get("line_count", 1)),
                     skip_pattern=item.get("skip_pattern"),
+                    entity_role=entity_role,
                 ))
             except (TypeError, ValueError, KeyError):
                 continue

@@ -1132,16 +1132,30 @@ def analyze_generator(
                             # Enrich field maps with segregation role_map
                             _skip_seg = (doc.metadata_json or {}).get("segregation", {})
                             if isinstance(_skip_seg, dict) and fm_dicts:
+                                # Build type→role lookup from segregation fields
+                                _seg_fields = _skip_seg.get("fields", [])
+                                _type_to_role: dict[str, str] = {}
+                                for sf in _seg_fields:
+                                    if isinstance(sf, dict) and sf.get("type") and sf.get("role"):
+                                        _type_to_role[sf["type"].upper()] = sf["role"]
+                                # Also use role_map (name→role) as fallback
                                 _skip_role_map = _skip_seg.get("role_map", {})
-                                if _skip_role_map:
+
+                                if _type_to_role or _skip_role_map:
                                     for fm_d in fm_dicts:
                                         if fm_d.get("entity_role"):
-                                            continue
-                                        anchor = fm_d.get("anchor_text", "")
-                                        for seg_name, seg_role in _skip_role_map.items():
-                                            if seg_name.lower() in anchor.lower() or anchor.lower() in seg_name.lower():
-                                                fm_d["entity_role"] = seg_role
-                                                break
+                                            continue  # already has role from LLM
+                                        # Primary match: field_type → role from segregation fields
+                                        ft = fm_d.get("field_type", "").upper()
+                                        if ft in _type_to_role:
+                                            fm_d["entity_role"] = _type_to_role[ft]
+                                        else:
+                                            # Fallback: anchor text vs role_map names
+                                            anchor = fm_d.get("anchor_text", "")
+                                            for seg_name, seg_role in _skip_role_map.items():
+                                                if seg_name.lower() in anchor.lower() or anchor.lower() in seg_name.lower():
+                                                    fm_d["entity_role"] = seg_role
+                                                    break
 
                             # Persist routing to metadata (same as vision path)
                             doc_meta = doc.metadata_json or {}
