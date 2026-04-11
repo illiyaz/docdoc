@@ -242,7 +242,15 @@ function TaskRow({
           {task.review_task_id.slice(0, 8)}...
         </td>
         <td className="px-4 py-2.5 font-mono text-xs">
-          {task.subject_id ? `${task.subject_id.slice(0, 8)}...` : "--"}
+          {task.subject_id ? (
+            <Link
+              to={`/subjects/${task.subject_id}`}
+              className="text-blue-600 hover:underline"
+              title={task.subject_id}
+            >
+              {task.subject_id.slice(0, 8)}...
+            </Link>
+          ) : "--"}
         </td>
         {showQueue && (
           <td className="px-4 py-2.5">

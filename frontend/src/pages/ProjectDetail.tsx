@@ -1,5 +1,5 @@
 import { useState, useCallback, useMemo, useRef, useEffect } from "react"
-import { useParams, useSearchParams, Link } from "react-router-dom"
+import { useParams, useSearchParams, Link, useNavigate } from "react-router-dom"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   ArrowLeft,
@@ -2681,6 +2681,24 @@ function JobsTab({
                                 {formatJobDuration(job)}
                               </span>
                               <span className="px-4 py-2.5 text-right flex justify-end gap-1" onClick={(e) => e.stopPropagation()}>
+                                {job.status === "analyzed" && (
+                                  <Link
+                                    to={`/projects/${projectId}/segregation?job_id=${job.id}`}
+                                    className="rounded p-1 text-indigo-500 hover:bg-indigo-50 hover:text-indigo-700"
+                                    title="Review Segregation"
+                                  >
+                                    <FolderOpen className="h-3.5 w-3.5" />
+                                  </Link>
+                                )}
+                                {job.status === "completed" && (
+                                  <Link
+                                    to={`/projects/${projectId}/qa?job_id=${job.id}`}
+                                    className="rounded p-1 text-green-500 hover:bg-green-50 hover:text-green-700"
+                                    title="Review Extraction QA"
+                                  >
+                                    <CheckCircle className="h-3.5 w-3.5" />
+                                  </Link>
+                                )}
                                 {canCancel(job.status) && (
                                   <button
                                     onClick={(e) => handleCancelJob(job.id, e)}
@@ -4051,6 +4069,7 @@ const STATUS_COLORS: Record<string, string> = {
 }
 
 function SubjectsTab({ projectId }: { projectId: string }) {
+  const navigate = useNavigate()
   const BASE = import.meta.env.VITE_API_URL ?? "/api"
   const [filter, setFilter] = useState<string>("all")
 
@@ -4148,12 +4167,17 @@ function SubjectsTab({ projectId }: { projectId: string }) {
                 <th className="px-3 py-2 text-left font-medium">PII Types</th>
                 <th className="px-3 py-2 text-left font-medium">Source</th>
                 <th className="px-3 py-2 text-right font-medium">Confidence</th>
+                <th className="px-3 py-2 text-right font-medium w-10"></th>
               </tr>
             </thead>
             <tbody>
               {filtered.slice(0, 100).map((s: Record<string, unknown>) => (
-                <tr key={s.subject_id as string} className="border-t hover:bg-muted/30">
-                  <td className="px-3 py-2 font-medium">{(s.name as string) || "-"}</td>
+                <tr
+                  key={s.subject_id as string}
+                  className="border-t hover:bg-muted/30 cursor-pointer"
+                  onClick={() => navigate(`/subjects/${s.subject_id}`)}
+                >
+                  <td className="px-3 py-2 font-medium text-blue-600 hover:underline">{(s.name as string) || "-"}</td>
                   <td className="px-3 py-2 text-muted-foreground">{(s.email as string) || "-"}</td>
                   <td className="px-3 py-2">
                     <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${STATUS_COLORS[s.review_status as string] ?? "bg-gray-100"}`}>
@@ -4175,6 +4199,9 @@ function SubjectsTab({ projectId }: { projectId: string }) {
                   </td>
                   <td className="px-3 py-2 text-right">
                     {s.merge_confidence != null ? `${((s.merge_confidence as number) * 100).toFixed(0)}%` : "-"}
+                  </td>
+                  <td className="px-3 py-2 text-right">
+                    <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
                   </td>
                 </tr>
               ))}
