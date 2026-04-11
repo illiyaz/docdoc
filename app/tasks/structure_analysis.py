@@ -83,15 +83,22 @@ class StructureAnalysisTask:
             # Enrich heuristic with segregation's document type
             if (
                 heuristic_result.document_type_confidence < seg_confidence
-                or heuristic_result.document_type.value == "unknown"
+                or heuristic_result.document_type == "unknown"
             ):
-                # Map segregation string to closest DocumentType enum
-                from app.structure.models import DocumentType
-                for dt in DocumentType:
-                    if dt.value == seg_doc_type or seg_doc_type.lower() in dt.value.lower():
-                        heuristic_result.document_type = dt
+                # Map segregation string to closest valid DocumentType
+                from app.structure.models import VALID_DOCUMENT_TYPES
+                seg_lower = seg_doc_type.lower().replace(" ", "_").replace("-", "_")
+                matched = False
+                for vdt in VALID_DOCUMENT_TYPES:
+                    if vdt == seg_lower or seg_lower in vdt or vdt in seg_lower:
+                        heuristic_result.document_type = vdt
                         heuristic_result.document_type_confidence = seg_confidence
+                        matched = True
                         break
+                if not matched and seg_doc_type != "unknown":
+                    # Keep segregation's type as-is if it's reasonable
+                    heuristic_result.document_type = "unknown"
+                    heuristic_result.document_type_confidence = seg_confidence
                 heuristic_result.detected_by = "heuristic+segregation"
             logger.info(
                 "Structure analysis: skipping LLM (segregation confidence=%.2f, type=%s)",
