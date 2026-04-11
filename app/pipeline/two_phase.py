@@ -344,6 +344,25 @@ def _route_single_document(doc_info: dict, router, template_cache, builder_cls) 
             total_pages=total_pages, is_scanned=is_scanned,
         )
 
+        # --- Enrich pii_fields with segregation role_map ---
+        seg_role_map = doc_info.get("segregation_role_map", {})
+        if seg_role_map and routing.pii_fields:
+            for pf in routing.pii_fields:
+                if pf.get("role"):
+                    continue  # VisionRouter already assigned a role
+                # Match by label or field name
+                label = pf.get("label", "") or pf.get("name", "")
+                matched_role = seg_role_map.get(label)
+                if not matched_role:
+                    # Fuzzy: try partial match
+                    label_lower = label.lower()
+                    for seg_name, seg_role in seg_role_map.items():
+                        if seg_name.lower() in label_lower or label_lower in seg_name.lower():
+                            matched_role = seg_role
+                            break
+                if matched_role:
+                    pf["role"] = matched_role
+
         # --- PERSON validation ---
         try:
             from app.pipeline.person_discovery import is_likely_name, discover_person_from_text
@@ -551,6 +570,89 @@ def analyze_generator(
             db.add(doc)
             doc_records.append(doc)
         db.commit()
+
+        # --- Stage 1.7: Segregation (LLM-first file classification) ---
+        # Classifies each file as PII vs non-PII, identifies document type,
+        # field inventory, and role attribution.  Results stored on Document
+        # metadata_json for downstream stages.  Best-effort — failures
+        # don't block the pipeline.
+        segregation_results: dict[str, "SegregationResult"] = {}  # doc_id → result
+        if settings.llm_assist_enabled:
+            yield _sse({
+                "stage": "segregation", "status": "running",
+                "message": f"Classifying {len(doc_records)} file(s) with LLM...",
+                "detail": {"total": len(doc_records), "current": 0},
+            })
+            try:
+                from app.pipeline.segregation import SegregationEngine
+
+                _seg_project_id = str(project_uuid) if project_uuid else None
+                seg_engine = SegregationEngine(
+                    db_session=db,
+                    project_id=_seg_project_id,
+                )
+                seg_pii_count = 0
+                seg_non_pii_count = 0
+
+                for seg_idx, doc in enumerate(doc_records, 1):
+                    try:
+                        seg_result = seg_engine.classify(
+                            file_path=doc.source_path,
+                            document_id=str(doc.id),
+                        )
+                        if seg_result:
+                            segregation_results[str(doc.id)] = seg_result
+                            # Persist segregation result on the Document record
+                            if doc.metadata_json is None:
+                                doc.metadata_json = {}
+                            doc.metadata_json["segregation"] = seg_result.to_dict()
+                            flag_modified(doc, "metadata_json")
+
+                            if seg_result.pii_detected:
+                                seg_pii_count += 1
+                            else:
+                                seg_non_pii_count += 1
+
+                            logger.info(
+                                "Segregation: %s → pii=%s type=%s fields=%s (%.1fs)",
+                                doc.file_name, seg_result.pii_detected,
+                                seg_result.document_type,
+                                seg_result.field_inventory,
+                                seg_result.processing_time_ms / 1000,
+                            )
+                    except Exception:
+                        logger.warning("Segregation failed for %s", doc.file_name, exc_info=True)
+
+                    if seg_idx % 5 == 0 or seg_idx == len(doc_records):
+                        yield _sse({
+                            "stage": "segregation", "status": "running",
+                            "message": f"Classified {seg_idx}/{len(doc_records)} files",
+                            "detail": {"total": len(doc_records), "current": seg_idx},
+                        })
+
+                db.commit()
+                yield _sse({
+                    "stage": "segregation", "status": "complete",
+                    "message": f"Segregation: {seg_pii_count} PII, {seg_non_pii_count} non-PII",
+                    "detail": {"pii_count": seg_pii_count, "non_pii_count": seg_non_pii_count},
+                })
+            except ImportError:
+                logger.warning("Segregation engine not available — skipping")
+                yield _sse({
+                    "stage": "segregation", "status": "complete",
+                    "message": "Segregation skipped (engine not available)",
+                })
+            except Exception:
+                logger.warning("Segregation stage failed — continuing without it", exc_info=True)
+                yield _sse({
+                    "stage": "segregation", "status": "complete",
+                    "message": "Segregation skipped (error)",
+                })
+        else:
+            yield _sse({
+                "stage": "segregation", "status": "complete",
+                "message": "Segregation skipped (LLM assist disabled)",
+            })
 
         # --- Stage 2: Cataloging ---
         yield _sse({"stage": "cataloging", "status": "running", "message": "Classifying documents..."})
@@ -1018,6 +1120,20 @@ def analyze_generator(
                             routing_dict, fm_dicts = skip_result
                             schema_skipped_docs.add(doc.id)
 
+                            # Enrich field maps with segregation role_map
+                            _skip_seg = (doc.metadata_json or {}).get("segregation", {})
+                            if isinstance(_skip_seg, dict) and fm_dicts:
+                                _skip_role_map = _skip_seg.get("role_map", {})
+                                if _skip_role_map:
+                                    for fm_d in fm_dicts:
+                                        if fm_d.get("entity_role"):
+                                            continue
+                                        anchor = fm_d.get("anchor_text", "")
+                                        for seg_name, seg_role in _skip_role_map.items():
+                                            if seg_name.lower() in anchor.lower() or anchor.lower() in seg_name.lower():
+                                                fm_d["entity_role"] = seg_role
+                                                break
+
                             # Persist routing to metadata (same as vision path)
                             doc_meta = doc.metadata_json or {}
                             doc_meta["vision_routing"] = {
@@ -1061,6 +1177,12 @@ def analyze_generator(
                             })
                         else:
                             # Needs vision routing — add to work queue
+                            # Include segregation role_map if available
+                            _seg_role_map: dict[str, str] = {}
+                            _doc_seg = (doc.metadata_json or {}).get("segregation", {})
+                            if isinstance(_doc_seg, dict):
+                                _seg_role_map = _doc_seg.get("role_map", {})
+
                             work_items.append({
                                 "doc_id": doc.id,
                                 "source_path": doc.source_path,
@@ -1069,6 +1191,7 @@ def analyze_generator(
                                 "onset": onset,
                                 "total_pages": total_pages,
                                 "is_scanned": is_scanned,
+                                "segregation_role_map": _seg_role_map,
                             })
 
                     db.commit()
@@ -3722,6 +3845,160 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                 )
             except Exception:
                 logger.warning("Post-extraction gap analysis failed", exc_info=True)
+
+        # --- Stage 1.5: GapDetector + GapFiller (4-path cascade) ---
+        # Runs after ExtractionVerifier vision gap-fill.  Detects page/field/
+        # truncation gaps and attempts auto-fill through coordinate → LLM →
+        # vision → Presidio cascade.  Results persisted to JSON for QA screen.
+        try:
+            from app.pipeline.gap_detector import GapDetector
+            from app.pipeline.gap_filler import GapFiller, persist_gaps
+
+            _gap_detector = GapDetector()
+            all_detected_gaps: list = []
+
+            _update_extraction_progress(
+                db, run, stage="gap_detection",
+                message="Running automated gap detection...",
+                completed_doc_ids=completed_doc_ids,
+                total_docs=len(approved_docs), current_doc=len(approved_docs),
+                records_found=len(all_records),
+                detail={"status": "running"},
+            )
+
+            for gdoc in approved_docs:
+                if not gdoc.source_path:
+                    continue
+                gdoc_meta = dict(gdoc.metadata_json or {})
+
+                # Get field_inventory from segregation or document schema
+                field_inv: list[str] = []
+                seg_data = gdoc_meta.get("segregation", {})
+                if isinstance(seg_data, dict):
+                    field_inv = seg_data.get("field_inventory", [])
+                if not field_inv:
+                    # Fallback: from document_schema
+                    schema_data = gdoc_meta.get("document_schema", {})
+                    if isinstance(schema_data, dict):
+                        field_inv = [
+                            f.get("field_type", "")
+                            for f in schema_data.get("field_mappings", [])
+                            if f.get("field_type")
+                        ]
+
+                if not field_inv:
+                    continue  # No expectations → no gaps to detect
+
+                # Serialize records for this document
+                doc_records_for_gap = [
+                    _serialize_pii_record(r)
+                    for r in all_records
+                    if r.document_id == str(gdoc.id)
+                ]
+                if not doc_records_for_gap:
+                    continue
+
+                # Determine onset + total pages
+                onset = gdoc.sample_onset_page or 0
+                total_pg = gdoc_meta.get("page_count", 0)
+                if not total_pg and (gdoc.file_type or "").lower() in ("pdf", ".pdf", "application/pdf"):
+                    try:
+                        import fitz as _gfitz
+                        _gdoc = _gfitz.open(gdoc.source_path)
+                        total_pg = _gdoc.page_count
+                        _gdoc.close()
+                    except Exception:
+                        total_pg = max(
+                            (int(r.get("page_range", "0").split("-")[0]) for r in doc_records_for_gap),
+                            default=0,
+                        )
+
+                if total_pg <= 0:
+                    continue
+
+                doc_gaps = _gap_detector.detect(
+                    records=doc_records_for_gap,
+                    field_inventory=field_inv,
+                    total_pages=total_pg,
+                    onset_page=onset,
+                    document_id=str(gdoc.id),
+                    document_name=gdoc.file_name or gdoc.source_path,
+                )
+                all_detected_gaps.extend(doc_gaps)
+
+            # Attempt auto-fill on detected gaps (per-document)
+            if all_detected_gaps and settings.llm_assist_enabled:
+                # Group gaps by document
+                from collections import defaultdict as _dd
+                gaps_by_doc: dict[str, list] = _dd(list)
+                for gap in all_detected_gaps:
+                    gaps_by_doc[gap.document_id].append(gap)
+
+                filled_gaps: list = []
+                for doc_id, doc_gaps in gaps_by_doc.items():
+                    # Find the document
+                    _fill_doc = next((d for d in approved_docs if str(d.id) == doc_id), None)
+                    if not _fill_doc or not _fill_doc.source_path:
+                        filled_gaps.extend(doc_gaps)
+                        continue
+
+                    _fill_meta = dict(_fill_doc.metadata_json or {})
+                    _fill_fm = _fill_meta.get("vision_field_map") or _fill_meta.get("coordinate_field_map")
+                    field_map_objs = None
+                    if _fill_fm:
+                        try:
+                            from app.structure.document_schema import FieldMapping as _GapFM
+                            field_map_objs = [_GapFM(**f) if isinstance(f, dict) else f for f in _fill_fm]
+                        except Exception:
+                            pass
+
+                    ollama_client = None
+                    try:
+                        from app.llm.client import OllamaClient as _GapOllama
+                        ollama_client = _GapOllama(db_session=db, timeout_s=120)
+                    except Exception:
+                        pass
+
+                    filler = GapFiller(
+                        doc_path=_fill_doc.source_path,
+                        document_id=doc_id,
+                        field_map=field_map_objs,
+                        ollama_client=ollama_client,
+                        vision_model=vision_model if 'vision_model' in dir() else None,
+                    )
+                    doc_filled = filler.fill(doc_gaps)
+                    filled_gaps.extend(doc_filled)
+
+                all_detected_gaps = filled_gaps
+
+            # Persist to disk for QA screen
+            _gap_project_id = str(run.project_id) if run.project_id else "default"
+            _gap_job_id = str(run.id) if run.id else "unknown"
+            persist_gaps(all_detected_gaps, _gap_project_id, _gap_job_id)
+
+            _gap_filled = sum(1 for g in all_detected_gaps if g.fill_result == "filled")
+            _gap_unfilled = sum(1 for g in all_detected_gaps if g.fill_result == "unfilled")
+            _update_extraction_progress(
+                db, run, stage="gap_detection",
+                message=f"Gap detection complete: {len(all_detected_gaps)} gaps ({_gap_filled} filled, {_gap_unfilled} unfilled)",
+                completed_doc_ids=completed_doc_ids,
+                total_docs=len(approved_docs), current_doc=len(approved_docs),
+                records_found=len(all_records),
+                detail={
+                    "total_gaps": len(all_detected_gaps),
+                    "filled": _gap_filled,
+                    "unfilled": _gap_unfilled,
+                    "status": "complete",
+                },
+            )
+            logger.info(
+                "Gap detection + fill: %d total, %d filled, %d unfilled",
+                len(all_detected_gaps), _gap_filled, _gap_unfilled,
+            )
+        except ImportError:
+            logger.info("Gap detector/filler not available — skipping")
+        except Exception:
+            logger.warning("Gap detection + fill failed", exc_info=True)
 
         # --- Stage 2: Entity Resolution ---
         _update_extraction_progress(
