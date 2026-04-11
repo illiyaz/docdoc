@@ -373,7 +373,12 @@ UNDERSTAND_MULTI_PAGE_DOCUMENT = (
     "\n"
     "1. Is this a REPEATING TEMPLATE document where the same form repeats\n"
     "   for multiple individuals? If yes, identify:\n"
-    "   - How many pages per individual\n"
+    "   - How many pages per individual (IMPORTANT: if each page is a COMPLETE\n"
+    "     record for ONE individual and the next page is a DIFFERENT individual\n"
+    "     with the SAME layout, then pages_per_instance = 1. Only set it > 1\n"
+    "     when a SINGLE individual's information SPANS multiple consecutive\n"
+    "     pages, e.g., page 1 = personal details, page 2 = medical history,\n"
+    "     page 3 = insurance info, ALL for the SAME person.)\n"
     "   - Which page within the template has the person's name\n"
     "   - What PII fields appear on each page\n"
     "\n"
@@ -391,8 +396,8 @@ UNDERSTAND_MULTI_PAGE_DOCUMENT = (
     '  "template": {{\n'
     '    "is_repeating": true,\n'
     '    "template_name": "descriptive name for the repeating form",\n'
-    '    "pages_per_instance": 3,\n'
-    '    "total_instances_estimate": 2,\n'
+    '    "pages_per_instance": 1,\n'
+    '    "total_instances_estimate": 5,\n'
     '    "instance_marker": "exact heading text that appears on the FIRST page of each individual, e.g. SUMMARY OF DETAILS IN RESPECT OF",\n'
     '    "page_roles": [\n'
     '      {{\n'
@@ -425,6 +430,11 @@ UNDERSTAND_MULTI_PAGE_DOCUMENT = (
     "- If a value contains both a name and an ID number concatenated (e.g., \"Cole WI726762D\"), "
     "these are SEPARATE entities that should be extracted independently.\n"
     "- For repeating templates, describe the PATTERN (pages_per_instance), not every instance.\n"
+    "- pages_per_instance MEANS: how many pages does ONE individual's data occupy?\n"
+    "  If page 1 = Student A's report, page 2 = Student B's report (same layout),\n"
+    "  then pages_per_instance = 1, NOT 2. Count pages for ONE person only.\n"
+    "  The most common value is 1 (one page per person). Only use 2+ when a\n"
+    "  single person's information genuinely continues across multiple pages.\n"
     "- If the document is NOT a repeating template, set template to null.\n"
     "- Be precise about what IS and ISN'T PII.\n"
     "- EDUCATIONAL AND HR DOCUMENTS: School grade reports, student records, "

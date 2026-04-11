@@ -114,11 +114,18 @@ class LLMDocumentUnderstanding:
         are not persisted (useful for testing).
     """
 
-    def __init__(self, db_session: Session | None = None) -> None:
-        from app.core.settings import get_settings as _get_settings
-        settings = _get_settings()
-        understanding_model = settings.ollama_understanding_model or settings.ollama_model
-        self.client = OllamaClient(db_session=db_session, model=understanding_model)
+    def __init__(
+        self,
+        db_session: Session | None = None,
+        llm_client: OllamaClient | None = None,
+    ) -> None:
+        if llm_client is not None:
+            self.client = llm_client
+        else:
+            from app.core.settings import get_settings as _get_settings
+            settings = _get_settings()
+            understanding_model = settings.ollama_understanding_model or settings.ollama_model
+            self.client = OllamaClient(db_session=db_session, model=understanding_model)
 
     def understand(
         self,
