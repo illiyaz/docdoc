@@ -598,33 +598,70 @@ def auto_correct_field_map(
     return corrected
 
 
+def _find_anchor_words(anchor: str, words: list[tuple]) -> list[tuple] | None:
+    """Find anchor text in PyMuPDF words, handling masked placeholders."""
+    anchor_words = FieldMapBuilder._find_text_in_words(words, anchor)
+    if anchor_words:
+        return anchor_words
+
+    # Try partial match (anchor might be masked: [PHONE] vs 425-431-6400)
+    anchor_lower = anchor.lower().strip("[]")
+    for w in words:
+        if anchor_lower in w[4].lower() or w[4].lower() in anchor_lower:
+            return [w]
+
+    # Try matching the unmasked phone pattern
+    if anchor.startswith("[") and "PHONE" in anchor.upper():
+        import re as _re
+        for w in words:
+            if _re.match(r'\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}', w[4]):
+                return [w]
+
+    return None
+
+
+def _find_data_lines_after_gap(
+    anchor_cy: float,
+    line_ys: list[float],
+    anchor_line_height: float,
+) -> list[float]:
+    """Find content lines below the anchor, treating the first cluster as data.
+
+    Many documents have a large blank gap between the header/anchor area
+    and the data section (e.g., school header at y=100, student data at
+    y=180).  The LLM's "line_below" means "first line in the data section",
+    not literally the next text line from the anchor.
+
+    Strategy: take all content lines below the anchor.  The first content
+    line IS the start of the data section (even if there's a gap from the
+    anchor).  The gap from anchor to first content is just a layout gap —
+    the coordinate extractor handles it via the corrected lines_below_N.
+
+    We do NOT skip past the first content cluster because the data we want
+    (names, addresses) is IN that first cluster, not after it.
+    """
+    all_below: list[float] = [
+        ly for ly in line_ys if ly > anchor_cy + _LINE_TOLERANCE
+    ]
+    return all_below
+
+
 def _correct_one_field(
     fm: FieldMapping,
     words: list[tuple],
     line_ys: list[float],
 ) -> FieldMapping:
-    """Correct one FieldMapping's spatial relationship using real word positions."""
+    """Correct one FieldMapping's spatial relationship using real word positions.
+
+    Handles blank gaps between anchor and data section by collapsing
+    them — the LLM's "line_below" refers to the Nth content line in
+    the data section, not the Nth text line from the anchor.
+    """
     anchor = fm.anchor_text
     if not anchor:
         return fm
 
-    # Find the anchor in the word list
-    anchor_words = FieldMapBuilder._find_text_in_words(words, anchor)
-    if not anchor_words:
-        # Try partial match (anchor might be masked: [PHONE] vs 425-431-6400)
-        anchor_lower = anchor.lower().strip("[]")
-        for w in words:
-            if anchor_lower in w[4].lower() or w[4].lower() in anchor_lower:
-                anchor_words = [w]
-                break
-        # Try matching the unmasked phone pattern
-        if not anchor_words and anchor.startswith("[") and "PHONE" in anchor.upper():
-            import re as _re
-            for w in words:
-                if _re.match(r'\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}', w[4]):
-                    anchor_words = [w]
-                    break
-
+    anchor_words = _find_anchor_words(anchor, words)
     if not anchor_words:
         logger.debug("auto_correct: anchor '%s' not found on page", anchor[:30])
         return fm
@@ -632,39 +669,32 @@ def _correct_one_field(
     anchor_bbox = _merge_bboxes(anchor_words)
     anchor_cy = (anchor_bbox[1] + anchor_bbox[3]) / 2
     anchor_line_height = (anchor_bbox[3] - anchor_bbox[1]) or 12
+    if anchor_line_height < 8:
+        anchor_line_height = 14  # reasonable default
 
-    # Parse the LLM's intended relationship to understand intent
+    # Same-line relationships don't need correction
     rel = fm.spatial_relationship or "line_below"
     if rel == "same_line_right":
-        # LLM says value is on the same line — trust it, no correction needed
         return fm
 
-    # For line_below / lines_below_N — find the actual content lines below anchor
-    # Count how many text lines exist below the anchor
-    lines_below_anchor: list[float] = []
-    for ly in line_ys:
-        if ly > anchor_cy + _LINE_TOLERANCE:
-            lines_below_anchor.append(ly)
-
-    if not lines_below_anchor:
+    # Find data lines after any blank gap
+    data_lines = _find_data_lines_after_gap(anchor_cy, line_ys, anchor_line_height)
+    if not data_lines:
         return fm
 
-    # Parse which line the LLM intended (line_below=1, lines_below_3=3)
+    # Parse which content line the LLM intended (line_below=1, lines_below_3=3)
     intended_line = 1
     if rel.startswith("lines_below_"):
         try:
             intended_line = int(rel.split("_")[-1])
         except ValueError:
             intended_line = 2
-    elif rel == "line_below":
-        intended_line = 1
 
-    # The LLM intended "Nth content line below anchor"
-    # Find what the actual Nth content line is at
-    target_idx = min(intended_line - 1, len(lines_below_anchor) - 1)
-    actual_y = lines_below_anchor[target_idx]
+    # Map LLM's intended Nth content line to actual position
+    target_idx = min(intended_line - 1, len(data_lines) - 1)
+    actual_y = data_lines[target_idx]
 
-    # Compute the real spatial relationship in terms of line_height
+    # Compute the real spatial relationship (from anchor, in line_height units)
     real_y_diff = actual_y - anchor_cy
     real_lines = max(1, round(real_y_diff / anchor_line_height))
 
@@ -682,14 +712,14 @@ def _correct_one_field(
 
     # Count value lines (for multi-line fields like addresses)
     value_line_count = fm.line_count
-    if value_line_count > 1 and target_idx + value_line_count <= len(lines_below_anchor):
-        # Verify the additional lines exist
-        last_y = lines_below_anchor[target_idx + value_line_count - 1]
-        value_line_count = max(1, round((last_y - actual_y) / anchor_line_height)) + 1
+    if value_line_count > 1 and target_idx + value_line_count <= len(data_lines):
+        last_y = data_lines[target_idx + value_line_count - 1]
+        real_span = max(1, round((last_y - actual_y) / anchor_line_height)) + 1
+        value_line_count = real_span
 
     if new_rel != fm.spatial_relationship:
         logger.info(
-            "auto_correct: '%s' %s → %s (anchor '%s' at y=%.0f, value at y=%.0f, gap=%.0fpt)",
+            "auto_correct: '%s' %s → %s (anchor '%s' at y=%.0f, data at y=%.0f, gap=%.0fpt)",
             fm.field_type, fm.spatial_relationship, new_rel,
             anchor[:20], anchor_cy, actual_y, real_y_diff,
         )

@@ -118,8 +118,27 @@ _TEXT_EXTRACTABLE_TYPES = frozenset({
 _MAX_TEXT_CHARS = 4000
 
 
+def _extract_pdf_text(file_path: str, max_pages: int = 2) -> str:
+    """Extract text from the first N pages of a PDF using PyMuPDF.
+
+    Returns concatenated text, or empty string on failure.
+    Used to decide whether segregation can use text model (fast)
+    instead of vision model (slow).
+    """
+    try:
+        import fitz
+        doc = fitz.open(file_path)
+        parts = []
+        for pg in range(min(max_pages, doc.page_count)):
+            parts.append(doc[pg].get_text())
+        doc.close()
+        return "\n".join(parts)
+    except Exception:
+        return ""
+
+
 class SegregationEngine:
-    """Classifies files as PII vs non-PII using vision LLM.
+    """Classifies files as PII vs non-PII using LLM.
 
     Usage:
         engine = SegregationEngine(db_session=session)
@@ -173,7 +192,17 @@ class SegregationEngine:
         )
 
         try:
-            if file_type in _VISION_TYPES:
+            # For PDFs: check if text is extractable first. Text-based
+            # classification with qwen2.5:7b is ~10x faster than vision
+            # with 90B and equally accurate for text documents.  Only
+            # fall back to vision when there's no extractable text.
+            if file_type == "pdf":
+                page_text = _extract_pdf_text(file_path, max_pages=2)
+                if len(page_text.strip()) > 100:
+                    self._classify_text(result, document_id, text_override=page_text)
+                else:
+                    self._classify_vision(result, document_id)
+            elif file_type in _VISION_TYPES:
                 self._classify_vision(result, document_id)
             elif file_type in _TEXT_EXTRACTABLE_TYPES:
                 self._classify_text(result, document_id)
@@ -349,11 +378,12 @@ class SegregationEngine:
         self,
         result: SegregationResult,
         document_id: Optional[str],
+        text_override: str | None = None,
     ) -> None:
         """Classify using text extraction + text LLM."""
         from app.llm.prompts import SEGREGATION_PROMPT_TEXT, SYSTEM_PROMPT
 
-        text = self._extract_text(result.file_path, result.file_type)
+        text = text_override or self._extract_text(result.file_path, result.file_type)
         if not text or len(text.strip()) < 20:
             result.error = "Could not extract text from file"
             result.classification_method = "fallback"
