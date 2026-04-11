@@ -496,6 +496,7 @@ class LLMTemplateExtractor:
         data: dict,
         doc_id: str,
         instance_pages: list[int],
+        entity_role: str | None = None,
     ) -> PIIRecord | None:
         """Convert a parsed JSON dict to a PIIRecord.
 
@@ -591,6 +592,7 @@ class LLMTemplateExtractor:
             page_or_sheet=instance_pages[0] if instance_pages else 0,
             page_range=page_range,
             entity_types_found=tuple(sorted(set(entity_types_found))),
+            entity_role=entity_role,
         )
 
     # ------------------------------------------------------------------

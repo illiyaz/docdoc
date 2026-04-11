@@ -208,6 +208,9 @@ class FieldMapBuilder:
         # Step 6: bounding box of the sample value
         value_bbox = _merge_bboxes(value_words)
 
+        # Step 7: entity_role from vision pii_field or segregation data
+        entity_role = pii_field.get("role")
+
         return FieldMapping(
             field_type=field_type,
             anchor_text=anchor_text,
@@ -216,6 +219,7 @@ class FieldMapBuilder:
             sample_bbox=list(value_bbox),
             line_count=line_count,
             skip_pattern=skip_pattern,
+            entity_role=entity_role,
         )
 
     # ------------------------------------------------------------------

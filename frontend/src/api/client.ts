@@ -1333,3 +1333,314 @@ export function testExtract(body: {
     body: JSON.stringify(body),
   })
 }
+
+// ---------------------------------------------------------------------------
+// Segregation Review (Step 30e-3)
+// ---------------------------------------------------------------------------
+
+export interface SegregationGroup {
+  group_id: string
+  group_name: string
+  document_type: string
+  is_pii: boolean
+  file_paths: string[]
+  file_count: number
+  sample_file_paths: string[]
+  field_inventory: string[]
+  role_summary: Record<string, string>
+  primary_subject_type: string | null
+  confidence_avg: number
+  confidence_min: number
+  status: string  // "pending_review" | "approved" | "rejected"
+  issuing_entities: string[]
+  reviewed_by?: string
+  reviewed_at?: string
+  review_rationale?: string
+}
+
+export interface SegregationGroupsResponse {
+  job_id: string
+  groups: SegregationGroup[]
+  summary: {
+    total_groups: number
+    pending_review: number
+    approved: number
+    rejected: number
+    total_files: number
+  }
+}
+
+export interface RunSegregationResponse {
+  status: string
+  job_id: string
+  total_files: number
+  total_groups: number
+  pii_groups: number
+  non_pii_groups: number
+  groups: SegregationGroup[]
+}
+
+export function getSegregationGroups(
+  projectId: string,
+  jobId?: string,
+): Promise<SegregationGroupsResponse> {
+  const params = new URLSearchParams()
+  if (jobId) params.set("job_id", jobId)
+  const qs = params.toString()
+  return api(`/projects/${projectId}/segregation/groups${qs ? `?${qs}` : ""}`)
+}
+
+export function runSegregation(
+  projectId: string,
+  body: { job_id: string; sample_size?: number },
+): Promise<RunSegregationResponse> {
+  return api(`/projects/${projectId}/segregation/run`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  })
+}
+
+export function approveSegregationGroup(
+  projectId: string,
+  groupId: string,
+  body: { reviewer_id?: string; rationale?: string },
+  jobId?: string,
+): Promise<{ status: string; group_id: string }> {
+  const params = new URLSearchParams()
+  if (jobId) params.set("job_id", jobId)
+  const qs = params.toString()
+  return api(`/projects/${projectId}/segregation/groups/${groupId}/approve${qs ? `?${qs}` : ""}`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  })
+}
+
+export function rejectSegregationGroup(
+  projectId: string,
+  groupId: string,
+  body: { reviewer_id?: string; rationale?: string },
+  jobId?: string,
+): Promise<{ status: string; group_id: string }> {
+  const params = new URLSearchParams()
+  if (jobId) params.set("job_id", jobId)
+  const qs = params.toString()
+  return api(`/projects/${projectId}/segregation/groups/${groupId}/reject${qs ? `?${qs}` : ""}`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  })
+}
+
+export function reclassifySegregationGroup(
+  projectId: string,
+  groupId: string,
+  body: {
+    reviewer_id?: string
+    new_document_type?: string
+    new_is_pii?: boolean
+    rationale?: string
+  },
+  jobId?: string,
+): Promise<{ status: string; group_id: string }> {
+  const params = new URLSearchParams()
+  if (jobId) params.set("job_id", jobId)
+  const qs = params.toString()
+  return api(`/projects/${projectId}/segregation/groups/${groupId}/reclassify${qs ? `?${qs}` : ""}`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  })
+}
+
+export function approveAllSegregationGroups(
+  projectId: string,
+  body: { reviewer_id?: string; rationale?: string },
+  jobId?: string,
+): Promise<{ approved: number; total: number }> {
+  const params = new URLSearchParams()
+  if (jobId) params.set("job_id", jobId)
+  const qs = params.toString()
+  return api(`/projects/${projectId}/segregation/approve-all${qs ? `?${qs}` : ""}`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  })
+}
+
+// ---------------------------------------------------------------------------
+// Extraction Gaps (Step 30e-6)
+// ---------------------------------------------------------------------------
+
+export interface ExtractionGap {
+  document_id: string
+  document_name: string
+  page_num: number
+  gap_type: "empty_page" | "missing_field" | "truncated" | "stitching"
+  severity: "high" | "medium" | "low"
+  expected_field: string | null
+  actual_fields: string[]
+  context: string | null
+  fill_attempted: boolean
+  fill_method: string | null
+  fill_result: "pending" | "filled" | "unfilled" | "not_applicable"
+  filled_value_masked: string | null
+  filled_by: "system" | "manual"
+}
+
+export interface GapListResponse {
+  project_id: string
+  job_id: string
+  total: number
+  gaps: ExtractionGap[]
+}
+
+export interface GapSummaryData {
+  total: number
+  filled: number
+  unfilled: number
+  pending: number
+  not_applicable: number
+  manually_resolved: number
+  high_severity_unfilled: number
+}
+
+export interface GapSummaryResponse {
+  project_id: string
+  job_id: string
+  summary: GapSummaryData
+}
+
+export function getExtractionGaps(
+  projectId: string,
+  jobId: string,
+  filters?: { severity?: string; gap_type?: string; fill_result?: string },
+): Promise<GapListResponse> {
+  const params = new URLSearchParams({ job_id: jobId })
+  if (filters?.severity) params.set("severity", filters.severity)
+  if (filters?.gap_type) params.set("gap_type", filters.gap_type)
+  if (filters?.fill_result) params.set("fill_result", filters.fill_result)
+  return api(`/projects/${projectId}/gaps/?${params.toString()}`)
+}
+
+export function getGapSummary(
+  projectId: string,
+  jobId: string,
+): Promise<GapSummaryResponse> {
+  return api(`/projects/${projectId}/gaps/summary?job_id=${jobId}`)
+}
+
+export function resolveGap(
+  projectId: string,
+  gapIndex: number,
+  body: { value?: string; action: string; reviewer_id?: string },
+  jobId: string,
+): Promise<{ status: string; gap_index: number; action: string; gap: ExtractionGap }> {
+  return api(`/projects/${projectId}/gaps/${gapIndex}/resolve?job_id=${jobId}`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  })
+}
+
+// ---------------------------------------------------------------------------
+// Extraction QA (Step 30e-7)
+// ---------------------------------------------------------------------------
+
+export interface QASample {
+  record_id: string
+  document_id: string
+  document_name: string
+  page_num: number
+  category: "largest_group" | "gap_filled" | "merged" | "cross_type" | "edge_case"
+  category_reason: string
+  extraction_method: string
+  fields: Record<string, string>
+  merge_group_id: string | null
+  merge_confidence: number | null
+  merge_explanation: string | null
+  gap_type: string | null
+  gap_fill_method: string | null
+}
+
+export interface QASummaryResponse {
+  project_id: string
+  job_id: string
+  status: "pending_review" | "approved"
+  approved_at: string | null
+  approved_by: string | null
+  stats: {
+    total_notification_subjects: number
+    total_documents: number
+    total_pages: number
+    completeness_pct: number
+  }
+  gaps: GapSummaryData
+  per_document: Array<{
+    document_name: string
+    record_count: number
+    page_count: number
+  }>
+}
+
+export interface QASamplesResponse {
+  project_id: string
+  job_id: string
+  total_samples: number
+  samples: QASample[]
+}
+
+export interface QAApproveResponse {
+  status: "approved" | "blocked"
+  reason?: string
+  approved_at?: string
+  approved_by?: string
+  gap_summary?: Record<string, number>
+  unresolved_gaps?: ExtractionGap[]
+}
+
+export function getQASummary(
+  projectId: string,
+  jobId: string,
+): Promise<QASummaryResponse> {
+  return api(`/projects/${projectId}/qa/summary?job_id=${jobId}`)
+}
+
+export function getQASamples(
+  projectId: string,
+  jobId: string,
+  maxSamples?: number,
+): Promise<QASamplesResponse> {
+  const params = new URLSearchParams({ job_id: jobId })
+  if (maxSamples) params.set("max_samples", String(maxSamples))
+  return api(`/projects/${projectId}/qa/samples?${params.toString()}`)
+}
+
+export function getQAGaps(
+  projectId: string,
+  jobId: string,
+  filters?: { status?: string; severity?: string },
+): Promise<GapListResponse> {
+  const params = new URLSearchParams({ job_id: jobId })
+  if (filters?.status) params.set("status", filters.status)
+  if (filters?.severity) params.set("severity", filters.severity)
+  return api(`/projects/${projectId}/qa/gaps?${params.toString()}`)
+}
+
+export function resolveQAGap(
+  projectId: string,
+  gapIndex: number,
+  body: { value?: string; action: string; reviewer_id?: string; notes?: string },
+  jobId: string,
+): Promise<{ status: string; gap_index: number; action: string; gap: ExtractionGap }> {
+  return api(`/projects/${projectId}/qa/gaps/${gapIndex}/resolve?job_id=${jobId}`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  })
+}
+
+export function approveQA(
+  projectId: string,
+  body: { reviewer_id?: string; rationale?: string },
+  jobId: string,
+): Promise<QAApproveResponse> {
+  return api(`/projects/${projectId}/qa/approve?job_id=${jobId}`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  })
+}

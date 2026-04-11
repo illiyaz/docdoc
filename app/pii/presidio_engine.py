@@ -114,6 +114,7 @@ class DetectionResult:
     geography: str
     regulatory_framework: str
     extraction_layer: str = "layer_1_pattern"
+    entity_role: str | None = None  # "primary_subject", "secondary_contact", "institutional", "provider"
     needs_layer2: bool = field(default=False, init=False)
 
     def __post_init__(self) -> None:

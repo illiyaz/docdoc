@@ -716,6 +716,12 @@ class CoordinateExtractor:
                 fields["raw_phone"] = None
 
             if success and raw_name and isinstance(raw_name, str):
+                # Derive entity_role from the PERSON field in the field map
+                _coord_role = None
+                for _fm in self.field_map:
+                    if _fm.field_type.upper() in ("PERSON", "PERSON_NAME"):
+                        _coord_role = getattr(_fm, "entity_role", None)
+                        break
                 rec = PIIRecord(
                     record_id=str(uuid4()),
                     entity_type="PERSON",
@@ -729,6 +735,7 @@ class CoordinateExtractor:
                     source_document_id=self.doc_id,
                     page_range=str(page_num + 1),
                     entity_types_found=tuple(entity_types_found),
+                    entity_role=_coord_role,
                 )
                 records.append(rec)
             else:

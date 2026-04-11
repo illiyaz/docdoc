@@ -262,6 +262,7 @@ def _try_schema_skip(schema, doc_total_pages: int = 0):
                 "sample_bbox": getattr(fm, "sample_bbox", []),
                 "line_count": getattr(fm, "line_count", 1),
                 "skip_pattern": getattr(fm, "skip_pattern", None),
+                "entity_role": getattr(fm, "entity_role", None),
             }
             for fm in field_map
         ]
@@ -405,6 +406,7 @@ def _route_single_document(doc_info: dict, router, template_cache, builder_cls) 
                     "sample_bbox": fm.sample_bbox,
                     "line_count": fm.line_count,
                     "skip_pattern": fm.skip_pattern,
+                    "entity_role": getattr(fm, "entity_role", None),
                 }
                 for fm in field_map
             ]

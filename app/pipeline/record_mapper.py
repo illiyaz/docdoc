@@ -265,6 +265,9 @@ def detection_to_pii_record(
     elif et.upper() in _GOV_ID_FIELD_TYPES:
         raw_government_id = detected_text
 
+    # Copy entity_role from DetectionResult if available
+    entity_role = getattr(det, "entity_role", None)
+
     return PIIRecord(
         record_id=str(uuid4()),
         entity_type=et,
@@ -279,6 +282,7 @@ def detection_to_pii_record(
         page_or_sheet=page,
         page_range=str(int(page) + 1) if isinstance(page, (int, float)) else str(page),
         entity_types_found=(et,),
+        entity_role=entity_role,
     )
 
 
@@ -428,6 +432,14 @@ def build_composite_record(
         d.entity_type for d in detections if d.entity_type
     )))
 
+    # Derive consensus entity_role from detections (majority vote, prefer non-None)
+    role_counts: dict[str, int] = {}
+    for d in detections:
+        role = getattr(d, "entity_role", None)
+        if role:
+            role_counts[role] = role_counts.get(role, 0) + 1
+    composite_role = max(role_counts, key=role_counts.get) if role_counts else None  # type: ignore[arg-type]
+
     return PIIRecord(
         record_id=str(uuid4()),
         entity_type=entity_type,
@@ -442,6 +454,7 @@ def build_composite_record(
         page_or_sheet=page,
         page_range=page_range_str,
         entity_types_found=all_entity_types,
+        entity_role=composite_role,
     )
 
 

@@ -573,6 +573,110 @@ UNDERSTAND_DOCUMENT_VISION = (
 )
 
 # ---------------------------------------------------------------------------
+# SEGREGATION — LLM-first file classification (Step 30e)
+# ---------------------------------------------------------------------------
+# Vision prompt: sent with page 1 (and optionally page 2) as image.
+# Returns: PII yes/no, document type, field inventory, role attribution.
+# One call per file, ~2-3 seconds.
+
+SEGREGATION_PROMPT_VISION = (
+    "You are a document classification assistant for a regulatory breach "
+    "notification team.  Analyze the document page image and answer:\n\n"
+    "1. Does this document contain **personally identifiable information** "
+    "(PII) about individuals?  PII includes: names, SSNs, dates of birth, "
+    "addresses, phone numbers, email addresses, medical record numbers, "
+    "insurance IDs, bank account numbers, driver license numbers, passport "
+    "numbers, student IDs, or any data that identifies a specific person.\n\n"
+    "2. What **type** of document is this?  Examples: medical_form, "
+    "billing_statement, loan_application, tax_form, pay_stub, "
+    "insurance_claim, school_record, shipping_document, invoice, "
+    "correspondence, legal_filing, report, spreadsheet_export, other.\n\n"
+    "3. List every **PII field** visible on the page, with role attribution.  "
+    "For each field, indicate whether it belongs to the **primary_subject** "
+    "(the person this record is about — patient, student, employee, "
+    "account holder) or a **secondary_contact** (parent, guardian, employer, "
+    "witness, emergency contact, spouse, provider, institution).\n\n"
+    "4. If the document is a **commercial/business** document with only "
+    "company names, product serial numbers, or shipping references (no "
+    "individual person PII), set pii to false.\n\n"
+    "IMPORTANT: Serial numbers, item numbers, barcodes, purchase order "
+    "numbers, and tracking numbers are NOT PII.  Company names and business "
+    "addresses are NOT PII unless they identify an individual person.\n\n"
+    "File name: {file_name}\n"
+    "File type: {file_type}\n"
+    "Total pages: {total_pages}\n\n"
+    "Respond with ONLY this JSON (no markdown, no commentary):\n"
+    '{{\n'
+    '  "pii": true/false,\n'
+    '  "confidence": 0.0-1.0,\n'
+    '  "document_type": "string",\n'
+    '  "document_subtype": "string or null",\n'
+    '  "issuing_entity": "organization name or null",\n'
+    '  "fields": [\n'
+    '    {{\n'
+    '      "name": "field label as shown on document",\n'
+    '      "type": "PERSON|US_SSN|DATE_OF_BIRTH|LOCATION|PHONE_NUMBER|'
+    'EMAIL_ADDRESS|MEDICAL_RECORD|INSURANCE_ID|BANK_ACCOUNT|'
+    'US_DRIVER_LICENSE|US_PASSPORT|STUDENT_ID|EMPLOYER_ID|OTHER_ID",\n'
+    '      "role": "primary_subject|secondary_contact",\n'
+    '      "value_visible": true/false\n'
+    '    }}\n'
+    '  ],\n'
+    '  "primary_subject_type": "patient|student|employee|account_holder|'
+    'applicant|claimant|taxpayer|other|null",\n'
+    '  "summary": "one-sentence description of what this document is"\n'
+    '}}'
+)
+
+
+SEGREGATION_PROMPT_TEXT = (
+    "You are a document classification assistant for a regulatory breach "
+    "notification team.  Analyze the following document text and answer:\n\n"
+    "1. Does this document contain **personally identifiable information** "
+    "(PII) about individuals?  PII includes: names, SSNs, dates of birth, "
+    "addresses, phone numbers, email addresses, medical record numbers, "
+    "insurance IDs, bank account numbers, driver license numbers, passport "
+    "numbers, student IDs, or any data that identifies a specific person.\n\n"
+    "2. What **type** of document is this?\n\n"
+    "3. List every **PII field** visible, with role attribution: "
+    "**primary_subject** (the person this record is about) or "
+    "**secondary_contact** (parent, guardian, employer, witness, etc.).\n\n"
+    "4. If the document is a **commercial/business** document with only "
+    "company names, product numbers, or shipping references (no individual "
+    "person PII), set pii to false.\n\n"
+    "IMPORTANT: Serial numbers, item numbers, barcodes, purchase order "
+    "numbers, and tracking numbers are NOT PII.\n\n"
+    "File name: {file_name}\n"
+    "File type: {file_type}\n"
+    "Total pages: {total_pages}\n\n"
+    "--- DOCUMENT TEXT (first {char_count} characters) ---\n"
+    "{document_text}\n"
+    "--- END ---\n\n"
+    "Respond with ONLY this JSON (no markdown, no commentary):\n"
+    '{{\n'
+    '  "pii": true/false,\n'
+    '  "confidence": 0.0-1.0,\n'
+    '  "document_type": "string",\n'
+    '  "document_subtype": "string or null",\n'
+    '  "issuing_entity": "organization name or null",\n'
+    '  "fields": [\n'
+    '    {{\n'
+    '      "name": "field label as shown on document",\n'
+    '      "type": "PERSON|US_SSN|DATE_OF_BIRTH|LOCATION|PHONE_NUMBER|'
+    'EMAIL_ADDRESS|MEDICAL_RECORD|INSURANCE_ID|BANK_ACCOUNT|'
+    'US_DRIVER_LICENSE|US_PASSPORT|STUDENT_ID|EMPLOYER_ID|OTHER_ID",\n'
+    '      "role": "primary_subject|secondary_contact",\n'
+    '      "value_visible": true/false\n'
+    '    }}\n'
+    '  ],\n'
+    '  "primary_subject_type": "patient|student|employee|account_holder|'
+    'applicant|claimant|taxpayer|other|null",\n'
+    '  "summary": "one-sentence description of what this document is"\n'
+    '}}'
+)
+
+
+# ---------------------------------------------------------------------------
 # Template registry for programmatic access
 # ---------------------------------------------------------------------------
 
@@ -585,4 +689,6 @@ PROMPT_TEMPLATES: dict[str, str] = {
     "understand_document": UNDERSTAND_DOCUMENT,
     "understand_multi_page_document": UNDERSTAND_MULTI_PAGE_DOCUMENT,
     "understand_document_vision": UNDERSTAND_DOCUMENT_VISION,
+    "segregation_vision": SEGREGATION_PROMPT_VISION,
+    "segregation_text": SEGREGATION_PROMPT_TEXT,
 }

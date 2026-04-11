@@ -21,6 +21,8 @@ import { JobSubmit } from "@/pages/JobSubmit"
 import { Settings } from "@/pages/Settings"
 import { Projects } from "@/pages/Projects"
 import { ProjectDetail } from "@/pages/ProjectDetail"
+import { SegregationReview } from "@/pages/SegregationReview"
+import { ExtractionQA } from "@/pages/ExtractionQA"
 
 // ---------------------------------------------------------------------------
 // Job ID context — shared across pages so SubjectDetail can fetch results
@@ -187,6 +189,8 @@ export default function App() {
                   <Route path="/" element={<Dashboard />} />
                   <Route path="/projects" element={<Projects />} />
                   <Route path="/projects/:id" element={<ProjectDetail />} />
+                  <Route path="/projects/:id/segregation" element={<SegregationReview />} />
+                  <Route path="/projects/:id/qa" element={<ExtractionQA />} />
                   <Route path="/review" element={<ReviewQueue />} />
                   <Route path="/subjects/:id" element={<SubjectDetail />} />
                   <Route path="/jobs" element={<JobSubmit />} />

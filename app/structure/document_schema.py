@@ -86,6 +86,7 @@ class FieldMapping:
     sample_bbox: list[float] = field(default_factory=list)  # [x0, y0, x1, y1] from sample page (reference only)
     line_count: int = 1                 # for multi-line fields like addresses
     skip_pattern: str | None = None     # text to skip (e.g., client code in parens)
+    entity_role: str | None = None      # "primary_subject", "secondary_contact", "institutional", "provider"
 
 
 @dataclass

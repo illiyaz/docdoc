@@ -29,6 +29,9 @@ from app.api.routes.protocols import router as protocols_router
 from app.api.routes.documents import router as documents_router
 from app.api.routes.intelligence import router as intelligence_router
 from app.api.routes.notifications import router as notifications_router
+from app.api.routes.segregation import router as segregation_router
+from app.api.routes.gaps import router as gaps_router
+from app.api.routes.extraction_qa import router as extraction_qa_router
 from app.api.routes.review import router as review_router
 from app.core.logging import setup_logging
 from app.core.settings import get_settings
@@ -136,3 +139,6 @@ app.include_router(audit_router, prefix="/api")
 app.include_router(dashboard_router, prefix="/api")
 app.include_router(diagnostic_router, prefix="/api")
 app.include_router(intelligence_router, prefix="/api")
+app.include_router(segregation_router, prefix="/api")
+app.include_router(gaps_router, prefix="/api")
+app.include_router(extraction_qa_router, prefix="/api")
