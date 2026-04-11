@@ -690,48 +690,128 @@ def main():
               f"{l.pages_per_instance if l else '-':>5} {fm:>3} {llm_time:>6} "
               f"{'***' if drift_count > 0 else 'OK':>7}")
 
-    # Save results
+    # Save results — grouped by file, with model comparison
     output_path = "output/llm_judgment_results.json"
     os.makedirs("output", exist_ok=True)
-    output = {
-        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
-        "files_tested": len(files),
-        "total_drifts": total_drifts,
-        "results": [
-            {
-                "file": r["file"],
-                "code": {
-                    "layout_type": r["code"].layout_type,
-                    "layout_confidence": r["code"].layout_confidence,
-                    "pages_per_instance": r["code"].pages_per_instance,
-                    "records_per_page": r["code"].records_per_page,
-                    "is_tabular": r["code"].is_tabular,
-                    "field_types": r["code"].field_types_detected,
-                    "has_text": r["code"].has_text,
-                    "total_pages": r["code"].total_pages,
+
+    # Group results by file for easy comparison
+    by_file: dict[str, dict] = {}
+    for r in all_results:
+        fname = r["file"]
+        if fname not in by_file:
+            c = r["code"]
+            by_file[fname] = {
+                "file": fname,
+                "code_judgment": {
+                    "total_pages": c.total_pages,
+                    "has_text": c.has_text,
+                    "text_ratio": round(c.text_ratio, 2),
+                    "avg_chars_per_page": round(c.avg_chars_per_page),
+                    "layout_type": c.layout_type,
+                    "layout_confidence": round(c.layout_confidence, 2),
+                    "pages_per_instance": c.pages_per_instance,
+                    "records_per_page": c.records_per_page,
+                    "is_tabular": c.is_tabular,
+                    "header_consistent": c.header_consistent,
+                    "common_header": c.common_header[:80] if c.common_header else None,
+                    "field_types_detected": c.field_types_detected,
+                    "sample_fields": c.sample_fields,
+                    "analysis_time_s": round(c.analysis_time_s, 2),
                 },
-                "llm": {
-                    "layout_type": r["llm"].layout_type,
-                    "layout_confidence": r["llm"].layout_confidence,
-                    "layout_field_map_count": r["llm"].layout_field_map_count,
-                    "pages_per_instance": r["llm"].pages_per_instance,
-                    "records_per_page": r["llm"].records_per_page,
-                    "is_tabular": r["llm"].is_tabular,
-                    "document_type": r["llm"].document_type,
-                    "schema_confidence": r["llm"].schema_confidence,
-                } if r["llm"] else None,
+                "llm_judgments": {},
+            }
+
+        l = r.get("llm")
+        if l is not None:
+            model_key = r.get("model", "default")
+            by_file[fname]["llm_judgments"][model_key] = {
+                "model": l.model,
+                "document_type": l.document_type,
+                "document_subtype": l.document_subtype,
+                "layout_type": l.layout_type,
+                "layout_confidence": round(l.layout_confidence, 2),
+                "layout_field_map_count": l.layout_field_map_count,
+                "layout_field_map_types": l.layout_field_map_types,
+                "is_tabular": l.is_tabular,
+                "records_per_page": l.records_per_page,
+                "pages_per_instance": l.pages_per_instance,
+                "template_name": l.template_name,
+                "schema_confidence": round(l.schema_confidence, 2),
+                "field_map_types": l.field_map_types,
+                "people_count": l.people_count,
+                "llm_time_s": round(l.llm_time_s, 1),
+                "error": l.error,
                 "drifts": [
                     {"field": d.field, "code": d.code_value, "llm": d.llm_value,
                      "severity": d.severity, "note": d.note}
                     for d in r["drifts"]
                 ],
+                "drift_summary": {
+                    "critical": len([d for d in r["drifts"] if d.severity == "CRITICAL"]),
+                    "warning": len([d for d in r["drifts"] if d.severity == "WARNING"]),
+                    "info": len([d for d in r["drifts"] if d.severity == "INFO"]),
+                },
             }
-            for r in all_results
-        ],
+
+    # Build model leaderboard (when comparing models)
+    model_scores: dict[str, dict] = defaultdict(lambda: {"files": 0, "critical": 0, "warning": 0, "time_s": 0})
+    for r in all_results:
+        l = r.get("llm")
+        if l is None:
+            continue
+        model_key = r.get("model", "default")
+        model_scores[model_key]["files"] += 1
+        model_scores[model_key]["time_s"] += l.llm_time_s
+        for d in r["drifts"]:
+            if d.severity == "CRITICAL":
+                model_scores[model_key]["critical"] += 1
+            elif d.severity == "WARNING":
+                model_scores[model_key]["warning"] += 1
+
+    if len(model_scores) > 1:
+        print(f"\n{'─' * 70}")
+        print("MODEL LEADERBOARD")
+        print(f"{'─' * 70}")
+        print(f"{'Model':<30} {'Files':>5} {'Critical':>8} {'Warning':>8} {'Avg Time':>10}")
+        print("─" * 65)
+        for model_key in sorted(model_scores, key=lambda m: (model_scores[m]["critical"], model_scores[m]["warning"])):
+            ms = model_scores[model_key]
+            avg_time = ms["time_s"] / ms["files"] if ms["files"] else 0
+            print(f"{model_key:<30} {ms['files']:>5} {ms['critical']:>8} {ms['warning']:>8} {avg_time:>9.1f}s")
+
+    output = {
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "files_tested": len(files),
+        "models_tested": list(model_scores.keys()) if model_scores else [],
+        "total_drifts": total_drifts,
+        "model_leaderboard": {
+            k: {"files": v["files"], "critical": v["critical"], "warning": v["warning"],
+                "avg_time_s": round(v["time_s"] / v["files"], 1) if v["files"] else 0}
+            for k, v in model_scores.items()
+        },
+        "files": list(by_file.values()),
     }
     with open(output_path, "w") as f:
         json.dump(output, f, indent=2, default=str)
     print(f"\nResults saved to: {output_path}")
+
+    # Also save CSV for quick spreadsheet analysis
+    csv_path = "output/llm_judgment_results.csv"
+    with open(csv_path, "w") as f:
+        f.write("file,model,total_pages,code_layout,llm_layout,code_ppi,llm_ppi,code_rpp,llm_rpp,"
+                "code_tabular,llm_tabular,field_map_count,llm_time_s,critical_drifts,warning_drifts\n")
+        for r in all_results:
+            c = r["code"]
+            l = r.get("llm")
+            if l is None:
+                continue
+            crit = len([d for d in r["drifts"] if d.severity == "CRITICAL"])
+            warn = len([d for d in r["drifts"] if d.severity == "WARNING"])
+            f.write(f"{r['file']},{r.get('model','default')},{c.total_pages},"
+                    f"{c.layout_type},{l.layout_type},{c.pages_per_instance},{l.pages_per_instance},"
+                    f"{c.records_per_page},{l.records_per_page},{c.is_tabular},{l.is_tabular},"
+                    f"{l.layout_field_map_count},{l.llm_time_s:.1f},{crit},{warn}\n")
+    print(f"CSV saved to: {csv_path}")
 
 
 if __name__ == "__main__":
