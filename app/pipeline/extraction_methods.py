@@ -199,13 +199,27 @@ class LLMTemplateMethod(ExtractionMethod):
         schema: DocumentSchema | None = None,
         **kwargs: Any,
     ) -> list[PIIRecord]:
+        if schema is None:
+            return []
         from app.structure.llm_template_extractor import LLMTemplateExtractor
 
+        # Build page_texts dict from blocks (LLMTemplateExtractor expects this)
         page_set = set(pages)
-        sample_blocks = [b for b in blocks if b.page_or_sheet in page_set]
+        page_texts: dict[int, str] = {}
+        for b in blocks:
+            if b.page_or_sheet in page_set and isinstance(b.page_or_sheet, int):
+                if b.page_or_sheet not in page_texts:
+                    page_texts[b.page_or_sheet] = ""
+                page_texts[b.page_or_sheet] += b.text + "\n"
+
+        if not page_texts:
+            return []
 
         extractor = LLMTemplateExtractor(self._llm_client)
-        return extractor.extract_from_blocks(sample_blocks, schema=schema)
+        doc_id = kwargs.get("doc_id", profile.source_path or "unknown")
+        return extractor.extract_all_instances(
+            schema, page_texts, doc_id, len(page_texts),
+        )
 
 
 class LLMTableMethod(ExtractionMethod):
@@ -261,7 +275,8 @@ class VisionMethod(ExtractionMethod):
 
         extractor = VisionDocumentExtractor(self._llm_client)
         int_pages = [p for p in pages if isinstance(p, int)]
-        return extractor.extract_pages(self._doc_path, int_pages)
+        doc_id = kwargs.get("doc_id", profile.source_path or "unknown")
+        return extractor.extract_pages(self._doc_path, int_pages, doc_id, schema=schema)
 
 
 class OCRPresidioMethod(ExtractionMethod):

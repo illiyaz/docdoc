@@ -2453,8 +2453,27 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                 # A0: FEEDBACK-DRIVEN EXTRACTION SELECTOR (feature-flagged)
                 # When enabled, replaces the Path 0/1/2/3 chain with a
                 # sample-test-scale loop.  Set USE_EXTRACTION_SELECTOR=true.
+                #
+                # IMPORTANT: Skip the selector when vision routing already
+                # recommends "coordinate" and we have a field map — coordinate
+                # extraction is faster and more reliable than competing methods.
                 # ============================================================
                 _use_selector = settings.use_extraction_selector
+                _doc_meta_pre = doc.metadata_json or {}
+                _vr_pre = _doc_meta_pre.get("vision_routing", {})
+                _recommended = _vr_pre.get("recommended_path", "")
+                _has_field_map = bool(
+                    _doc_meta_pre.get("auditor_layout_field_map")
+                    or _vr_pre.get("field_map")
+                    or (_doc_meta_pre.get("document_schema", {}) or {}).get("field_map")
+                )
+                if _use_selector and _recommended == "coordinate" and _has_field_map:
+                    logger.info(
+                        "[%d/%d] SELECTOR SKIPPED for %s — vision routing recommends coordinate with field map",
+                        i, len(approved_docs), doc.file_name,
+                    )
+                    _use_selector = False
+
                 if _use_selector:
                     try:
                         from app.pipeline.extraction_selector import (
@@ -3784,7 +3803,7 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                         continue
                     if (doc.file_type or "").lower() not in ("pdf", ".pdf", "application/pdf"):
                         continue
-                    doc_records = [r for r in all_records if r.document_id == str(doc.id)]
+                    doc_records = [r for r in all_records if r.source_document_id == str(doc.id)]
                     if not doc_records:
                         continue
                     try:
@@ -3810,7 +3829,7 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                     gap_client = OllamaClient(db_session=db, timeout_s=300)
                     if gap_client.is_vision_available(model_override=vision_model):
                         try:
-                            doc_records = [r for r in all_records if r.document_id == str(doc.id)]
+                            doc_records = [r for r in all_records if r.source_document_id == str(doc.id)]
                             updated_records, gf_result = verifier.vision_gap_fill(
                                 records=doc_records,
                                 doc_path=doc.source_path,
@@ -3821,7 +3840,7 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                             )
                             # Replace records in all_records
                             for j, r in enumerate(all_records):
-                                if r.document_id == str(doc.id):
+                                if r.source_document_id == str(doc.id):
                                     for ur in updated_records:
                                         if getattr(ur, "page_range", None) == getattr(r, "page_range", None) and ur.raw_name == r.raw_name:
                                             all_records[j] = ur
@@ -3893,7 +3912,7 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                 doc_records_for_gap = [
                     _serialize_pii_record(r)
                     for r in all_records
-                    if r.document_id == str(gdoc.id)
+                    if r.source_document_id == str(gdoc.id)
                 ]
                 if not doc_records_for_gap:
                     continue
