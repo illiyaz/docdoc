@@ -691,7 +691,16 @@ def main():
               f"{'***' if drift_count > 0 else 'OK':>7}")
 
     # Save results — grouped by file, with model comparison
-    output_path = "output/llm_judgment_results.json"
+    # Derive output name from input path so different runs don't overwrite each other
+    input_path = Path(args.path)
+    if input_path.is_dir():
+        run_label = input_path.name  # e.g. "taxonomy_samples" or "testingsamples"
+    else:
+        run_label = input_path.stem  # single file name without extension
+    # Sanitize for filesystem
+    run_label = re.sub(r'[^\w\-]', '_', run_label)
+    timestamp_suffix = time.strftime("%Y%m%d_%H%M%S")
+    output_path = f"output/llm_judgment_{run_label}_{timestamp_suffix}.json"
     os.makedirs("output", exist_ok=True)
 
     # Group results by file for easy comparison
@@ -796,7 +805,7 @@ def main():
     print(f"\nResults saved to: {output_path}")
 
     # Also save CSV for quick spreadsheet analysis
-    csv_path = "output/llm_judgment_results.csv"
+    csv_path = f"output/llm_judgment_{run_label}_{timestamp_suffix}.csv"
     with open(csv_path, "w") as f:
         f.write("file,model,total_pages,code_layout,llm_layout,code_ppi,llm_ppi,code_rpp,llm_rpp,"
                 "code_tabular,llm_tabular,field_map_count,llm_time_s,critical_drifts,warning_drifts\n")
