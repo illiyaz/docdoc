@@ -2435,6 +2435,12 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                 # Secondary tabular detection: even if schema missed it,
                 # count SSN/name patterns on a sample page.  If >1 found,
                 # the doc is tabular and coordinate path would miss records.
+                #
+                # IMPORTANT: Names alone are unreliable — a school report card
+                # has 1 student but 6-8 names (student + parents + teachers).
+                # SSN count is the reliable indicator of distinct individuals.
+                # When the LLM already said records_per_page=1, trust it
+                # unless SSNs disagree (SSNs don't lie about individuals).
                 if not is_tabular and blocks and total_pg > 5:
                     import re as _re_tab
                     _sample_pg = min(b.page_or_sheet for b in blocks if isinstance(b.page_or_sheet, int))
@@ -2445,15 +2451,42 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                     _name_count = len(_re_tab.findall(
                         r'(?:^|\n)\s*[A-Z][a-z]+[, ]+[A-Z][a-z]+', _sample_text,
                     ))
-                    _detected_rpp = max(_ssn_count, _name_count)
-                    if _detected_rpp > 1:
-                        is_tabular = True
-                        logger.info(
-                            "Auto-detected tabular layout for %s: %d records on sample page %d "
-                            "(SSNs=%d, names=%d)",
-                            doc.file_name, _detected_rpp, _sample_pg,
-                            _ssn_count, _name_count,
-                        )
+
+                    # LLM schema is authoritative when available.
+                    # Only override LLM with regex when SSNs prove multiple
+                    # distinct individuals (names can't — supporting entities
+                    # inflate name counts on single-record pages).
+                    _llm_says_single = (
+                        schema is not None
+                        and schema.records_per_page_estimate <= 1
+                    )
+
+                    if _llm_says_single:
+                        # Trust LLM unless multiple SSNs prove otherwise
+                        if _ssn_count > 1:
+                            is_tabular = True
+                            logger.info(
+                                "Override LLM single-record: %s has %d SSNs on page %d "
+                                "(LLM said rpp=1, but SSNs prove multiple individuals)",
+                                doc.file_name, _ssn_count, _sample_pg,
+                            )
+                        else:
+                            logger.info(
+                                "Trusting LLM rpp=1 for %s (names=%d but SSNs=%d — "
+                                "names likely include supporting entities)",
+                                doc.file_name, _name_count, _ssn_count,
+                            )
+                    else:
+                        # No LLM or LLM already says tabular — use regex as before
+                        _detected_rpp = max(_ssn_count, _name_count)
+                        if _detected_rpp > 1:
+                            is_tabular = True
+                            logger.info(
+                                "Auto-detected tabular layout for %s: %d records on sample page %d "
+                                "(SSNs=%d, names=%d)",
+                                doc.file_name, _detected_rpp, _sample_pg,
+                                _ssn_count, _name_count,
+                            )
 
                 records: list[PIIRecord] = []
                 extraction_path = "3"
