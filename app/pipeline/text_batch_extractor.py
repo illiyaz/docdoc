@@ -89,29 +89,54 @@ def extract_text_batch(
         fields_hint = ", ".join(field_inventory) if field_inventory else "PERSON, LOCATION, PHONE_NUMBER, DATE_OF_BIRTH, US_SSN"
         prompt = _build_batch_prompt(batch_pages, batch_text, document_type, fields_hint)
 
+        _system_prompt = (
+            "You are a document data extraction assistant. "
+            "Extract ONLY the primary subject's information from each page. "
+            "Ignore teachers, doctors, providers, institutional staff, and other supporting names."
+        )
+
         try:
             response = ollama_client.generate(
                 prompt=prompt,
-                system=(
-                    "You are a document data extraction assistant. "
-                    "Extract ONLY the primary subject's information from each page. "
-                    "Ignore teachers, doctors, providers, institutional staff, and other supporting names."
-                ),
+                system=_system_prompt,
                 use_case="text_batch_extraction",
                 document_id=doc_id,
             )
             calls_made += 1
 
-            # Build page text lookup for validation
             batch_page_texts = {pg: page_texts.get(pg, "") for pg in batch_pages}
             records = _parse_batch_response(response, doc_id, batch_pages, batch_page_texts)
             all_records.extend(records)
 
         except Exception:
-            logger.warning(
-                "Text batch extraction failed for pages %s",
-                [p + 1 for p in batch_pages], exc_info=True,
+            # Batch failed (likely timeout) — retry each page individually
+            logger.info(
+                "Batch failed for pages %s — retrying individually",
+                [p + 1 for p in batch_pages],
             )
+            for retry_pg in batch_pages:
+                retry_text = page_texts[retry_pg][:MAX_CHARS_PER_PAGE]
+                if len(retry_text.strip()) < 50:
+                    continue
+                retry_prompt = _build_batch_prompt(
+                    [retry_pg], f"\n--- PAGE {retry_pg + 1} ---\n{retry_text}\n",
+                    document_type, fields_hint,
+                )
+                try:
+                    retry_response = ollama_client.generate(
+                        prompt=retry_prompt,
+                        system=_system_prompt,
+                        use_case="text_batch_extraction_retry",
+                        document_id=doc_id,
+                    )
+                    calls_made += 1
+                    retry_page_texts = {retry_pg: page_texts.get(retry_pg, "")}
+                    retry_records = _parse_batch_response(
+                        retry_response, doc_id, [retry_pg], retry_page_texts,
+                    )
+                    all_records.extend(retry_records)
+                except Exception:
+                    logger.debug("Retry failed for page %d", retry_pg + 1)
 
     logger.info(
         "Text batch extraction: %d records from %d pages (%d LLM calls)",
