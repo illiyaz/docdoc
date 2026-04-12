@@ -259,9 +259,10 @@ class VisionMethod(ExtractionMethod):
         self._doc_path = doc_path
 
     def is_applicable(self, profile: DocumentProfile) -> bool:
-        return self._llm_client is not None and (
-            profile.text_ratio < 0.8 or not profile.has_text_layer
-        )
+        # Only use vision for docs with NO usable text layer.
+        # Text PDFs with blank pages have low text_ratio but still have
+        # extractable text — vision is redundant and slow (90B model swap).
+        return self._llm_client is not None and not profile.has_text_layer
 
     def extract(
         self,
