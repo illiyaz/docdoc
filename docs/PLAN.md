@@ -538,3 +538,50 @@ Surya had catastrophic performance degradation on CMG (batches 131-190 went from
 - **Inline documentation:** "What is onset detection?" links/tooltips on the analysis review screen
 - **Protocol explainers:** Plain-English summary of what each regulatory protocol requires
 - **Keyboard shortcuts:** Document and display common actions (approve, reject, next record)
+
+---
+
+### Step 37 — Text LLM Batch Extraction (Feature-Flagged)
+
+**Goal:** Reliable extraction path for text PDFs that doesn't depend on coordinate field maps. Simpler, more accurate, acceptable performance (~8-10 min for 225 pages vs 10s coordinate but 20+ min fallback when coordinate fails).
+
+**Rationale:** Coordinate extraction is fast (30-45ms/page) but fragile — depends on LLM producing correct anchor text and spatial relationships, both non-deterministic. When it fails, the fallback chain (table → Presidio) is slow and inaccurate (teacher contamination, name-only records). A text LLM batch path using qwen2.5:7b provides a reliable middle ground.
+
+#### Architecture
+
+**Extraction hierarchy (updated):**
+1. **Path 0 — Coordinate** (10s/225 pages): When field map validates. Fastest, most accurate for fixed layouts.
+2. **Path 1 — Text LLM Batch** (8-10 min/225 pages): NEW. For text PDFs when coordinate fails. Send 5-10 pages per qwen2.5:7b call with entity_role-aware prompt. ~45 calls × 10-15s each.
+3. **Path 2 — Vision** (scanned/image docs only): 90B vision model, ~30s/page.
+4. **Path 3 — Presidio** (last resort): Pattern-only, no LLM.
+
+**Feature flag:** `USE_TEXT_LLM_BATCH=true` in .env. When enabled, replaces the table/Presidio fallback for text PDFs.
+
+#### Implementation
+
+| File | What to do |
+|---|---|
+| `app/pipeline/text_batch_extractor.py` | NEW — TextBatchExtractor class. Accepts page_texts dict, sends batches of 5-10 pages to qwen2.5:7b, parses structured JSON responses into PIIRecord objects. Entity_role-aware prompt distinguishes primary_subject from guardian/provider. |
+| `app/llm/prompts.py` | NEW prompt: EXTRACT_TEXT_BATCH — "Given these N pages of text, extract the primary subject's name, address, DOB, SSN, phone for each page. Ignore teacher/provider names." |
+| `app/pipeline/two_phase.py` | Wire TextBatchExtractor as Path 1 fallback when coordinate fails and doc has text. Feature-flagged via USE_TEXT_LLM_BATCH setting. |
+| `app/core/settings.py` | Add `use_text_llm_batch: bool = False` setting |
+| `tests/test_text_batch_extractor.py` | Unit tests: batch building, JSON parsing, entity_role filtering, error handling |
+
+#### Key design decisions
+- **Batch size 5-10 pages:** qwen2.5:7b handles ~12K chars comfortably. Each page ~2500 chars. 5 pages = 12.5K chars per call.
+- **Entity_role in prompt:** "Extract ONLY the primary subject (student/patient/employee) and their guardian. Ignore institutional names, teacher names, provider names."
+- **No field map needed:** The LLM reads the full page text and uses its understanding to find the right names/addresses. More robust than coordinate anchoring.
+- **Gap fill also uses text batch:** For text PDFs, gap fill should always use text LLM (7s/page), never vision (30s+/page). Feature flag controls this.
+- **Comparison mode:** When both coordinate and text batch are enabled, run both on a sample (5 pages), compare record quality, pick the better path for the full doc.
+
+#### Performance targets
+- 225-page text PDF: ~8-10 min (vs 10s coordinate, 20+ min table fallback)
+- Per-page accuracy: >95% name extraction, >90% address extraction
+- Entity_role accuracy: <5% teacher/provider contamination (vs ~50% with Presidio)
+
+#### Migration path
+1. Implement behind feature flag (off by default)
+2. Test on all 12 phase2_large_pdfs_mini files
+3. Compare accuracy vs coordinate vs Presidio using test_llm_judgment.py
+4. If accuracy ≥ coordinate accuracy: make it the default Path 1
+5. Eventually: coordinate becomes optional optimization, text batch is the reliable default
