@@ -4458,6 +4458,7 @@ export function ProjectDetail() {
   const { id } = useParams<{ id: string }>()
   const projectId = id ?? ""
   const queryClient = useQueryClient()
+  const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const initialTab = (searchParams.get("tab") as TabId) || "overview"
   const [activeTab, setActiveTab] = useState<TabId>(initialTab)
