@@ -143,7 +143,70 @@ def extract_text_batch(
         len(all_records), len(content_pages), calls_made,
     )
 
+    # Post-extraction: remove names that appear on too many pages
+    # (teachers/staff appear across 5+ pages, students appear on 1-2)
+    all_records = _filter_frequent_names(all_records, content_pages)
+
     return all_records
+
+
+def _filter_frequent_names(
+    records: list[PIIRecord],
+    content_pages: list[int],
+) -> list[PIIRecord]:
+    """Remove names that appear on too many distinct pages.
+
+    A student appears on 1-2 pages. A teacher/provider appears on 5+.
+    This catches institutional names that slipped through the LLM prompt
+    and the per-page validation.
+
+    Threshold: if a last name appears on >10% of content pages AND on
+    more than 3 distinct pages, it's likely institutional.
+    """
+    from collections import Counter
+
+    if len(content_pages) < 10:
+        return records  # too few pages to detect frequency
+
+    # Count how many distinct pages each last name appears on
+    name_pages: dict[str, set[str]] = {}
+    for r in records:
+        if r.entity_role != "primary_subject":
+            continue
+        last = r.raw_name.split()[-1].lower() if r.raw_name else ""
+        if len(last) < 3:
+            continue
+        if last not in name_pages:
+            name_pages[last] = set()
+        name_pages[last].add(r.page_range or "")
+
+    # Find suspiciously frequent names
+    threshold_pages = max(3, len(content_pages) * 0.10)
+    frequent_names: set[str] = set()
+    for last_name, pages in name_pages.items():
+        if len(pages) > threshold_pages:
+            frequent_names.add(last_name)
+            logger.info(
+                "Filtering frequent name '%s' (%d pages > %.0f threshold)",
+                last_name, len(pages), threshold_pages,
+            )
+
+    if not frequent_names:
+        return records
+
+    filtered = []
+    dropped = 0
+    for r in records:
+        last = r.raw_name.split()[-1].lower() if r.raw_name else ""
+        if last in frequent_names and r.entity_role == "primary_subject":
+            dropped += 1
+            continue
+        filtered.append(r)
+
+    if dropped:
+        logger.info("Frequency filter: dropped %d records with institutional names", dropped)
+
+    return filtered
 
 
 def _build_batch_prompt(
@@ -268,22 +331,26 @@ def _parse_batch_response(
             )
             continue
 
-        # P2: Page-position verification — the primary subject's name should
-        # appear in the HEADER section of the page (first ~12 lines), not in
-        # the body/grades/provider section (lines 15+). This catches teacher
-        # names that the LLM incorrectly returns as primary subjects.
-        if actual_page_text:
-            page_lines = [l.strip() for l in page_texts.get(page_0, "").split("\n") if l.strip()]
-            header_lines = page_lines[:12]  # first 12 content lines = subject section
-            header_text = " ".join(header_lines).lower()
-            name_first = name.split()[0].lower()
-            name_last = name.split()[-1].lower() if len(name.split()) > 1 else name_first
-
-            # Check if the name's last name appears in the header section
-            if name_last not in header_text and name_first not in header_text:
+        # P2: Cross-validation — if the LLM returned both name and
+        # parent_or_guardian, verify they are DIFFERENT people.
+        # If name == guardian, the LLM confused the two roles.
+        guardian_name = entry.get("parent_or_guardian", "") or ""
+        if guardian_name and isinstance(guardian_name, str):
+            guardian_name = guardian_name.strip()
+            # Check if "name" is actually the guardian (LLM put guardian in name field)
+            name_lower = name.lower()
+            guardian_lower = guardian_name.lower()
+            if name_lower == guardian_lower:
                 logger.debug(
-                    "Dropping record: name '%s' not in header section of page %s",
+                    "Dropping: name '%s' same as guardian on page %s",
                     name[:30], page_str,
+                )
+                continue
+            # Check if name is a substring of guardian (e.g., "Cynthia Abad" from "Julio & Cynthia Abad")
+            if len(name_lower) > 4 and name_lower in guardian_lower:
+                logger.debug(
+                    "Dropping: name '%s' is part of guardian '%s' on page %s",
+                    name[:30], guardian_name[:30], page_str,
                 )
                 continue
 
