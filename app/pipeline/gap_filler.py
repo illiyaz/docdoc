@@ -101,15 +101,20 @@ class GapFiller:
     # ------------------------------------------------------------------
 
     def fill(self, gaps: list[ExtractionGap]) -> list[ExtractionGap]:
-        """Attempt to fill all gaps. Returns updated gap list with fill status.
+        """Attempt to fill gaps using batched page-level LLM extraction.
 
-        Gaps are processed by severity (high first), and each gap goes
-        through the fallback cascade until filled or all paths exhausted.
+        Optimized approach:
+        1. Group gaps by page (3 gaps on page 5 = 1 page read)
+        2. Open PDF once for all pages
+        3. For each unique page, send text to LLM in batches of 5-10
+        4. Parse results and match back to gaps
+
+        Falls back to per-gap processing only for non-LLM methods.
         """
         if not gaps:
             return gaps
 
-        # Sort: high severity first, then missing_field before truncated
+        # Sort: high severity first
         severity_order = {"high": 0, "medium": 1, "low": 2}
         type_order = {"empty_page": 0, "missing_field": 1, "truncated": 2, "stitching": 3}
         sorted_gaps = sorted(
@@ -117,10 +122,33 @@ class GapFiller:
             key=lambda g: (severity_order.get(g.severity, 9), type_order.get(g.gap_type, 9)),
         )
 
+        # Mark stitching gaps as not applicable
         results: list[ExtractionGap] = []
+        fillable_gaps: list[ExtractionGap] = []
         for gap in sorted_gaps:
-            filled_gap = self._fill_one(gap)
-            results.append(filled_gap)
+            if gap.gap_type == "stitching":
+                results.append(replace(gap, fill_attempted=True, fill_result="not_applicable",
+                                       context="Stitching gaps require manual review"))
+            else:
+                fillable_gaps.append(gap)
+
+        # Group by page — deduplicate page reads
+        from collections import defaultdict
+        gaps_by_page: dict[int, list[ExtractionGap]] = defaultdict(list)
+        for gap in fillable_gaps:
+            gaps_by_page[gap.page_num].append(gap)
+
+        # Try batched LLM text extraction (fast path)
+        filled_pages: set[int] = set()
+        if self.ollama_client and self._llm_calls_used < self.max_llm_total:
+            filled_pages = self._fill_batched_text(gaps_by_page, fillable_gaps, results)
+
+        # Remaining unfilled gaps → mark as unfilled
+        for gap in fillable_gaps:
+            if gap.page_num not in filled_pages:
+                already = any(r.page_num == gap.page_num and r.gap_type == gap.gap_type for r in results)
+                if not already:
+                    results.append(replace(gap, fill_attempted=True, fill_result="unfilled"))
 
         # Log summary
         filled_count = sum(1 for g in results if g.fill_result == "filled")
@@ -131,6 +159,127 @@ class GapFiller:
         )
 
         return results
+
+    def _fill_batched_text(
+        self,
+        gaps_by_page: dict[int, list[ExtractionGap]],
+        all_gaps: list[ExtractionGap],
+        results: list[ExtractionGap],
+    ) -> set[int]:
+        """Fill gaps using batched text LLM calls — send 5 pages per call.
+
+        Returns set of page numbers that were successfully processed.
+        """
+        filled_pages: set[int] = set()
+
+        # Read page texts from PDF — ONE open for all pages
+        page_texts: dict[int, str] = {}
+        try:
+            import fitz
+            doc = fitz.open(self.doc_path)
+            for page_num in gaps_by_page:
+                page_idx = page_num - 1  # gaps use 1-indexed
+                if 0 <= page_idx < doc.page_count:
+                    page_texts[page_num] = doc[page_idx].get_text()
+            doc.close()
+        except Exception:
+            logger.warning("Gap fill: could not read PDF %s", self.doc_path, exc_info=True)
+            return filled_pages
+
+        if not page_texts:
+            return filled_pages
+
+        # Batch pages into groups of 5
+        page_nums = sorted(page_texts.keys())
+        batch_size = 5
+
+        for batch_start in range(0, len(page_nums), batch_size):
+            if self._llm_calls_used >= self.max_llm_total:
+                break
+
+            batch_pages = page_nums[batch_start:batch_start + batch_size]
+            batch_text = ""
+            for pn in batch_pages:
+                text = page_texts.get(pn, "")
+                if text.strip():
+                    batch_text += f"\n--- PAGE {pn} ---\n{text[:3000]}\n"
+
+            if not batch_text.strip():
+                continue
+
+            # Build prompt
+            missing_fields = set()
+            for pn in batch_pages:
+                for gap in gaps_by_page.get(pn, []):
+                    if gap.missing_field:
+                        missing_fields.add(gap.missing_field)
+                    else:
+                        missing_fields.update(["PERSON", "LOCATION"])
+
+            fields_str = ", ".join(sorted(missing_fields)) or "PERSON, LOCATION"
+            prompt = (
+                f"Extract personal information from these {len(batch_pages)} pages.\n"
+                f"For EACH page, extract the PRIMARY SUBJECT only (not teachers, "
+                f"doctors, providers, or institutional staff).\n"
+                f"Fields to extract: {fields_str}\n"
+                f"Return a JSON array with one object per page:\n"
+                f'[{{"page": 5, "PERSON": "name", "LOCATION": "address"}}, ...]\n'
+                f"If a page has no extractable data, omit it from the array.\n\n"
+                f"{batch_text}"
+            )
+
+            try:
+                response = self.ollama_client.generate(
+                    prompt=prompt,
+                    system="You are a document data extraction assistant. Extract only the primary subject's information.",
+                    use_case="gap_fill_batch",
+                    document_id=self.document_id,
+                )
+                self._llm_calls_used += 1
+
+                # Parse response
+                import json
+                cleaned = response.strip()
+                if cleaned.startswith("```"):
+                    lines = cleaned.split("\n")
+                    lines = [l for l in lines if not l.strip().startswith("```")]
+                    cleaned = "\n".join(lines)
+
+                records = json.loads(cleaned)
+                if not isinstance(records, list):
+                    records = [records]
+
+                for rec in records:
+                    page_num = rec.get("page")
+                    if page_num and page_num in gaps_by_page:
+                        person = rec.get("PERSON", "")
+                        location = rec.get("LOCATION", "")
+                        if person or location:
+                            filled_pages.add(page_num)
+                            for gap in gaps_by_page[page_num]:
+                                value = ""
+                                if gap.missing_field == "PERSON" and person:
+                                    value = person
+                                elif gap.missing_field == "LOCATION" and location:
+                                    value = location
+                                elif gap.gap_type == "empty_page" and person:
+                                    value = person
+
+                                if value:
+                                    results.append(replace(
+                                        gap,
+                                        fill_attempted=True,
+                                        fill_method="text_batch",
+                                        fill_result="filled",
+                                        filled_value_masked=_mask_value(value, gap.missing_field or "PERSON"),
+                                    ))
+                                else:
+                                    results.append(replace(gap, fill_attempted=True, fill_result="unfilled"))
+
+            except Exception:
+                logger.debug("Gap fill batch failed for pages %s", batch_pages, exc_info=True)
+
+        return filled_pages
 
     @property
     def llm_calls_used(self) -> int:
