@@ -3933,7 +3933,8 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                     gap_budget_remaining -= pages_to_fill
 
                     gap_client = OllamaClient(db_session=db, timeout_s=300)
-                    if gap_client.is_vision_available(model_override=vision_model):
+                    _ev_vision_model = settings.ollama_vision_model
+                    if gap_client.is_vision_available(model_override=_ev_vision_model):
                         try:
                             doc_records = [r for r in all_records if r.source_document_id == str(doc.id)]
                             updated_records, gf_result = verifier.vision_gap_fill(
@@ -3941,7 +3942,7 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                                 doc_path=doc.source_path,
                                 doc_id=str(doc.id),
                                 ollama_client=gap_client,
-                                vision_model=vision_model,
+                                vision_model=_ev_vision_model,
                                 max_pages=pages_to_fill,
                             )
                             # Replace records in all_records
@@ -4084,12 +4085,21 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                     except Exception:
                         pass
 
+                    # Resolve vision model for gap filling
+                    _gap_vision_model = None
+                    try:
+                        _gap_vision_model = settings.ollama_vision_model
+                        if protocol_config and isinstance(protocol_config, dict):
+                            _gap_vision_model = protocol_config.get("vision_model", _gap_vision_model)
+                    except Exception:
+                        pass
+
                     filler = GapFiller(
                         doc_path=_fill_doc.source_path,
                         document_id=doc_id,
                         field_map=field_map_objs,
                         ollama_client=ollama_client,
-                        vision_model=vision_model if 'vision_model' in dir() else None,
+                        vision_model=_gap_vision_model,
                     )
                     doc_filled = filler.fill(doc_gaps)
                     filled_gaps.extend(doc_filled)
