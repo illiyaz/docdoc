@@ -2570,8 +2570,8 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                 _recommended = _vr_pre.get("recommended_path", "")
                 _has_field_map = bool(
                     _doc_meta_pre.get("auditor_layout_field_map")
-                    or _vr_pre.get("field_map")
-                    or (_doc_meta_pre.get("document_schema", {}) or {}).get("field_map")
+                    or _doc_meta_pre.get("vision_field_map")
+                    or (_doc_meta_pre.get("document_schema", {}) or {}).get("layout_field_map")
                 )
                 if _use_selector and _recommended == "coordinate" and _has_field_map:
                     logger.info(
