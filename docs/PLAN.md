@@ -691,6 +691,25 @@ Has text layer? ──yes──> Coordinate field map validates? ──yes──
 - Per-page accuracy: >95% name extraction, >90% address extraction
 - Entity_role accuracy: <5% teacher/provider contamination (vs ~50% with Presidio)
 
+#### Pre-requisite: Gap fill optimization (before or during Step 37)
+
+Current gap fill is slow: 335 gaps × 4-method cascade × per-gap PDF I/O = 25+ min.
+
+**Optimizations (implement as part of Step 37):**
+
+1. **Open PDF once** — current code opens `fitz.open()` per gap. Pass doc handle.
+2. **Batch gaps by page** — page 5 missing name+address+phone = 1 page read, not 3.
+3. **Skip cascade for field-level gaps** — coordinate already failed on that field, go straight to LLM text.
+4. **Batch LLM calls** — send 5-10 pages per call ("extract missing fields for these pages"). Turns 168 LLM calls into ~30.
+5. **Skip coordinate retry on page gaps** — if coordinate missed the page entirely, don't retry coordinate_relaxed. Go to LLM text.
+
+**Expected improvement:** 335 gaps in ~4 min (from 25+ min). This is essentially the text batch approach applied to gap filling.
+
+| File | What to do |
+|---|---|
+| `app/pipeline/gap_filler.py` | Refactor `fill()` to batch by page, open PDF once, batch LLM calls |
+| `app/pipeline/two_phase.py` | Pass doc handle to GapFiller instead of path |
+
 #### Migration path
 1. Implement behind feature flag (off by default)
 2. Test on all 12 phase2_large_pdfs_mini files
