@@ -29,9 +29,9 @@ from app.pipeline.gap_detector import ExtractionGap
 
 logger = logging.getLogger(__name__)
 
-# LLM budget defaults
+# LLM budget defaults — scaled by doc size at call site
 DEFAULT_MAX_LLM_CALLS_PER_GAP = 3
-DEFAULT_MAX_LLM_CALLS_TOTAL = 50
+DEFAULT_MAX_LLM_CALLS_TOTAL = 50  # overridden by caller for large docs
 
 # Extraction path names (aligned with extraction_verifier and two_phase)
 PATH_COORDINATE_RELAXED = "coordinate_relaxed"

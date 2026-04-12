@@ -542,21 +542,16 @@ def auto_correct_field_map(
     doc_path: str,
     onset_page: int = 0,
 ) -> list[FieldMapping]:
-    """Correct LLM-produced spatial relationships using actual PyMuPDF words.
+    """Correct LLM-produced field maps using actual PyMuPDF words.
 
-    The LLM understands WHAT fields exist and WHAT anchor to use, but
-    guesses the spatial distance (e.g., "line_below" when the real gap
-    is 7 lines).  This function:
+    Two corrections:
+    1. **Anchor validation**: If the LLM's anchor text doesn't exist on
+       the page, find the best alternative anchor (phone number, org name,
+       or other fixed institutional text).
+    2. **Spatial correction**: Recompute the real spatial relationship
+       using actual word positions, collapsing blank gaps.
 
-    1. Opens the PDF at the onset page
-    2. Finds each anchor in the actual word list
-    3. Finds content lines below the anchor
-    4. Recomputes the real spatial relationship
-    5. Adds accurate sample_bbox from the actual value position
-
-    Returns corrected FieldMappings.  Mappings whose anchor can't be
-    found are returned unchanged (coordinate extractor will handle
-    the miss gracefully on a per-page basis).
+    Returns corrected FieldMappings.
     """
     if not field_maps or not doc_path:
         return field_maps
@@ -590,12 +585,67 @@ def auto_correct_field_map(
             seen_y.add(y_bucket)
             line_ys.append((w[1] + w[3]) / 2)
 
+    # --- Step 1: Validate anchors, find best alternative if needed ---
+    # Find the best anchor on the page that all fields can share
+    best_anchor = _find_best_page_anchor(words, field_maps)
+
     corrected: list[FieldMapping] = []
     for fm in field_maps:
-        corrected_fm = _correct_one_field(fm, words, line_ys)
+        # If the LLM's anchor doesn't exist, substitute the best one
+        fm_to_correct = fm
+        if best_anchor and not _find_anchor_words(fm.anchor_text, words):
+            logger.info(
+                "auto_correct: replacing bad anchor '%s' with '%s' for %s",
+                fm.anchor_text[:20], best_anchor[:20], fm.field_type,
+            )
+            fm_to_correct = FieldMapping(
+                field_type=fm.field_type,
+                anchor_text=best_anchor,
+                spatial_relationship=fm.spatial_relationship,
+                value_pattern=fm.value_pattern,
+                sample_bbox=fm.sample_bbox,
+                line_count=fm.line_count,
+                skip_pattern=fm.skip_pattern,
+                entity_role=fm.entity_role,
+            )
+
+        corrected_fm = _correct_one_field(fm_to_correct, words, line_ys)
         corrected.append(corrected_fm)
 
     return corrected
+
+
+def _find_best_page_anchor(words: list[tuple], field_maps: list[FieldMapping]) -> str | None:
+    """Find the best anchor text on the page.
+
+    Priority:
+    1. An existing anchor from field_maps that IS found on the page
+    2. A phone number pattern (institutional phone)
+    3. The first line of text (typically org name/header)
+
+    Returns anchor text string, or None if no good anchor found.
+    """
+    import re as _re
+
+    # Check if any existing field map anchor works
+    for fm in field_maps:
+        if _find_anchor_words(fm.anchor_text, words):
+            return fm.anchor_text
+
+    # Look for a phone number (common institutional anchor)
+    for w in words:
+        if _re.match(r'\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}$', w[4]):
+            return w[4]
+
+    # Use the topmost "institutional" text — first line that looks like
+    # an org name or header (>5 chars, starts with uppercase)
+    sorted_words = sorted(words, key=lambda w: (w[1], w[0]))
+    for w in sorted_words[:20]:
+        text = w[4].strip()
+        if len(text) >= 5 and text[0].isupper() and not text.isdigit():
+            return text
+
+    return None
 
 
 def _find_anchor_words(anchor: str, words: list[tuple]) -> list[tuple] | None:
@@ -604,17 +654,26 @@ def _find_anchor_words(anchor: str, words: list[tuple]) -> list[tuple] | None:
     if anchor_words:
         return anchor_words
 
-    # Try partial match (anchor might be masked: [PHONE] vs 425-431-6400)
-    anchor_lower = anchor.lower().strip("[]")
-    for w in words:
-        if anchor_lower in w[4].lower() or w[4].lower() in anchor_lower:
-            return [w]
+    # Try partial match — require minimum 4 chars to avoid false positives
+    anchor_lower = anchor.lower().strip("[]:.,-; ")
+    if len(anchor_lower) >= 4:
+        for w in words:
+            word_lower = w[4].lower().strip("[]:.,-; ")
+            if len(word_lower) >= 4 and (anchor_lower in word_lower or word_lower in anchor_lower):
+                return [w]
 
     # Try matching the unmasked phone pattern
     if anchor.startswith("[") and "PHONE" in anchor.upper():
         import re as _re
         for w in words:
-            if _re.match(r'\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}', w[4]):
+            if _re.match(r'\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}$', w[4]):
+                return [w]
+
+    # Try phone pattern even without masked placeholder (common anchor)
+    import re as _re2
+    if _re2.match(r'\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}$', anchor):
+        for w in words:
+            if _re2.match(r'\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}$', w[4]):
                 return [w]
 
     return None

@@ -3892,7 +3892,7 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
 
         # --- Post-extraction gap analysis (deferred from per-doc loop) ---
         # Runs AFTER all docs are extracted, with a hard budget cap.
-        _MAX_GAP_FILL_CALLS = 50  # 50 vision calls total ≈ 20 minutes
+        _MAX_GAP_FILL_CALLS = 10  # 10 vision calls total — vision is slow (30s+/call)
 
         if settings.llm_assist_enabled and getattr(settings, "use_vision_extraction", False):
             try:
@@ -4054,6 +4054,9 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
 
             # Attempt auto-fill on detected gaps (per-document)
             if all_detected_gaps and settings.llm_assist_enabled:
+                # Scale LLM budget with gap count: min 50, max 200
+                _gap_budget = min(200, max(50, len(all_detected_gaps) // 2))
+
                 # Group gaps by document
                 from collections import defaultdict as _dd
                 gaps_by_doc: dict[str, list] = _dd(list)
@@ -4100,9 +4103,14 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                         field_map=field_map_objs,
                         ollama_client=ollama_client,
                         vision_model=_gap_vision_model,
+                        max_llm_total=_gap_budget,
                     )
-                    doc_filled = filler.fill(doc_gaps)
-                    filled_gaps.extend(doc_filled)
+                    try:
+                        doc_filled = filler.fill(doc_gaps)
+                        filled_gaps.extend(doc_filled)
+                    except Exception:
+                        logger.warning("Gap fill failed for doc %s", doc_id, exc_info=True)
+                        filled_gaps.extend(doc_gaps)  # keep as unfilled
 
                 all_detected_gaps = filled_gaps
 
