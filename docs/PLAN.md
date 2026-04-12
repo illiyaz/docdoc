@@ -15,9 +15,10 @@ For detailed per-step implementation notes, see [CLAUDE_HISTORY.md](CLAUDE_HISTO
 | Phase 5 Steps 26-26d (LiteParse + Auditor Workflow) | COMPLETE | ~2850 |
 | Phase 5 Step 29a (Notification Preview) | COMPLETE | ~2850 |
 | Phase 5 Steps 30a-30c (Intelligence + Quality) | COMPLETE | ~2850 |
-| Phase 5 Step 30d (OCR Tool Evaluation) | **COMPLETE** | — |
-| Phase 5 Step 30e (LLM Segregation + Review UI + Extraction QA) | **NEXT** | — |
-| **Phase 6 (Security + Governance)** | Pending | — |
+| Phase 5 Step 30d (OCR Tool Evaluation) | COMPLETE | — |
+| Phase 5 Step 30e (LLM Segregation + Review UI + Extraction QA) | COMPLETE | ~2850 |
+| Phase 5 Step 30f (Performance + Quality Sprint) | **COMPLETE** | ~2850 |
+| **Phase 6 (Security + Governance)** | **NEXT** | — |
 | Phase 7 (Workflow Completeness) | Pending | — |
 | Phase 8 (Scale + Polish) | Pending | — |
 

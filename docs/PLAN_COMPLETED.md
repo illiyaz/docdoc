@@ -41,5 +41,11 @@ Phone/email/name/address normalizers, entity resolver (Union-Find, confidence la
 | 26c | Merge Explanation — build_confidence_explained(), per-anchor signals, migration 0013 |
 | 26d | Auditor Workflow Polish — analysis filter tabs, dedup summary, extraction progress bar, plain-English config, export filtering, delivery dashboard |
 | 29a | Notification Preview — email/letter preview with masked PII rendering |
+| 30a | Intelligence Tab — document understanding diagnostic view, test-extract (Tier 1), correction memory |
+| 30b | Extraction Quality — phone validation across all 5 paths, DL regex tightened, schema persistence per-doc |
+| 30c | LLM Prompt Coverage — school/HR/educational docs recognized (FERPA), PERSON+LOCATION-only field maps valid |
+| 30d | OCR Tool Evaluation — docTR selected (Apache 2.0, 16-767x faster, word-level bbox, 98.8% SSN coverage) |
+| 30e | LLM-First Segregation + Review UI + Extraction QA — 7 sub-steps, 135 tests, full pipeline wiring |
+| 30f | Performance + Quality Sprint — docTR integrated (MPS), qwen2.5:7b primary text LLM (9x faster), segregation text-first (8.8s), structure LLM skip, tabular detection fix, entity_role on field maps, field map auto-correction, 4 extraction bugs fixed, race condition fix, end-to-end UI flow, LLM judgment test script, Category B/C/D prompts. **Analysis: 19.7min → 3.75min (81% faster)** |
 
-**Key metrics:** ~2850 tests, 19 tables, 13 migrations, 78K PII records from 34 docs.
+**Key metrics:** ~2850 tests, 19 tables, 13 migrations, 78K PII records from 34 docs. Analysis time 3.75min (was 19.7min). Primary models: qwen2.5:7b (text) + llama3.2-vision:90b (vision). OCR: docTR on MPS.
