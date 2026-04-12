@@ -39,7 +39,7 @@ TEST_FILES=(
     "docs/testingsamples/phase2_large_pdfs_mini/WashingtonCMD_0000102080.pdf"
 )
 
-MODELS=("qwen2.5:7b" "qwen2.5:14b" "qwen2.5:32b")
+MODELS=("qwen2.5:7b" "qwen2.5:14b" "qwen2.5:32b" "llama3:8b")
 
 # --- Run full pipeline for each model × file ---
 for model in "${MODELS[@]}"; do
