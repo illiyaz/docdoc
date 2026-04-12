@@ -340,8 +340,12 @@ export function ExtractionQA() {
 
   const approveMutation = useMutation({
     mutationFn: () => approveQA(projectId!, { reviewer_id: "auditor" }, jobId),
-    onSuccess: () => {
+    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["qa-summary", projectId, jobId] })
+      // Navigate to project detail (notification tab) after approval
+      if (data?.status === "approved") {
+        setTimeout(() => navigate(`/projects/${projectId}?tab=notification`), 1500)
+      }
     },
   })
 

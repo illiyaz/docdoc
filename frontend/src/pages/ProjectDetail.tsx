@@ -2752,6 +2752,22 @@ function JobsTab({
                                     onJobCompleted()
                                   }}
                                 />
+                              ) : job.status === "completed" ? (
+                                <>
+                                  <div className="flex items-center justify-between mb-3">
+                                    <p className="text-sm font-medium text-green-700">
+                                      Extraction complete — {job.document_count} document(s) processed
+                                    </p>
+                                    <Link
+                                      to={`/projects/${projectId}/qa?job_id=${job.id}`}
+                                      className="inline-flex items-center gap-2 rounded-md bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 transition-colors"
+                                    >
+                                      <CheckCircle className="h-4 w-4" />
+                                      Review QA
+                                    </Link>
+                                  </div>
+                                  <PipelineProgressView jobId={job.id} />
+                                </>
                               ) : (
                                 <>
                                   <p className="text-xs font-medium text-muted-foreground mb-2">
@@ -4461,7 +4477,17 @@ export function ProjectDetail() {
   const handleJobCompleted = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: ["catalog-summary", projectId] })
     queryClient.invalidateQueries({ queryKey: ["density", projectId] })
-  }, [queryClient, projectId])
+    // Auto-navigate to QA screen after extraction completes
+    // Find the most recently completed job to get job_id for QA
+    queryClient.invalidateQueries({ queryKey: ["project-jobs", projectId] })
+    setTimeout(() => {
+      const currentJobs = queryClient.getQueryData<any>(["project-jobs", projectId])
+      const completedJob = currentJobs?.jobs?.find((j: any) => j.status === "completed")
+      if (completedJob) {
+        navigate(`/projects/${projectId}/qa?job_id=${completedJob.id}`)
+      }
+    }, 1500)
+  }, [queryClient, projectId, navigate])
 
   if (isLoading) {
     return (
