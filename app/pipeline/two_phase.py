@@ -2556,168 +2556,57 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                 extraction_path = "3"
 
                 # ============================================================
-                # A0: FEEDBACK-DRIVEN EXTRACTION SELECTOR (feature-flagged)
-                # When enabled, replaces the Path 0/1/2/3 chain with a
-                # sample-test-scale loop.  Set USE_EXTRACTION_SELECTOR=true.
+                # EXTRACTION PATH SELECTION
                 #
-                # IMPORTANT: Skip the selector when vision routing already
-                # recommends "coordinate" and we have a field map — coordinate
-                # extraction is faster and more reliable than competing methods.
+                # When USE_TEXT_LLM_BATCH=true (Step 37):
+                #   Text PDFs → Text Batch (primary) → done
+                #   No selector, no table, no Presidio for text docs.
+                #   Coordinate is optional pre-step if field map validates.
+                #
+                # When USE_TEXT_LLM_BATCH=false (legacy):
+                #   Selector → Coordinate → Table → Presidio
                 # ============================================================
-                _use_selector = settings.use_extraction_selector
                 _doc_meta_pre = doc.metadata_json or {}
-                _vr_pre = _doc_meta_pre.get("vision_routing", {})
-                _recommended = _vr_pre.get("recommended_path", "")
-                _has_field_map = bool(
-                    _doc_meta_pre.get("auditor_layout_field_map")
-                    or _doc_meta_pre.get("vision_field_map")
-                    or (_doc_meta_pre.get("document_schema", {}) or {}).get("layout_field_map")
-                )
-                if _use_selector and _recommended == "coordinate" and _has_field_map:
-                    logger.info(
-                        "[%d/%d] SELECTOR SKIPPED for %s — vision routing recommends coordinate with field map",
-                        i, len(approved_docs), doc.file_name,
-                    )
-                    _use_selector = False
 
-                if _use_selector:
-                    try:
-                        from app.pipeline.extraction_selector import (
-                            build_document_profile, pick_sample_pages,
-                        )
-                        from app.pipeline.extraction_methods import compete_methods
-                        from app.pipeline.content_onset import find_verified_onset
-
-                        # Phase 1: UNDERSTAND
-                        _onset = doc.metadata_json.get("verified_onset", 0) if doc.metadata_json else 0
-                        _profile = build_document_profile(
-                            doc_path=doc.source_path,
-                            blocks=blocks,
-                            file_type=doc.file_type or "pdf",
-                            file_name=doc.file_name,
-                            onset_page=_onset,
-                            engine=engine,
-                        )
-
-                        # Phase 2: COMPETE
-                        _sample_pages = pick_sample_pages(_profile, blocks, n=5)
-
-                        # Gather field map from analysis phase if available
-                        _field_map = None
-                        _doc_meta_sel = doc.metadata_json or {}
-                        _vr_sel = _doc_meta_sel.get("vision_routing", {})
-                        if _vr_sel.get("field_map"):
-                            _field_map = _vr_sel["field_map"]
-
-                        _schema = None
-                        _schema_dict = _doc_meta_sel.get("document_schema")
-                        if _schema_dict:
-                            try:
-                                from app.structure.document_schema import DocumentSchema as _SelDS
-                                _schema = _SelDS.from_dict(_schema_dict)
-                            except Exception:
-                                pass
-
-                        _llm_client = None
-                        if settings.llm_assist_enabled:
-                            try:
-                                from app.llm.client import OllamaClient
-                                _llm_client = OllamaClient()
-                            except Exception:
-                                pass
-
-                        _winner, _results = compete_methods(
-                            profile=_profile,
-                            blocks=blocks,
-                            sample_pages=_sample_pages,
-                            schema=_schema,
-                            field_map=_field_map,
-                            engine=engine,
-                            llm_client=_llm_client,
-                            target_entities=doc_targets,
-                        )
-
-                        if _winner is not None:
-                            # Phase 3: SCALE — apply winner to all data pages
-                            _all_data_pages = sorted(doc_pages)
-                            if isinstance(_profile.onset_page, int):
-                                _all_data_pages = [p for p in _all_data_pages if p >= _profile.onset_page]
-
-                            logger.info(
-                                "[%d/%d] SELECTOR: %s | winner=%s | scaling to %d pages",
-                                i, len(approved_docs), doc.file_name,
-                                _winner.name, len(_all_data_pages),
-                            )
-                            extraction_path = f"selector:{_winner.name}"
-                            records = _winner.extract(
-                                pages=_all_data_pages,
-                                blocks=blocks,
-                                profile=_profile,
-                                schema=_schema,
-                            )
-                            logger.info(
-                                "[%d/%d] SELECTOR DONE: %s | %d records via %s",
-                                i, len(approved_docs), doc.file_name,
-                                len(records), _winner.name,
-                            )
-                        else:
-                            logger.warning(
-                                "[%d/%d] SELECTOR: No winner for %s — falling through to legacy paths",
-                                i, len(approved_docs), doc.file_name,
-                            )
-                            _use_selector = False  # Fall through to legacy
-
-                    except Exception as sel_err:
-                        logger.warning(
-                            "[%d/%d] SELECTOR FAILED for %s: %s — falling through to legacy paths",
-                            i, len(approved_docs), doc.file_name, sel_err,
-                            exc_info=True,
-                        )
-                        _use_selector = False  # Fall through to legacy
-
-                # ============================================================
-                # LEGACY PATH SELECTION (when selector is off or failed)
-                # ============================================================
-                _selector_produced_records = _use_selector and len(records) > 0
-
-                # ============================================================
-                # TEXT BATCH EXTRACTION (Step 37, feature-flagged)
-                # Fast, reliable path for text PDFs. Uses qwen2.5:7b to
-                # extract primary subjects in batches of 5 pages per call.
-                # Entity_role-aware: ignores teachers/providers/institutional.
-                # ============================================================
-                if (
-                    not _selector_produced_records
-                    and not records
-                    and settings.use_text_llm_batch
-                    and settings.llm_assist_enabled
-                    and blocks  # has text content
-                    and total_pg > 0
-                ):
+                if settings.use_text_llm_batch and settings.llm_assist_enabled and blocks:
+                    # ── Step 37: Text Batch as PRIMARY path for text PDFs ──
                     try:
                         from app.pipeline.text_batch_extractor import extract_text_batch
                         from app.llm.client import OllamaClient as _TBClient
 
-                        # Build page_texts from blocks
+                        # Build page_texts from ALL document pages (not just sampled)
+                        # For large PDFs, read directly from PDF for complete coverage
                         _tb_page_texts: dict[int, str] = {}
-                        for b in blocks:
-                            pg = b.page_or_sheet
-                            if isinstance(pg, int):
-                                if pg not in _tb_page_texts:
-                                    _tb_page_texts[pg] = ""
-                                _tb_page_texts[pg] += b.text + "\n"
+
+                        if (doc.file_type or "").lower() in ("pdf", ".pdf") and doc.source_path:
+                            try:
+                                import fitz as _tb_fitz
+                                _tb_doc = _tb_fitz.open(doc.source_path)
+                                for pg_idx in range(_tb_doc.page_count):
+                                    text = _tb_doc[pg_idx].get_text()
+                                    if text.strip():
+                                        _tb_page_texts[pg_idx] = text
+                                _tb_doc.close()
+                            except Exception:
+                                pass
+
+                        # Fallback: use blocks if PDF read failed
+                        if not _tb_page_texts:
+                            for b in blocks:
+                                pg = b.page_or_sheet
+                                if isinstance(pg, int):
+                                    if pg not in _tb_page_texts:
+                                        _tb_page_texts[pg] = ""
+                                    _tb_page_texts[pg] += b.text + "\n"
 
                         if _tb_page_texts:
                             _tb_client = _TBClient(db_session=db, timeout_s=120)
-
-                            # Get doc type and field inventory from metadata
-                            _tb_meta = doc.metadata_json or {}
-                            _tb_seg = _tb_meta.get("segregation", {})
+                            _tb_seg = _doc_meta_pre.get("segregation", {})
                             _tb_doc_type = _tb_seg.get("document_type", "unknown") if isinstance(_tb_seg, dict) else "unknown"
                             _tb_fields = _tb_seg.get("field_inventory", []) if isinstance(_tb_seg, dict) else []
 
                             logger.info(
-                                "[%d/%d] TEXT BATCH: %s | %d pages | type=%s",
+                                "[%d/%d] TEXT BATCH: %s | %d text pages | type=%s",
                                 i, len(approved_docs), doc.file_name,
                                 len(_tb_page_texts), _tb_doc_type,
                             )
@@ -2733,8 +2622,9 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                             if records:
                                 extraction_path = "1-text-batch"
                                 logger.info(
-                                    "[%d/%d] TEXT BATCH DONE: %s | %d records",
-                                    i, len(approved_docs), doc.file_name, len(records),
+                                    "[%d/%d] TEXT BATCH DONE: %s | %d records from %d pages",
+                                    i, len(approved_docs), doc.file_name,
+                                    len(records), len(_tb_page_texts),
                                 )
 
                     except Exception:
@@ -2742,6 +2632,82 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                             "Text batch extraction failed for %s — falling through to legacy",
                             doc.file_name, exc_info=True,
                         )
+
+                # ── Legacy path: Selector → Coordinate → Table → Presidio ──
+                # Only runs when text batch is OFF or failed to produce records
+                _selector_produced_records = False
+                if not records and settings.use_extraction_selector:
+                    _use_selector = True
+                    _vr_pre = _doc_meta_pre.get("vision_routing", {})
+                    _recommended = _vr_pre.get("recommended_path", "")
+                    _has_field_map = bool(
+                        _doc_meta_pre.get("auditor_layout_field_map")
+                        or _doc_meta_pre.get("vision_field_map")
+                        or (_doc_meta_pre.get("document_schema", {}) or {}).get("layout_field_map")
+                    )
+                    if _recommended == "coordinate" and _has_field_map:
+                        logger.info(
+                            "[%d/%d] SELECTOR SKIPPED for %s — coordinate with field map",
+                            i, len(approved_docs), doc.file_name,
+                        )
+                        _use_selector = False
+
+                    if _use_selector:
+                        try:
+                            from app.pipeline.extraction_selector import (
+                                build_document_profile, pick_sample_pages,
+                            )
+                            from app.pipeline.extraction_methods import compete_methods
+                            from app.pipeline.content_onset import find_verified_onset
+
+                            _onset = doc.metadata_json.get("verified_onset", 0) if doc.metadata_json else 0
+                            _profile = build_document_profile(
+                                doc_path=doc.source_path, blocks=blocks,
+                                file_type=doc.file_type or "pdf", file_name=doc.file_name,
+                                onset_page=_onset, engine=engine,
+                            )
+                            _sample_pages = pick_sample_pages(_profile, blocks, n=5)
+                            _schema = None
+                            _schema_dict = _doc_meta_pre.get("document_schema")
+                            if _schema_dict:
+                                try:
+                                    from app.structure.document_schema import DocumentSchema as _SelDS
+                                    _schema = _SelDS.from_dict(_schema_dict)
+                                except Exception:
+                                    pass
+
+                            _llm_client = None
+                            if settings.llm_assist_enabled:
+                                try:
+                                    from app.llm.client import OllamaClient
+                                    _llm_client = OllamaClient()
+                                except Exception:
+                                    pass
+
+                            _winner, _results = compete_methods(
+                                profile=_profile, blocks=blocks, sample_pages=_sample_pages,
+                                schema=_schema, field_map=None, engine=engine,
+                                llm_client=_llm_client, target_entities=doc_targets,
+                            )
+
+                            if _winner is not None:
+                                _all_data_pages = sorted(doc_pages)
+                                if isinstance(_profile.onset_page, int):
+                                    _all_data_pages = [p for p in _all_data_pages if p >= _profile.onset_page]
+                                extraction_path = f"selector:{_winner.name}"
+                                records = _winner.extract(
+                                    pages=_all_data_pages, blocks=blocks,
+                                    profile=_profile, schema=_schema,
+                                )
+                                logger.info(
+                                    "[%d/%d] SELECTOR: %s | %d records via %s",
+                                    i, len(approved_docs), doc.file_name,
+                                    len(records), _winner.name,
+                                )
+                        except Exception:
+                            logger.warning("Selector failed for %s", doc.file_name, exc_info=True)
+
+                    _selector_produced_records = len(records) > 0
 
                 # ============================================================
                 # LARGE DOC FAST-PATH (>500 pages)
