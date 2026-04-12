@@ -224,7 +224,8 @@ def _build_batch_prompt(
         f"- In a bank statement: the ACCOUNT HOLDER (not the bank staff)\n"
         f"- In an HR file: the EMPLOYEE (not the HR manager)\n"
         f"- In a legal filing: the CLAIMANT/DEFENDANT (not the attorney)\n\n"
-        f"Also extract the primary subject's GUARDIAN if present (parent, spouse, legal guardian).\n\n"
+        f"Also extract the primary subject's SECONDARY CONTACT if present "
+        f"(parent, spouse, guardian, emergency contact, next of kin).\n\n"
         f"Fields to look for: {fields_hint}\n\n"
         f"Return a JSON array with one object per page:\n"
         f"[\n"
@@ -245,8 +246,8 @@ def _build_batch_prompt(
         f"  city, state, and ZIP code. If you cannot find a street address, set address to null.\n"
         f"- phone: Personal phone number ONLY. Institutional phone numbers that appear in page\n"
         f"  headers (same on EVERY page) are NOT personal — set to null.\n"
-        f"- parent_or_guardian: Parent or guardian name if present. In school docs, this is\n"
-        f"  usually listed near the student name (e.g., 'John & Mary Smith' above the student).\n"
+        f"- parent_or_guardian: Secondary contact (parent, spouse, guardian, emergency contact).\n"
+        f"  This is a related person, NOT the primary subject themselves.\n"
         f"- One object per page. If a page has no primary subject, omit it.\n"
         f"- If multiple subjects on one page (e.g., payroll list), return one per subject.\n"
         f"- Use null for any field not found.\n\n"
@@ -361,10 +362,11 @@ def _parse_batch_response(
             addr_clean = addr.strip()
             # Must contain a number (street addresses start with numbers)
             has_number = any(c.isdigit() for c in addr_clean[:10])
-            # Must not be instructional/grade text
-            bad_patterns = ["grade", "final", "semester", "please", "contact",
-                           "question", "teacher", "student", "office", "daily",
-                           "progress", "skyward", "counseling", "login"]
+            # Must not be instructional text (common in page body, not addresses)
+            bad_patterns = ["please contact", "if you have any question",
+                           "final grades", "semester 1", "semester 2",
+                           "daily basis", "login information",
+                           "check skyward", "counseling office"]
             is_garbage = any(p in addr_clean.lower() for p in bad_patterns)
 
             # Validate address text appears on the claimed page
