@@ -2681,6 +2681,69 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                 _selector_produced_records = _use_selector and len(records) > 0
 
                 # ============================================================
+                # TEXT BATCH EXTRACTION (Step 37, feature-flagged)
+                # Fast, reliable path for text PDFs. Uses qwen2.5:7b to
+                # extract primary subjects in batches of 5 pages per call.
+                # Entity_role-aware: ignores teachers/providers/institutional.
+                # ============================================================
+                if (
+                    not _selector_produced_records
+                    and not records
+                    and settings.use_text_llm_batch
+                    and settings.llm_assist_enabled
+                    and blocks  # has text content
+                    and total_pg > 0
+                ):
+                    try:
+                        from app.pipeline.text_batch_extractor import extract_text_batch
+                        from app.llm.client import OllamaClient as _TBClient
+
+                        # Build page_texts from blocks
+                        _tb_page_texts: dict[int, str] = {}
+                        for b in blocks:
+                            pg = b.page_or_sheet
+                            if isinstance(pg, int):
+                                if pg not in _tb_page_texts:
+                                    _tb_page_texts[pg] = ""
+                                _tb_page_texts[pg] += b.text + "\n"
+
+                        if _tb_page_texts:
+                            _tb_client = _TBClient(db_session=db, timeout_s=120)
+
+                            # Get doc type and field inventory from metadata
+                            _tb_meta = doc.metadata_json or {}
+                            _tb_seg = _tb_meta.get("segregation", {})
+                            _tb_doc_type = _tb_seg.get("document_type", "unknown") if isinstance(_tb_seg, dict) else "unknown"
+                            _tb_fields = _tb_seg.get("field_inventory", []) if isinstance(_tb_seg, dict) else []
+
+                            logger.info(
+                                "[%d/%d] TEXT BATCH: %s | %d pages | type=%s",
+                                i, len(approved_docs), doc.file_name,
+                                len(_tb_page_texts), _tb_doc_type,
+                            )
+
+                            records = extract_text_batch(
+                                page_texts=_tb_page_texts,
+                                ollama_client=_tb_client,
+                                doc_id=str(doc.id),
+                                document_type=_tb_doc_type,
+                                field_inventory=_tb_fields,
+                            )
+
+                            if records:
+                                extraction_path = "1-text-batch"
+                                logger.info(
+                                    "[%d/%d] TEXT BATCH DONE: %s | %d records",
+                                    i, len(approved_docs), doc.file_name, len(records),
+                                )
+
+                    except Exception:
+                        logger.warning(
+                            "Text batch extraction failed for %s — falling through to legacy",
+                            doc.file_name, exc_info=True,
+                        )
+
+                # ============================================================
                 # LARGE DOC FAST-PATH (>500 pages)
                 # Skip LLM-heavy paths (1, 2a, 2b). Instead:
                 # 1. LLM reads pages 0-20 to learn the pattern (~1 min)
