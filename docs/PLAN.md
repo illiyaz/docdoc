@@ -650,6 +650,42 @@ Has text layer? ──yes──> Coordinate field map validates? ──yes──
  PATH 2: Vision (90B) ── scanned/image only                               
 ```
 
+#### Edge cases and multi-page strategy
+
+**Existing multi-page infrastructure (already built, reusable):**
+- `DocumentTemplate` with `pages_per_instance` and `instance_marker` — detects multi-page records
+- `find_instance_boundaries()` — marker-based scanning for variable-length instances
+- `get_instance_pages()` — fixed-stride fallback
+- `LLMTemplateExtractor.extract_all_instances()` — batched LLM extraction with dedup
+- `build_composite_record()` — Presidio-based cross-page stitching fallback
+- **Verdict: highly compatible with text batch.** No reinvention needed — wire text batch into existing instance grouping.
+
+**Edge case 1: Data spanning page boundaries**
+- Problem: Address starts on page 14, city/state on page 15
+- Solution: **Overlapping page windows.** Send pages [0-5], [4-9], [8-13]... with 1-2 page overlap. The LLM sees complete data; dedup merges duplicates from overlapping windows.
+- Alternative: **Tail-buffer stitching** — prepend last 5 lines of previous page to current page text. Cheaper than full overlap.
+- The existing `PageStitcher` in `app/readers/stitcher.py` does text-level stitching for coordinate extraction but is NOT used in template extraction. Could be adapted.
+
+**Edge case 2: Multiple subjects on one page**
+- Problem: Payroll register has 4-8 employees per page in tabular format
+- Solution: The prompt says "extract ALL subjects, return JSON array." The LLM naturally handles this — it reads "John Smith SSN:... Jane Doe SSN:..." and returns `[{person1}, {person2}]`.
+- Coordinate extraction CANNOT handle this (fixed to 1 record/page). Text batch can.
+- Risk: Dense pages with 20+ subjects — LLM may miss some. QA gap detection catches these.
+
+**Edge case 3: Variable subjects per page**
+- Problem: Page 1 has 3 subjects, page 2 has 1, page 3 has 5
+- Solution: Text batch returns variable-length arrays per page. The pipeline already handles this — `extract_all_instances()` processes per-instance, and multi-subject pages just return more records.
+
+**Edge case 4: Multi-page single-person (existing template path)**
+- Problem: Loan application — page 1 demographics, page 3 SSN, page 5 employment
+- Solution: **Already handled** by `LLMTemplateExtractor`. Pages grouped by `pages_per_instance` or `instance_marker`. All pages for one person sent together in one LLM call. No changes needed.
+- Text batch enhancement: When `pages_per_instance > 1`, batch by instance groups instead of fixed page windows.
+
+**Edge case 5: Mixed structure within one document**
+- Problem: HR file — page 1 is a form (Category A), pages 2-5 are payroll register (Category B), pages 6-10 are emails (Category E)
+- Solution: **Per-page classification** during analysis. The segregation step already identifies doc type per page. Text batch can use per-page routing — send form pages individually, send payroll pages as a group, send email pages with full context.
+- This is a Phase 8+ capability — not in scope for Step 37 MVP.
+
 #### Performance targets
 - 225-page text PDF: ~8-10 min (vs 10s coordinate, 20+ min table fallback)
 - Per-page accuracy: >95% name extraction, >90% address extraction
