@@ -710,9 +710,50 @@ Current gap fill is slow: 335 gaps × 4-method cascade × per-gap PDF I/O = 25+ 
 | `app/pipeline/gap_filler.py` | Refactor `fill()` to batch by page, open PDF once, batch LLM calls |
 | `app/pipeline/two_phase.py` | Pass doc handle to GapFiller instead of path |
 
+#### Quality improvement plan (based on April 12 end-to-end results)
+
+**Current:** 47% student accuracy (53/113), 65 wrong subjects (teachers)
+**Target:** >90% student accuracy, <5% teacher contamination
+
+**Priority 1: Reduce batch size from 5 to 2-3 pages**
+- 5-page batches cause timeouts (120s) on ~15% of batches → pages lost
+- Smaller batches = faster per call, fewer timeouts, less cross-page confusion
+- Trade-off: more LLM calls (46 vs 23) but each faster (~8s vs ~13s)
+- Net time similar (~6 min) but accuracy much higher
+
+**Priority 2: Post-extraction page-position verification**
+- After LLM returns a name, verify it appears in the STUDENT position on the page
+- For Meadowdale reports: student name is at line 7 (y≈179), teacher names at y>340
+- Simple check: is the extracted name in the first 10 lines of the page? If not, reject.
+- This catches teachers that the prompt didn't filter
+
+**Priority 3: Try gemma3:12b for extraction**
+- qwen2.5:7b is fast but inconsistent on role attribution
+- gemma3:12b was decent in our judgment tests (0 critical drifts on some files)
+- Trade-off: ~2x slower per call but potentially higher accuracy
+- Test with scripts/test_llm_judgment.py on extraction quality
+
+**Priority 4: Page-specific prompts for known document types**
+- When segregation identifies "grade_report", use a grade-report-specific prompt:
+  "The student name is on line 7 (after the parent names). The address is on line 8.
+   Lines after 'Semester 1' are grades with TEACHER NAMES — do NOT extract those."
+- This turns the generic prompt into a targeted extraction instruction
+
+**Priority 5: Guardian dedup handling**
+- Currently 97 guardians dropped as "name-only" (no separate address)
+- Fix: when creating guardian PIIRecord, copy the student's address to the guardian
+  (they share the same address)
+- Or: create a guardian→student link in notification_subjects
+
+**Priority 6: QA screen improvements**
+- Show extracted records (name + address) not just gaps
+- Show side-by-side: extracted vs page text preview
+- Allow auditor to correct names/addresses inline
+- Highlight records where confidence is low
+
 #### Migration path
-1. Implement behind feature flag (off by default)
+1. Implement priorities 1-2 (batch size + position verification) — quick wins
 2. Test on all 12 phase2_large_pdfs_mini files
 3. Compare accuracy vs coordinate vs Presidio using test_llm_judgment.py
-4. If accuracy ≥ coordinate accuracy: make it the default Path 1
+4. If accuracy ≥ 85%: release as default extraction path
 5. Eventually: coordinate becomes optional optimization, text batch is the reliable default
