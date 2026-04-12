@@ -21,8 +21,9 @@ from app.rra.entity_resolver import PIIRecord
 
 logger = logging.getLogger(__name__)
 
-# Batch config
-DEFAULT_PAGES_PER_BATCH = 5
+# Batch config — 3 pages per batch balances speed vs accuracy.
+# 5 pages caused timeouts and cross-page confusion.
+DEFAULT_PAGES_PER_BATCH = 3
 MAX_CHARS_PER_PAGE = 3000
 
 
@@ -232,12 +233,30 @@ def _parse_batch_response(
 
         # Validate name exists on the claimed page
         if actual_page_text and name.split()[0].lower() not in actual_page_text:
-            # Name's first word not found on this page — likely cross-contamination
             logger.debug(
                 "Dropping record: name '%s' not found on page %s",
                 name[:30], page_str,
             )
             continue
+
+        # P2: Page-position verification — the primary subject's name should
+        # appear in the HEADER section of the page (first ~12 lines), not in
+        # the body/grades/provider section (lines 15+). This catches teacher
+        # names that the LLM incorrectly returns as primary subjects.
+        if actual_page_text:
+            page_lines = [l.strip() for l in page_texts.get(page_0, "").split("\n") if l.strip()]
+            header_lines = page_lines[:12]  # first 12 content lines = subject section
+            header_text = " ".join(header_lines).lower()
+            name_first = name.split()[0].lower()
+            name_last = name.split()[-1].lower() if len(name.split()) > 1 else name_first
+
+            # Check if the name's last name appears in the header section
+            if name_last not in header_text and name_first not in header_text:
+                logger.debug(
+                    "Dropping record: name '%s' not in header section of page %s",
+                    name[:30], page_str,
+                )
+                continue
 
         # Build address dict — validate it's a real street address AND on the right page
         raw_address = None
