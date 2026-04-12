@@ -231,11 +231,15 @@ def _parse_batch_response(
         if page_texts:
             actual_page_text = page_texts.get(page_0, "").lower()
 
-        # Validate name exists on the claimed page
-        if actual_page_text and name.split()[0].lower() not in actual_page_text:
+        # Validate name exists on the claimed page — check LAST name
+        # (more unique than first name) against full page text.
+        # This catches LLM hallucinations where it invents plausible names.
+        name_parts = name.split()
+        name_last = name_parts[-1].lower() if len(name_parts) > 1 else name_parts[0].lower()
+        if actual_page_text and len(name_last) >= 3 and name_last not in actual_page_text:
             logger.debug(
-                "Dropping record: name '%s' not found on page %s",
-                name[:30], page_str,
+                "Dropping hallucinated name: '%s' (last='%s') not on page %s",
+                name[:30], name_last, page_str,
             )
             continue
 
