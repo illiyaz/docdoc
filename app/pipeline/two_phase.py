@@ -2635,7 +2635,8 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
 
                 # ── Legacy path: Selector → Coordinate → Table → Presidio ──
                 # Only runs when text batch is OFF or failed to produce records
-                _selector_produced_records = False
+                _text_batch_produced_records = len(records) > 0
+                _selector_produced_records = _text_batch_produced_records  # skip all legacy if text batch worked
                 if not records and settings.use_extraction_selector:
                     _use_selector = True
                     _vr_pre = _doc_meta_pre.get("vision_routing", {})
