@@ -574,6 +574,82 @@ Surya had catastrophic performance degradation on CMG (batches 131-190 went from
 - **Gap fill also uses text batch:** For text PDFs, gap fill should always use text LLM (7s/page), never vision (30s+/page). Feature flag controls this.
 - **Comparison mode:** When both coordinate and text batch are enabled, run both on a sample (5 pages), compare record quality, pick the better path for the full doc.
 
+#### Applicability by document type
+
+Text batch extraction works for ALL doc types — the only variable is the text source:
+
+| Doc type | Text source | Extra step? |
+|---|---|---|
+| Text PDF | PyMuPDF `page.get_text()` | None |
+| XLSX/XLS/CSV | openpyxl/xlrd row data | Serialize rows as text |
+| DOCX | python-docx paragraphs | None |
+| MSG/EML | extract-msg body + headers | None |
+| Scanned PDF | **docTR OCR** (0.55s/page) → text | OCR first |
+| HEIC/JPG/PNG | **docTR OCR** → text | OCR first |
+| OCR garbage | Vision model (90B) last resort | Only when OCR fails |
+
+This means the 90B vision model is ONLY needed when docTR OCR produces garbage (badly degraded faxes, handwritten forms). Everything else routes through docTR + qwen2.5:7b.
+
+#### Entity_role — primary vs supporting subject
+
+The extraction prompt MUST distinguish primary subjects from supporting cast. This is the single biggest accuracy lever — more important than extraction speed.
+
+**Current prompt coverage (from April 11-12 changes):**
+- School docs: student = primary, parent = guardian, teacher = provider ✓
+- Generic entity_role: primary_subject, guardian, institutional, provider ✓
+
+**Gaps to fill in Step 37 prompt:**
+
+| Domain | Primary subject | Supporting (DO NOT extract) |
+|---|---|---|
+| School/FERPA | Student | Teachers, counselors, principal, school staff |
+| Medical/HIPAA | Patient | Doctors, nurses, providers, hospital staff, insurance agent |
+| Financial/bank | Account holder | Relationship manager, branch staff, co-signers (tag separately) |
+| Legal | Plaintiff/defendant/claimant | Attorneys, judges, court clerks, witnesses |
+| HR/employment | Employee | HR manager, supervisor, recruiter, reference contacts |
+| Insurance | Policyholder/claimant | Agent, adjuster, underwriter, provider |
+| Government | Taxpayer/beneficiary | Caseworker, examiner, agent |
+
+The Step 37 prompt should include domain-specific suppression:
+```
+"If this is a SCHOOL document: extract student name + parent name + student address. 
+ Ignore: teacher names (appear in grade sections), counselor names, principal name.
+ If this is a MEDICAL document: extract patient name + DOB + MRN + address.
+ Ignore: physician names, nurse names, facility staff, insurance company contacts.
+ If this is a FINANCIAL document: extract account holder name + SSN + address.
+ Ignore: relationship manager, branch manager, agent names.
+ ..."
+```
+
+#### Feature flag testing plan
+
+1. **`USE_TEXT_LLM_BATCH=false`** (default): Current behavior — coordinate → table → Presidio
+2. **`USE_TEXT_LLM_BATCH=true`**: New behavior — coordinate → text batch → Presidio
+3. **`USE_TEXT_LLM_BATCH=compare`**: Run both paths on 5 sample pages, log comparison, pick winner
+
+Testing with `scripts/test_llm_judgment.py`:
+- Run all 12 phase2_large_pdfs_mini files with each mode
+- Compare: subjects found, accuracy (vs ground truth), teacher contamination rate, total time
+- Output to `output/extraction_comparison.csv` for analysis
+
+#### Updated extraction hierarchy
+
+```
+Has text layer? ──yes──> Coordinate field map validates? ──yes──> PATH 0: Coordinate (10s)
+     │                          │ no                                          
+     │                          v                                          
+     │                   PATH 1: Text LLM Batch (8-10 min)                
+     │                          │                                          
+     no                         v                                          
+     │                   PATH 3: Presidio fallback (12s)                   
+     v                                                                     
+ docTR OCR ──text OK──> PATH 1: Text LLM Batch                           
+     │                                                                     
+     no (garbage)                                                          
+     v                                                                     
+ PATH 2: Vision (90B) ── scanned/image only                               
+```
+
 #### Performance targets
 - 225-page text PDF: ~8-10 min (vs 10s coordinate, 20+ min table fallback)
 - Per-page accuracy: >95% name extraction, >90% address extraction
