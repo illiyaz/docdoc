@@ -212,12 +212,18 @@ def main():
     parser.add_argument("--models", default="qwen2.5:7b,llama3:8b",
                        help="Comma-separated models to test")
     parser.add_argument("--pages", type=int, default=5, help="Number of pages to test")
+    parser.add_argument("--pdf", default=None, help="Path to PDF file to test")
     args = parser.parse_args()
 
     # Find PDF
-    pdf_path = PDF_PATH if os.path.exists(PDF_PATH) else ALT_PDF
-    if not os.path.exists(pdf_path):
-        print(f"PDF not found at {PDF_PATH} or {ALT_PDF}")
+    if args.pdf and os.path.exists(args.pdf):
+        pdf_path = args.pdf
+    elif os.path.exists(PDF_PATH):
+        pdf_path = PDF_PATH
+    elif os.path.exists(ALT_PDF):
+        pdf_path = ALT_PDF
+    else:
+        print(f"PDF not found. Use --pdf to specify path.")
         sys.exit(1)
 
     models = [m.strip() for m in args.models.split(",")]
