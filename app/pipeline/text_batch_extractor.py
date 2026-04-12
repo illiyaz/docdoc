@@ -101,7 +101,9 @@ def extract_text_batch(
             )
             calls_made += 1
 
-            records = _parse_batch_response(response, doc_id, batch_pages)
+            # Build page text lookup for validation
+            batch_page_texts = {pg: page_texts.get(pg, "") for pg in batch_pages}
+            records = _parse_batch_response(response, doc_id, batch_pages, batch_page_texts)
             all_records.extend(records)
 
         except Exception:
@@ -168,8 +170,13 @@ def _parse_batch_response(
     response: str,
     doc_id: str,
     batch_pages: list[int],
+    page_texts: dict[int, str] | None = None,
 ) -> list[PIIRecord]:
-    """Parse LLM JSON response into PIIRecord objects."""
+    """Parse LLM JSON response into PIIRecord objects.
+
+    When *page_texts* is provided, validates extracted values exist
+    on the claimed page — prevents cross-page contamination in batches.
+    """
     records: list[PIIRecord] = []
 
     # Clean response
@@ -204,10 +211,35 @@ def _parse_batch_response(
         if not name or not isinstance(name, str) or len(name.strip()) < 2:
             continue
 
-        # Clean name
         name = name.strip()
 
-        # Build address dict — validate it looks like a real street address
+        # Resolve page number (LLM returns 1-indexed, we use 0-indexed internally)
+        page = entry.get("page")
+        if isinstance(page, int):
+            page_0 = page - 1  # convert to 0-indexed
+            page_str = str(page)
+        elif isinstance(page, str) and page.isdigit():
+            page_0 = int(page) - 1
+            page_str = page
+        else:
+            page_0 = batch_pages[0] if batch_pages else 0
+            page_str = str(page_0 + 1)
+
+        # Get the actual page text for validation
+        actual_page_text = ""
+        if page_texts:
+            actual_page_text = page_texts.get(page_0, "").lower()
+
+        # Validate name exists on the claimed page
+        if actual_page_text and name.split()[0].lower() not in actual_page_text:
+            # Name's first word not found on this page — likely cross-contamination
+            logger.debug(
+                "Dropping record: name '%s' not found on page %s",
+                name[:30], page_str,
+            )
+            continue
+
+        # Build address dict — validate it's a real street address AND on the right page
         raw_address = None
         addr = entry.get("address")
         if addr and isinstance(addr, str) and len(addr.strip()) > 5:
@@ -219,17 +251,21 @@ def _parse_batch_response(
                            "question", "teacher", "student", "office", "daily",
                            "progress", "skyward", "counseling", "login"]
             is_garbage = any(p in addr_clean.lower() for p in bad_patterns)
-            if has_number and not is_garbage:
-                raw_address = {"raw": addr_clean}
 
-        # Get page number
-        page = entry.get("page")
-        if isinstance(page, int):
-            page_str = str(page)
-        elif isinstance(page, str):
-            page_str = page
-        else:
-            page_str = str(batch_pages[0] + 1) if batch_pages else "1"
+            # Validate address text appears on the claimed page
+            on_page = True
+            if actual_page_text and has_number:
+                # Check first significant word of address (street number)
+                addr_words = addr_clean.split()
+                if addr_words and addr_words[0].lower() not in actual_page_text:
+                    on_page = False
+                    logger.debug(
+                        "Dropping address '%s' — not found on page %s",
+                        addr_clean[:30], page_str,
+                    )
+
+            if has_number and not is_garbage and on_page:
+                raw_address = {"raw": addr_clean}
 
         # Build entity_types
         entity_types = ["PERSON"]
