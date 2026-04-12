@@ -133,26 +133,33 @@ def _build_batch_prompt(
         f"- In a bank statement: the ACCOUNT HOLDER (not the bank staff)\n"
         f"- In an HR file: the EMPLOYEE (not the HR manager)\n"
         f"- In a legal filing: the CLAIMANT/DEFENDANT (not the attorney)\n\n"
-        f"Also extract the primary subject's GUARDIAN if present (parent, spouse, legal guardian).\n"
-        f"Tag guardians with role=guardian.\n\n"
+        f"Also extract the primary subject's GUARDIAN if present (parent, spouse, legal guardian).\n\n"
         f"Fields to look for: {fields_hint}\n\n"
-        f"Return a JSON array with one object per page that has data:\n"
+        f"Return a JSON array with one object per page:\n"
         f"[\n"
-        f'  {{"page": 1, "name": "student/patient/employee name", '
-        f'"parent_or_guardian": "parent name or null", '
-        f'"address": "full address or null", '
-        f'"phone": "phone number or null", '
-        f'"dob": "date of birth or null", '
-        f'"ssn": "SSN or government ID or null", '
-        f'"email": "email or null"}}\n'
+        f'  {{"page": 1, "name": "John Smith", '
+        f'"parent_or_guardian": "Mary Smith", '
+        f'"address": "123 Main St, Springfield, IL 62701", '
+        f'"phone": "555-123-4567", '
+        f'"dob": "01/15/2005", '
+        f'"ssn": "123-45-6789", '
+        f'"email": "john@example.com"}}\n'
         f"]\n\n"
-        f"Rules:\n"
-        f"- One object per page. If a page has NO primary subject data, omit it.\n"
-        f"- If multiple subjects are on one page (e.g., payroll list), return one object per subject.\n"
-        f"- Use null for fields not found on that page.\n"
-        f"- Phone numbers in document headers (same on every page) are institutional — ignore them.\n"
-        f"- School/company addresses that appear on every page are institutional — ignore them.\n\n"
-        f"Respond ONLY with the JSON array. No additional text.\n\n"
+        f"CRITICAL RULES:\n"
+        f"- name: The primary subject's full name ONLY. Not a parent, teacher, or provider.\n"
+        f"- address: MUST be a real STREET ADDRESS with a number + street name.\n"
+        f"  Good: '5720 HILLPOINTE CIR', '123 Main St, City, ST 12345'\n"
+        f"  BAD: 'Final Grades S1 2013', 'please contact the office' — these are NOT addresses.\n"
+        f"  The address is the subject's HOME address, usually with a street number, street name,\n"
+        f"  city, state, and ZIP code. If you cannot find a street address, set address to null.\n"
+        f"- phone: Personal phone number ONLY. Institutional phone numbers that appear in page\n"
+        f"  headers (same on EVERY page) are NOT personal — set to null.\n"
+        f"- parent_or_guardian: Parent or guardian name if present. In school docs, this is\n"
+        f"  usually listed near the student name (e.g., 'John & Mary Smith' above the student).\n"
+        f"- One object per page. If a page has no primary subject, omit it.\n"
+        f"- If multiple subjects on one page (e.g., payroll list), return one per subject.\n"
+        f"- Use null for any field not found.\n\n"
+        f"Respond ONLY with the JSON array.\n\n"
         f"{batch_text}"
     )
 
@@ -200,11 +207,20 @@ def _parse_batch_response(
         # Clean name
         name = name.strip()
 
-        # Build address dict
+        # Build address dict — validate it looks like a real street address
         raw_address = None
         addr = entry.get("address")
-        if addr and isinstance(addr, str) and len(addr.strip()) > 3:
-            raw_address = {"raw": addr.strip()}
+        if addr and isinstance(addr, str) and len(addr.strip()) > 5:
+            addr_clean = addr.strip()
+            # Must contain a number (street addresses start with numbers)
+            has_number = any(c.isdigit() for c in addr_clean[:10])
+            # Must not be instructional/grade text
+            bad_patterns = ["grade", "final", "semester", "please", "contact",
+                           "question", "teacher", "student", "office", "daily",
+                           "progress", "skyward", "counseling", "login"]
+            is_garbage = any(p in addr_clean.lower() for p in bad_patterns)
+            if has_number and not is_garbage:
+                raw_address = {"raw": addr_clean}
 
         # Get page number
         page = entry.get("page")
