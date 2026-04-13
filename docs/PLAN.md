@@ -860,8 +860,42 @@ For vision fallback: render ONE page to image, send, discard.
 |---|---|
 | `app/pipeline/repeating_unit_detector.py` | NEW — 9-page sampling, text LLM call, optional vision fallback, JSON parsing |
 | `app/pipeline/two_phase.py` | Wire between onset detection and document understanding |
-| `app/pipeline/text_batch_extractor.py` | Accept `record_unit` + `separator` + `pattern_description` to build prompt variant |
+| `app/pipeline/text_batch_extractor.py` | Accept `record_unit` + `separator` + `pattern_description` + `context_markers` to build prompt variant |
 | `app/llm/prompts.py` | Add DETECT_REPEATING_UNIT prompt + EXTRACT_MULTI_SUBJECT prompt |
+
+**Context markers — guiding extraction LLM WHERE to look:**
+
+The analysis LLM discovers text markers that bracket the primary subject's data. These are passed to the extraction prompt so it doesn't search 200 lines of noise.
+
+```json
+{
+  "context_markers": {
+    "name_after": "date line or last header field",
+    "name_before": "Employee ID: or similar label",
+    "address_after": "person's name",
+    "address_before": "Employee ID: or tax data start"
+  }
+}
+```
+
+This is text-marker coordinate extraction — more robust than pixel coordinates because it survives reformatting, font changes, and layout shifts. Different documents produce different markers:
+
+| Document | name_after | name_before |
+|---|---|---|
+| Pay stub | Date/advice line | "Employee ID:" |
+| School report | Phone number | "Final Grades" |
+| Payroll register | Dashed separator | "SS-NO" |
+| Bank statement | Account number | "Transaction Date" |
+| Medical record | "Patient:" label | "DOB:" or "MRN:" |
+
+The analysis LLM discovers these markers from 9 sample pages. The extraction LLM is told: "the employee name appears AFTER {name_after} and BEFORE {name_before}." This narrows 2600 chars to ~3 lines.
+
+**Standalone test script:** `scripts/test_repeating_unit.py` — tests the full Step 37b flow on any PDF without running the pipeline:
+1. Samples 9 pages
+2. Calls LLM for repeating unit + context markers
+3. Uses markers to extract from 5 test pages
+4. Compares against ground truth
+5. Reports accuracy per file
 
 #### Migration path
 1. Implement priorities 1-2 (batch size + position verification) — quick wins
