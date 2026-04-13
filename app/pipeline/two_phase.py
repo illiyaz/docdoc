@@ -2063,7 +2063,28 @@ def _count_valid_names(records: list) -> int:
 # Hard upper bound on how long a single document can take.
 # Even if the doc IS making progress, kill it after this many seconds.
 # Prevents a single large doc from blocking the entire queue.
-_DOC_HARD_TIMEOUT_SECONDS = 1800  # 30 minutes max per document
+# Base timeout from settings (default 1800s = 30 min), but scales
+# with page count: large docs (3000+ pages) get proportionally more time.
+_DOC_HARD_TIMEOUT_BASE = 1800  # base: 30 minutes for small docs
+
+
+def _compute_doc_timeout(page_count: int) -> int:
+    """Scale the per-document hard timeout with page count.
+
+    Base: 30 min for ≤200 pages.
+    Scale: +2s per page beyond 200.
+    Cap: 4 hours (14400s) — no doc should take longer.
+
+    Examples:
+        200 pages → 1800s (30 min)
+        500 pages → 2400s (40 min)
+        1000 pages → 3400s (57 min)
+        3000 pages → 7400s (123 min)
+    """
+    from app.core.settings import get_settings
+    base = get_settings().doc_hard_timeout_s or _DOC_HARD_TIMEOUT_BASE
+    extra = max(0, page_count - 200) * 2  # 2s per page beyond 200
+    return min(base + extra, 14400)  # cap at 4 hours
 
 
 class _DocTimeoutError(Exception):
@@ -2378,6 +2399,8 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
             _doc_start = time.time()
             _stall_detector = _DocStallDetector()
             _doc_meta_pre = doc.metadata_json or {}
+            _doc_page_count = _doc_meta_pre.get("total_pages", 200)
+            _doc_timeout = _compute_doc_timeout(int(_doc_page_count) if _doc_page_count else 200)
             _vr = _doc_meta_pre.get("vision_routing", {})
             logger.info(
                 "[%d/%d] START: %s | type=%s | pages=%s | routing=%s | path=%s",
@@ -2699,6 +2722,9 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                             "Text extraction failed for %s — falling through to legacy",
                             doc.file_name, exc_info=True,
                         )
+                    finally:
+                        # Release page text dict — can be 7+ MB for large docs
+                        _tb_page_texts.clear()
 
                 # ── Legacy path: Selector → Coordinate → Table → Presidio ──
                 # Only runs when text batch is OFF or failed to produce records
@@ -2965,7 +2991,7 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                 def _heartbeat_cb(batch_idx: int, total_batches: int, records_so_far: int) -> None:
                     # Hard timeout check (A7) — absolute wall-clock limit per doc
                     _elapsed = time.time() - _doc_start
-                    if _elapsed > _DOC_HARD_TIMEOUT_SECONDS:
+                    if _elapsed > _doc_timeout:
                         raise _DocTimeoutError(
                             f"Hard timeout after {_elapsed:.0f}s "
                             f"at batch {batch_idx}/{total_batches} ({records_so_far} records)"
@@ -2976,16 +3002,19 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                             f"Stalled for {_stall_detector.stall_seconds:.0f}s "
                             f"at batch {batch_idx}/{total_batches} ({records_so_far} records)"
                         )
-                    _update_extraction_progress(
-                        db, run,
-                        stage="detection",
-                        message=f"Extracting {doc.file_name}: batch {batch_idx}/{total_batches} ({records_so_far} records)",
-                        completed_doc_ids=completed_doc_ids,
-                        total_docs=len(approved_docs), current_doc=i,
-                        records_found=len(all_records) + records_so_far,
-                        detail={"total": len(approved_docs), "current": i, "status": "running",
-                                "batch": batch_idx, "total_batches": total_batches},
-                    )
+                    # Write progress every 10 batches (reduces DB commits for large docs)
+                    # Still checks timeout/stall every batch above.
+                    if batch_idx % 10 == 0 or batch_idx == total_batches:
+                        _update_extraction_progress(
+                            db, run,
+                            stage="detection",
+                            message=f"Extracting {doc.file_name}: batch {batch_idx}/{total_batches} ({records_so_far} records)",
+                            completed_doc_ids=completed_doc_ids,
+                            total_docs=len(approved_docs), current_doc=i,
+                            records_found=len(all_records) + records_so_far,
+                            detail={"total": len(approved_docs), "current": i, "status": "running",
+                                    "batch": batch_idx, "total_batches": total_batches},
+                        )
 
                 # --- Path 0: Coordinate extraction (vision-routed) ---
                 # Load vision routing from analysis phase
@@ -4167,8 +4196,11 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
 
             # Attempt auto-fill on detected gaps (per-document)
             if all_detected_gaps and settings.llm_assist_enabled:
-                # Scale LLM budget with gap count: min 50, max 200
-                _gap_budget = min(200, max(50, len(all_detected_gaps) // 2))
+                # Scale LLM budget with gap count and document size
+                # For 3000-page docs with 500+ gaps, need proportional budget.
+                # Budget ≈ gaps × 0.6 (batched fills handle ~5 gaps per call),
+                # floored at 50, capped at 500.
+                _gap_budget = min(500, max(50, int(len(all_detected_gaps) * 0.6)))
 
                 # Group gaps by document
                 from collections import defaultdict as _dd

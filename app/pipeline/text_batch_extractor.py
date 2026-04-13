@@ -215,6 +215,8 @@ def extract_text_batch(
 
     all_records: list[PIIRecord] = []
     calls_made = 0
+    retries_used = 0
+    max_retries = max(10, len(content_pages) // 10)  # cap at 10% of pages
 
     # Overlapping windows when records can span page boundaries
     # Step size = batch size - overlap. Default overlap=0, but overlap=1
@@ -257,11 +259,19 @@ def extract_text_batch(
 
         except Exception:
             # Batch failed (likely timeout) — retry each page individually
+            if retries_used >= max_retries:
+                logger.warning(
+                    "Retry budget exhausted (%d/%d) — skipping pages %s",
+                    retries_used, max_retries, [p + 1 for p in batch_pages],
+                )
+                continue
             logger.info(
-                "Batch failed for pages %s — retrying individually",
-                [p + 1 for p in batch_pages],
+                "Batch failed for pages %s — retrying individually (%d/%d retries used)",
+                [p + 1 for p in batch_pages], retries_used, max_retries,
             )
             for retry_pg in batch_pages:
+                if retries_used >= max_retries:
+                    break
                 retry_text = page_texts[retry_pg][:MAX_CHARS_PER_PAGE]
                 if len(retry_text.strip()) < 5:
                     continue
@@ -277,12 +287,14 @@ def extract_text_batch(
                         document_id=doc_id,
                     )
                     calls_made += 1
+                    retries_used += 1
                     retry_page_texts = {retry_pg: page_texts.get(retry_pg, "")}
                     retry_records = _parse_batch_response(
                         retry_response, doc_id, [retry_pg], retry_page_texts,
                     )
                     all_records.extend(retry_records)
                 except Exception:
+                    retries_used += 1
                     logger.debug("Retry failed for page %d", retry_pg + 1)
 
     logger.info(
