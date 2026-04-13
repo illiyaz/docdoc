@@ -20,6 +20,7 @@ For detailed per-step implementation notes, see [CLAUDE_HISTORY.md](CLAUDE_HISTO
 | Phase 5 Step 30f (Performance + Quality Sprint) | **COMPLETE** | ~2850 |
 | Phase 5 Step 37 (Text LLM Batch + Strategy A/B/C) | **COMPLETE** | — |
 | Phase 5 Step 37b (Repeating Unit Detection) | **COMPLETE** | — |
+| Phase 5 Step 30g (Scale Hardening for 3000+ pages) | **COMPLETE** | — |
 | Phase 5 Step 38 (Production vLLM Deployment) | **NEXT** | — |
 | **Phase 6 (Security + Governance)** | Pending | — |
 | Phase 7 (Workflow Completeness) | Pending | — |
@@ -957,6 +958,51 @@ The analysis LLM discovers these markers from 9 sample pages. The extraction LLM
 | Comparison mode (`USE_TEXT_LLM_BATCH=compare`) | P4 | Run both coordinate + text batch on sample, pick winner. Development aid only. |
 | Test on 100-page versions | P1 | Files exist in `docs/testingsamples/phase2_100pg/` but not systematically tested through pipeline. |
 | QA post-approval flow broken | **Known Bug** | Clicking "Approve for Notification" navigates to notification tab, but the notification tab experience is incomplete. Deferred — fix in Step 29b (Batch Approval & Send). |
+
+---
+
+### Step 30g — Scale Hardening for 3000+ Page Documents (COMPLETE)
+
+**Goal:** Ensure the extraction pipeline handles documents with 3000+ pages without timeout, memory exhaustion, or silent data loss.
+
+**Audit findings and fixes (April 13-14, 2026):**
+
+| Issue | Severity | Before | After |
+|---|---|---|---|
+| Per-doc hard timeout | CRITICAL | 30 min flat — kills 3000-page extraction | `_compute_doc_timeout()`: 30min base + 2s/page beyond 200, cap 4hr. 3000pg → 123min |
+| LLM gap-fill budget | CRITICAL | max 200 calls for 500+ gaps (80% unfilled) | `min(500, gaps × 0.6)`. 500 gaps → 300 calls |
+| LLM retry explosion | CRITICAL | No cap — unbounded retries on dead model | Circuit breaker: 5 consecutive failures → abort. Success resets counter. Failed pages tracked as gaps. |
+| PDF `_forget_page()` missing | HIGH | gap_filler.py had 4 missing calls | All fixed — `_forget_page()` after every `get_text()` |
+| Pre-onset pages loaded | MEDIUM | ALL pages loaded into text dict | Skips pages before onset (cover sheets, TOC have no PII) |
+| Text dict memory leak | MEDIUM | 7.5MB for 3000 pages lingers after extraction | `.clear()` in finally block |
+| Progress DB commits | MEDIUM | Every batch (1000 commits for 3000pg) | Every 10 batches (100 commits). Timeout checks still every batch. |
+| Entity resolver O(n²) | LOW | — | Already safe — index-based filtering, not O(n²) |
+| CSV export all-in-memory | LOW | — | ~6MB for 3000 subjects — acceptable |
+
+**Circuit breaker pattern (key design decision):**
+- No hard retry cap — every page gets a fair retry chance regardless of doc size
+- 5 consecutive LLM call failures = model is down → abort remaining pages immediately
+- Any successful call resets the counter (model recovered from transient failure)
+- Failed pages tracked in `failed_pages` list → surfaced as gaps in QA screen
+- Works identically for 50-page and 5000-page docs — threshold is about model health, not doc size
+- Applied to both Strategy A (marker extraction) and Strategy B (text batch)
+
+**Timeout scaling examples:**
+
+| Pages | Timeout | Notes |
+|---|---|---|
+| 200 | 30 min | Base timeout from settings |
+| 500 | 40 min | +600s for 300 extra pages |
+| 1000 | 57 min | +1600s |
+| 3000 | 123 min | +5600s |
+| 5000+ | 240 min (4hr cap) | Maximum allowed |
+
+**Files modified:**
+- `app/pipeline/two_phase.py` — `_compute_doc_timeout()`, text dict cleanup, progress batching, gap budget scaling
+- `app/pipeline/text_batch_extractor.py` — circuit breaker in both `extract_with_markers()` and `extract_text_batch()`
+- `app/pipeline/gap_filler.py` — `_forget_page()` in 4 locations
+- `tests/test_gap_detection.py` — fixed test for batched fill path
+- `tests/test_two_phase.py` — fixed 3 pre-existing failures (quality gate threshold, settings env override)
 
 ---
 
