@@ -452,8 +452,12 @@ export function JobSubmit() {
       setJobId(res.job_id)
       setPhase("complete")
 
-      // C4: Auto-navigate to project detail after 2s so user sees results
-      if (selectedProjectId) {
+      // Auto-navigate: two-phase → segregation review, else → project detail
+      if (selectedProjectId && res.job_id) {
+        setTimeout(() => {
+          navigate(`/projects/${selectedProjectId}/segregation?job_id=${res.job_id}`)
+        }, 2000)
+      } else if (selectedProjectId) {
         setTimeout(() => navigate(`/projects/${selectedProjectId}`), 2000)
       }
     } catch (err) {
