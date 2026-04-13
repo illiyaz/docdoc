@@ -897,12 +897,51 @@ The analysis LLM discovers these markers from 9 sample pages. The extraction LLM
 4. Compares against ground truth
 5. Reports accuracy per file
 
-#### Migration path
-1. Implement priorities 1-2 (batch size + position verification) — quick wins
-2. Test on all 12 phase2_large_pdfs_mini files
-3. Compare accuracy vs coordinate vs Presidio using test_llm_judgment.py
-4. If accuracy ≥ 85%: release as default extraction path
-5. Eventually: coordinate becomes optional optimization, text batch is the reliable default
+#### Final Extraction Strategy (April 13, 2026 — validated by overnight testing)
+
+**Model: qwen2.5:32b for ALL text-based LLM calls.** Accuracy is the priority.
+- Overnight test: 97.3% on school reports (vs 87% for 7b, 92% for 14b)
+- Marker detection: 32b is honest (returns empty when no labels) where 14b hallucinated
+
+**Three auto-selected strategies:**
+
+```
+1. Has text layer?
+   No → Strategy C (vision: 90B on rendered page images)
+   Yes ↓
+
+2. Marker detection (32b, one call, 2 sample pages):
+   "Find FIXED TEXT LABELS that appear before/after person names"
+   
+   Markers found? → Strategy A
+   No markers?    → Strategy B
+```
+
+**Strategy A: Marker-Filter (labeled documents)**
+- Python filters each page to ~5 lines around the markers (no LLM)
+- 32b extracts from tiny snippets (~100 chars vs 2600)
+- Tested: WashingtonCMD 100%, CMG 100%, Complex1 80%, TPHS2 90%
+- Speed: ~2-5 min for 225 pages
+- Works on: pay stubs, tax forms, financial statements, insurance forms
+
+**Strategy B: Full Text Batch (label-less documents)**
+- Send 3 pages per batch to 32b with entity_role prompt
+- Tested: school reports 97.3%, pension statements 95%
+- Speed: ~18-25 min for 225 pages on Mac, ~2-3 min on A100
+- Works on: school reports, letters, correspondence, narrative docs
+
+**Strategy C: Vision (scanned/image only)**
+- docTR OCR → if text OK → Strategy A or B
+- If OCR fails → render page → 90B vision model
+- Works on: faxes, photographed documents, handwritten forms
+
+**Implementation order:**
+1. Add marker detection to analysis phase (new file: `repeating_unit_detector.py`)
+2. Add marker-filter extraction to `text_batch_extractor.py`
+3. Wire strategy selection in `two_phase.py`
+4. Switch all text LLM calls to 32b in .env
+5. Test on 100-page versions of all 12 files
+6. Verify end-to-end pipeline via UI
 
 ---
 
