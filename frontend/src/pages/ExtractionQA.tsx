@@ -4,7 +4,7 @@
  * Three-panel layout:
  * 1. Summary dashboard (top) — completeness stats, per-document breakdown
  * 2. Smart sample panel (middle) — curated record samples
- * 3. Unresolved gaps panel (bottom) — gap resolution actions
+ * 3. Unresolved gaps panel (bottom) — gap resolution actions + bulk resolve
  *
  * URL: /projects/:id/qa?job_id=xxx
  */
@@ -27,12 +27,15 @@ import {
   Ban,
   HelpCircle,
   Lock,
+  Zap,
+  ListChecks,
 } from "lucide-react"
 import {
   getQASummary,
   getQASamples,
   getQAGaps,
   resolveQAGap,
+  bulkResolveQAGaps,
   approveQA,
 } from "@/api/client"
 import type { QASample, ExtractionGap } from "@/api/client"
@@ -171,6 +174,7 @@ function GapRow({
   onResolved: () => void
 }) {
   const [showResolve, setShowResolve] = useState(false)
+  const [showPageText, setShowPageText] = useState(false)
   const [value, setValue] = useState("")
   const [notes, setNotes] = useState("")
 
@@ -186,23 +190,33 @@ function GapRow({
   })
 
   const isResolved = gap.fill_result === "filled" || gap.fill_result === "not_applicable"
-  const isManual = gap.filled_by === "manual"
+  const isManuallyAcknowledged = gap.filled_by === "manual"
 
   return (
     <div
       className={`rounded-lg border p-4 ${
         isResolved
           ? "border-green-200 bg-green-50"
-          : gap.severity === "high"
-            ? "border-red-200 bg-red-50"
-            : "border-gray-200 bg-white"
+          : isManuallyAcknowledged
+            ? "border-gray-200 bg-gray-50"
+            : gap.severity === "high"
+              ? "border-red-200 bg-red-50"
+              : "border-gray-200 bg-white"
       }`}
     >
       <div className="flex items-start justify-between">
-        <div>
-          <div className="flex items-center gap-2">
+        <div className="flex-1">
+          <div className="flex items-center gap-2 flex-wrap">
             <SeverityBadge severity={gap.severity} />
-            <span className="text-sm font-medium text-gray-700">{gap.gap_type}</span>
+            <span className="text-sm font-medium text-gray-700">
+              {gap.gap_type === "empty_page"
+                ? "No records extracted"
+                : gap.gap_type === "missing_field"
+                  ? "Missing field"
+                  : gap.gap_type === "truncated"
+                    ? "Truncated data"
+                    : gap.gap_type}
+            </span>
             {gap.expected_field && (
               <span className="rounded bg-gray-100 px-1.5 py-0.5 text-xs font-mono text-gray-600">
                 {gap.expected_field}
@@ -211,7 +225,12 @@ function GapRow({
             {isResolved && (
               <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-2 py-0.5 text-xs text-green-700">
                 <CheckCircle className="h-3 w-3" />
-                {isManual ? "Manually resolved" : "Auto-filled"}
+                {isManuallyAcknowledged ? "Manually resolved" : "Auto-filled"}
+              </span>
+            )}
+            {!isResolved && isManuallyAcknowledged && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-gray-200 px-2 py-0.5 text-xs text-gray-600">
+                Acknowledged
               </span>
             )}
           </div>
@@ -219,19 +238,44 @@ function GapRow({
             Page {gap.page_num} · {gap.document_name}
           </p>
           {gap.context && (
-            <p className="mt-1 text-xs text-gray-400">{gap.context}</p>
+            <p className="mt-1 text-xs text-gray-600 font-mono bg-gray-50 rounded px-2 py-1">
+              {gap.context}
+            </p>
+          )}
+          {gap.actual_fields && gap.actual_fields.length > 0 && (
+            <p className="mt-1 text-xs text-gray-500">
+              Fields found: {gap.actual_fields.join(", ")}
+            </p>
           )}
           {gap.filled_value_masked && (
-            <p className="mt-1 text-xs font-mono text-gray-600">
-              Value: {gap.filled_value_masked}
+            <p className="mt-1 text-xs font-mono text-green-700">
+              Filled: {gap.filled_value_masked}
+              {gap.fill_method && (
+                <span className="ml-2 text-gray-400">via {gap.fill_method}</span>
+              )}
             </p>
+          )}
+          {/* Page text toggle */}
+          {gap.page_text_snippet && (
+            <button
+              onClick={() => setShowPageText(!showPageText)}
+              className="mt-1 flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800"
+            >
+              <Eye className="h-3 w-3" />
+              {showPageText ? "Hide" : "Show"} page text
+            </button>
+          )}
+          {showPageText && gap.page_text_snippet && (
+            <pre className="mt-2 max-h-40 overflow-auto rounded border border-gray-200 bg-gray-50 p-2 text-xs text-gray-700 whitespace-pre-wrap font-mono">
+              {gap.page_text_snippet}
+            </pre>
           )}
         </div>
 
-        {!isResolved && gap.fill_result !== "not_applicable" && (
+        {!isResolved && !isManuallyAcknowledged && (
           <button
             onClick={() => setShowResolve(!showResolve)}
-            className="rounded bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700"
+            className="ml-3 shrink-0 rounded bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700"
           >
             Resolve
           </button>
@@ -302,6 +346,83 @@ function GapRow({
 }
 
 // ---------------------------------------------------------------------------
+// Gap summary bar (clear breakdown)
+// ---------------------------------------------------------------------------
+
+function GapSummaryBar({ gaps }: { gaps: { total: number; filled: number; unfilled: number; pending: number; not_applicable: number; manually_resolved: number; manual_unfilled?: number; resolved?: number; high_severity_unfilled: number; can_approve?: boolean } }) {
+  if (gaps.total === 0) return null
+
+  const resolved = gaps.resolved ?? (gaps.filled + gaps.not_applicable + gaps.manually_resolved)
+  const needsAttention = gaps.high_severity_unfilled
+
+  return (
+    <div className="space-y-3">
+      {/* Progress bar */}
+      <div className="flex items-center gap-3">
+        <div className="flex-1 h-3 bg-gray-200 rounded-full overflow-hidden">
+          {gaps.total > 0 && (
+            <div className="flex h-full">
+              <div
+                className="bg-green-500 h-full"
+                style={{ width: `${(gaps.filled / gaps.total) * 100}%` }}
+                title={`${gaps.filled} auto-filled`}
+              />
+              <div
+                className="bg-blue-400 h-full"
+                style={{ width: `${(gaps.not_applicable / gaps.total) * 100}%` }}
+                title={`${gaps.not_applicable} marked N/A`}
+              />
+              <div
+                className="bg-gray-400 h-full"
+                style={{ width: `${(gaps.manually_resolved / gaps.total) * 100}%` }}
+                title={`${gaps.manually_resolved} manually resolved`}
+              />
+            </div>
+          )}
+        </div>
+        <span className="text-sm font-medium text-gray-700 whitespace-nowrap">
+          {resolved}/{gaps.total} resolved
+        </span>
+      </div>
+
+      {/* Detailed counts */}
+      <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
+        {gaps.filled > 0 && (
+          <span className="flex items-center gap-1">
+            <span className="h-2 w-2 rounded-full bg-green-500" />
+            <span className="text-gray-600">{gaps.filled} auto-filled</span>
+          </span>
+        )}
+        {gaps.not_applicable > 0 && (
+          <span className="flex items-center gap-1">
+            <span className="h-2 w-2 rounded-full bg-blue-400" />
+            <span className="text-gray-600">{gaps.not_applicable} N/A</span>
+          </span>
+        )}
+        {gaps.manually_resolved > 0 && (
+          <span className="flex items-center gap-1">
+            <span className="h-2 w-2 rounded-full bg-gray-400" />
+            <span className="text-gray-600">{gaps.manually_resolved} manually resolved</span>
+          </span>
+        )}
+        {needsAttention > 0 && (
+          <span className="flex items-center gap-1 font-medium text-red-600">
+            <AlertTriangle className="h-3 w-3" />
+            {needsAttention} high-severity need attention
+          </span>
+        )}
+        {needsAttention === 0 && gaps.total > 0 && (
+          <span className="flex items-center gap-1 font-medium text-green-600">
+            <CheckCircle className="h-3 w-3" />
+            Ready to approve
+          </span>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Main page
 // ---------------------------------------------------------------------------
 
@@ -342,14 +463,21 @@ export function ExtractionQA() {
     mutationFn: () => approveQA(projectId!, { reviewer_id: "auditor" }, jobId),
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["qa-summary", projectId, jobId] })
-      // Navigate to project detail (notification tab) after approval
       if (data?.status === "approved") {
         setTimeout(() => navigate(`/projects/${projectId}?tab=notification`), 1500)
       }
     },
   })
 
-  const invalidateGaps = () => {
+  const bulkResolveMutation = useMutation({
+    mutationFn: (body: { action: "mark_na" | "mark_unrecoverable"; filter_severity?: string; filter_gap_type?: string; notes?: string }) =>
+      bulkResolveQAGaps(projectId!, body, jobId),
+    onSuccess: () => {
+      invalidateAll()
+    },
+  })
+
+  const invalidateAll = () => {
     queryClient.invalidateQueries({ queryKey: ["qa-gaps", projectId, jobId] })
     queryClient.invalidateQueries({ queryKey: ["qa-summary", projectId, jobId] })
   }
@@ -364,6 +492,10 @@ export function ExtractionQA() {
 
   const summary = summaryQuery.data
   const isApproved = summary?.status === "approved"
+  const canApprove = (summary?.gaps as any)?.can_approve ?? summary?.gaps.high_severity_unfilled === 0
+  const totalUnresolved = gapsQuery.data?.gaps.filter(
+    (g) => g.fill_result !== "filled" && g.fill_result !== "not_applicable" && g.filled_by !== "manual"
+  ).length ?? 0
 
   return (
     <div className="mx-auto max-w-6xl space-y-6 p-6">
@@ -385,25 +517,32 @@ export function ExtractionQA() {
             </p>
           </div>
         </div>
-        {isApproved ? (
-          <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-4 py-2 text-sm font-medium text-green-700">
-            <CheckCircle className="h-4 w-4" /> Approved by{" "}
-            {summary?.approved_by}
-          </span>
-        ) : (
-          <button
-            onClick={() => approveMutation.mutate()}
-            disabled={approveMutation.isPending}
-            className="inline-flex items-center gap-2 rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50"
-          >
-            {approveMutation.isPending ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Shield className="h-4 w-4" />
-            )}
-            Approve for Notification
-          </button>
-        )}
+        <div className="flex items-center gap-3">
+          {isApproved ? (
+            <span className="inline-flex items-center gap-1 rounded-full bg-green-100 px-4 py-2 text-sm font-medium text-green-700">
+              <CheckCircle className="h-4 w-4" /> Approved by{" "}
+              {summary?.approved_by}
+            </span>
+          ) : (
+            <button
+              onClick={() => approveMutation.mutate()}
+              disabled={approveMutation.isPending || !canApprove}
+              className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium text-white ${
+                canApprove
+                  ? "bg-green-600 hover:bg-green-700"
+                  : "bg-gray-400 cursor-not-allowed"
+              } disabled:opacity-50`}
+              title={canApprove ? "Approve extraction" : "Resolve all high-severity gaps first"}
+            >
+              {approveMutation.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Shield className="h-4 w-4" />
+              )}
+              Approve for Notification
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Approval blocked message */}
@@ -476,18 +615,14 @@ export function ExtractionQA() {
               </div>
             </div>
 
-            {/* Gap summary */}
+            {/* Gap summary — clear visual breakdown */}
             {summary.gaps.total > 0 && (
-              <div className="rounded bg-gray-50 p-3 text-sm text-gray-600">
-                {summary.gaps.filled} gaps auto-filled,{" "}
-                {summary.gaps.manually_resolved} manually resolved,{" "}
-                {summary.gaps.unfilled} unfilled
-                {summary.gaps.high_severity_unfilled > 0 && (
-                  <span className="ml-2 font-medium text-red-600">
-                    ({summary.gaps.high_severity_unfilled} high-severity
-                    unresolved)
-                  </span>
-                )}
+              <GapSummaryBar gaps={summary.gaps} />
+            )}
+            {summary.gaps.total === 0 && summary.stats.total_notification_subjects > 0 && (
+              <div className="flex items-center gap-2 rounded-lg bg-green-50 p-3 text-sm text-green-700">
+                <CheckCircle className="h-4 w-4" />
+                No extraction gaps detected — all data extracted cleanly.
               </div>
             )}
 
@@ -551,30 +686,105 @@ export function ExtractionQA() {
       </div>
 
       {/* ============================================================== */}
-      {/* Section 3: Unresolved Gaps */}
+      {/* Section 3: Extraction Gaps */}
       {/* ============================================================== */}
       <div className="rounded-lg border border-gray-200 bg-white p-6">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between flex-wrap gap-3">
           <h2 className="flex items-center gap-2 text-lg font-medium text-gray-800">
             <AlertTriangle className="h-5 w-5 text-amber-500" /> Extraction
             Gaps
+            {gapsQuery.data && (
+              <span className="text-sm font-normal text-gray-400">
+                ({gapsQuery.data.total})
+              </span>
+            )}
           </h2>
-          <div className="flex gap-1">
-            {["all", "unfilled", "filled", "pending"].map((f) => (
-              <button
-                key={f}
-                onClick={() => setGapFilter(f)}
-                className={`rounded px-3 py-1 text-xs font-medium ${
-                  gapFilter === f
-                    ? "bg-gray-800 text-white"
-                    : "bg-gray-100 text-gray-600 hover:bg-gray-200"
-                }`}
-              >
-                {f.charAt(0).toUpperCase() + f.slice(1)}
-              </button>
-            ))}
+
+          <div className="flex items-center gap-2">
+            {/* Filter buttons */}
+            <div className="flex gap-1">
+              {["all", "unfilled", "filled", "pending", "not_applicable"].map((f) => (
+                <button
+                  key={f}
+                  onClick={() => setGapFilter(f)}
+                  className={`rounded px-3 py-1 text-xs font-medium ${
+                    gapFilter === f
+                      ? "bg-gray-800 text-white"
+                      : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                  }`}
+                >
+                  {f === "not_applicable" ? "N/A" : f.charAt(0).toUpperCase() + f.slice(1)}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
+
+        {/* Bulk action bar */}
+        {totalUnresolved > 0 && !isApproved && (
+          <div className="mt-3 flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3">
+            <ListChecks className="h-4 w-4 text-amber-600 shrink-0" />
+            <span className="text-sm text-amber-700">
+              {totalUnresolved} unresolved gap{totalUnresolved !== 1 ? "s" : ""}
+            </span>
+            <div className="ml-auto flex gap-2">
+              <button
+                onClick={() =>
+                  bulkResolveMutation.mutate({
+                    action: "mark_na",
+                    filter_severity: "low",
+                    notes: "Bulk dismissed — low severity",
+                  })
+                }
+                disabled={bulkResolveMutation.isPending}
+                className="flex items-center gap-1 rounded bg-white border border-amber-300 px-3 py-1.5 text-xs font-medium text-amber-700 hover:bg-amber-100"
+              >
+                <Ban className="h-3 w-3" /> Dismiss Low
+              </button>
+              <button
+                onClick={() =>
+                  bulkResolveMutation.mutate({
+                    action: "mark_na",
+                    filter_severity: "medium",
+                    notes: "Bulk dismissed — medium severity",
+                  })
+                }
+                disabled={bulkResolveMutation.isPending}
+                className="flex items-center gap-1 rounded bg-white border border-amber-300 px-3 py-1.5 text-xs font-medium text-amber-700 hover:bg-amber-100"
+              >
+                <Ban className="h-3 w-3" /> Dismiss Medium
+              </button>
+              <button
+                onClick={() =>
+                  bulkResolveMutation.mutate({
+                    action: "mark_na",
+                    notes: "Bulk dismissed — all unresolved",
+                  })
+                }
+                disabled={bulkResolveMutation.isPending}
+                className="flex items-center gap-1 rounded bg-amber-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-700"
+              >
+                {bulkResolveMutation.isPending ? (
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                ) : (
+                  <Zap className="h-3 w-3" />
+                )}
+                Dismiss All
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Bulk resolve success toast */}
+        {bulkResolveMutation.data && (
+          <div className="mt-2 rounded-lg bg-green-50 border border-green-200 p-3 text-sm text-green-700">
+            <CheckCircle className="inline h-4 w-4 mr-1" />
+            {bulkResolveMutation.data.resolved_count} gaps resolved.
+            {bulkResolveMutation.data.can_approve
+              ? " Ready to approve!"
+              : ` ${bulkResolveMutation.data.remaining_high_severity} high-severity gaps remaining.`}
+          </div>
+        )}
 
         {gapsQuery.isLoading ? (
           <div className="flex justify-center py-8">
@@ -582,22 +792,27 @@ export function ExtractionQA() {
           </div>
         ) : gapsQuery.data?.gaps.length ? (
           <div className="mt-4 space-y-3">
-            {gapsQuery.data.gaps.map((gap, i) => (
+            {gapsQuery.data.gaps.slice(0, 50).map((gap, i) => (
               <GapRow
-                key={i}
+                key={`${gap.page_num}-${gap.gap_type}-${gap.expected_field}-${i}`}
                 gap={gap}
                 index={i}
                 projectId={projectId}
                 jobId={jobId}
-                onResolved={invalidateGaps}
+                onResolved={invalidateAll}
               />
             ))}
+            {gapsQuery.data.gaps.length > 50 && (
+              <p className="text-center text-sm text-gray-500">
+                Showing 50 of {gapsQuery.data.gaps.length} gaps. Use bulk actions above to resolve remaining.
+              </p>
+            )}
           </div>
         ) : (
           <p className="mt-4 text-sm text-gray-500">
             {gapFilter === "all"
               ? "No gaps detected — extraction is complete."
-              : `No ${gapFilter} gaps.`}
+              : `No ${gapFilter === "not_applicable" ? "N/A" : gapFilter} gaps.`}
           </p>
         )}
       </div>

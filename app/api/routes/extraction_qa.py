@@ -47,6 +47,15 @@ class ResolveGapBody(BaseModel):
     notes: str | None = None
 
 
+class BulkResolveBody(BaseModel):
+    """Bulk resolve gaps."""
+    action: str = "mark_na"   # "mark_na" | "mark_unrecoverable"
+    filter_severity: str | None = None  # "low" | "medium" | "high" — only resolve this severity
+    filter_gap_type: str | None = None  # "empty_page" | "missing_field" | "truncated"
+    reviewer_id: str = "auditor"
+    notes: str | None = None
+
+
 # ---------------------------------------------------------------------------
 # Helpers — QA state persistence (JSON on disk, like gaps & segregation)
 # ---------------------------------------------------------------------------
@@ -177,28 +186,45 @@ def qa_summary(
         for r in records
     ))
 
-    # Gap stats
+    # Gap stats — categorize clearly
     total_gaps = len(gaps)
     filled_gaps = sum(1 for g in gaps if g.fill_result == "filled")
-    unfilled_gaps = sum(1 for g in gaps if g.fill_result == "unfilled")
+    unfilled_gaps = sum(1 for g in gaps if g.fill_result == "unfilled" and g.filled_by != "manual")
     pending_gaps = sum(1 for g in gaps if g.fill_result == "pending")
     na_gaps = sum(1 for g in gaps if g.fill_result == "not_applicable")
     manual_gaps = sum(1 for g in gaps if g.filled_by == "manual")
-    high_unfilled = sum(
+    # Count manual "unrecoverable" as acknowledged, not as unresolved
+    manual_unfilled = sum(
         1 for g in gaps
-        if g.severity == "high" and g.fill_result == "unfilled"
+        if g.fill_result == "unfilled" and g.filled_by == "manual"
     )
 
-    # Completeness percentage — based on records found, not gaps
-    # If we have records but some gaps, completeness reflects what we DID find
+    # High severity that STILL need attention (not manually resolved)
+    high_unfilled = sum(
+        1 for g in gaps
+        if g.severity == "high"
+        and g.fill_result in ("pending", "unfilled")
+        and g.filled_by != "manual"
+    )
+
+    # Resolved = any gap that's filled, N/A, or manually acknowledged
+    # Use set logic to avoid double-counting
+    resolved_gaps = sum(
+        1 for g in gaps
+        if g.fill_result in ("filled", "not_applicable")
+        or g.filled_by == "manual"
+    )
+
+    # Completeness: based on what fraction of gaps are resolved
+    # Records are the primary signal; gaps are secondary
     if total_records > 0 and total_gaps > 0:
-        # Blend: weight records found heavily, penalize for unfilled gaps
-        gap_ratio = (total_gaps - unfilled_gaps) / total_gaps if total_gaps else 1.0
-        completeness = round(min(100.0, max(gap_ratio * 100, 50.0 + 50.0 * gap_ratio)), 1)
+        resolved_ratio = resolved_gaps / total_gaps if total_gaps else 1.0
+        completeness = round(min(100.0, resolved_ratio * 100), 1)
     elif total_records > 0:
         completeness = 100.0
     elif total_gaps > 0:
-        completeness = round(100 * (total_gaps - unfilled_gaps - pending_gaps) / total_gaps, 1)
+        resolved_ratio = resolved_gaps / total_gaps
+        completeness = round(resolved_ratio * 100, 1)
     else:
         completeness = 100.0
 
@@ -239,7 +265,10 @@ def qa_summary(
             "pending": pending_gaps,
             "not_applicable": na_gaps,
             "manually_resolved": manual_gaps,
+            "manual_unfilled": manual_unfilled,
+            "resolved": resolved_gaps,
             "high_severity_unfilled": high_unfilled,
+            "can_approve": high_unfilled == 0,
         },
         "per_document": per_document,
     }
@@ -281,6 +310,7 @@ def qa_gaps(
     job_id: str = Query(..., description="Job/run ID"),
     status: str | None = Query(None, description="Filter: unfilled, filled, pending"),
     severity: str | None = Query(None, description="Filter: high, medium, low"),
+    include_page_text: bool = Query(False, description="Include page text snippet for context"),
     db: Session = Depends(get_db),
 ):
     """Return extraction gaps for manual review."""
@@ -292,12 +322,86 @@ def qa_gaps(
     if severity:
         gaps = [g for g in gaps if g.severity == severity]
 
+    gap_dicts = [g.to_dict() for g in gaps]
+
+    # Optionally load page text snippets for auditor context
+    if include_page_text and gap_dicts:
+        _enrich_gaps_with_page_text(gap_dicts, project_id, job_id)
+
     return {
         "project_id": project_id,
         "job_id": job_id,
-        "total": len(gaps),
-        "gaps": [g.to_dict() for g in gaps],
+        "total": len(gap_dicts),
+        "gaps": gap_dicts,
     }
+
+
+def _enrich_gaps_with_page_text(
+    gap_dicts: list[dict],
+    project_id: str,
+    job_id: str,
+) -> None:
+    """Add a 'page_text_snippet' field to gap dicts for auditor review.
+
+    Opens each referenced PDF once and reads the first 500 chars from gap pages.
+    """
+    # Resolve document paths — find source files via ingestion run
+    from app.db.models import IngestionRun, Document
+    from uuid import UUID
+
+    try:
+        from app.api.deps import _get_session_factory
+        db = _get_session_factory()()
+    except Exception:
+        return
+
+    # Group gaps by document
+    doc_pages: dict[str, set[int]] = {}
+    for g in gap_dicts:
+        doc_id = g.get("document_id", "")
+        pg = g.get("page_num", 0)
+        if doc_id:
+            doc_pages.setdefault(doc_id, set()).add(pg)
+
+    # Load document paths
+    doc_paths: dict[str, str] = {}
+    for doc_id in doc_pages:
+        try:
+            doc = db.get(Document, UUID(doc_id))
+            if doc and doc.source_path:
+                doc_paths[doc_id] = doc.source_path
+        except Exception:
+            pass
+    db.close()
+
+    # Read page texts
+    page_texts: dict[str, dict[int, str]] = {}  # doc_id → {page_num → text}
+    try:
+        import fitz
+    except ImportError:
+        return
+
+    for doc_id, path in doc_paths.items():
+        try:
+            pdf = fitz.open(path)
+            page_texts[doc_id] = {}
+            for pg in doc_pages.get(doc_id, set()):
+                pg_idx = pg - 1  # gaps use 1-indexed
+                if 0 <= pg_idx < pdf.page_count:
+                    text = pdf[pg_idx].get_text()
+                    # Truncate to 500 chars for display
+                    page_texts[doc_id][pg] = text[:500].strip()
+                    pdf[pg_idx]._erase()
+            pdf.close()
+        except Exception:
+            pass
+
+    # Attach to gap dicts
+    for g in gap_dicts:
+        doc_id = g.get("document_id", "")
+        pg = g.get("page_num", 0)
+        texts = page_texts.get(doc_id, {})
+        g["page_text_snippet"] = texts.get(pg, "")
 
 
 @router.post("/gaps/{gap_index}/resolve")
@@ -355,6 +459,71 @@ def qa_resolve_gap(
         "gap_index": gap_index,
         "action": body.action,
         "gap": gap.to_dict(),
+    }
+
+
+@router.post("/gaps/bulk-resolve")
+def qa_bulk_resolve(
+    project_id: str,
+    body: BulkResolveBody,
+    job_id: str = Query(..., description="Job/run ID"),
+    db: Session = Depends(get_db),
+):
+    """Bulk resolve gaps matching filters.
+
+    Typical use: auditor marks all low-severity truncation gaps as N/A.
+    """
+    if body.action not in ("mark_na", "mark_unrecoverable"):
+        raise HTTPException(status_code=400, detail="Bulk action must be mark_na or mark_unrecoverable")
+
+    gaps = load_gaps(project_id, job_id)
+    resolved_count = 0
+
+    for gap in gaps:
+        # Skip already resolved gaps
+        if gap.fill_result in ("filled", "not_applicable"):
+            continue
+        if gap.filled_by == "manual":
+            continue
+
+        # Apply filters
+        if body.filter_severity and gap.severity != body.filter_severity:
+            continue
+        if body.filter_gap_type and gap.gap_type != body.filter_gap_type:
+            continue
+
+        # Apply action
+        if body.action == "mark_na":
+            gap.fill_result = "not_applicable"
+            gap.filled_by = "manual"
+            gap.fill_attempted = True
+            if body.notes:
+                gap.context = (gap.context or "") + f" [Bulk N/A: {body.notes}]"
+        elif body.action == "mark_unrecoverable":
+            gap.fill_result = "unfilled"
+            gap.filled_by = "manual"
+            gap.fill_attempted = True
+            if body.notes:
+                gap.context = (gap.context or "") + f" [Bulk unrecoverable: {body.notes}]"
+
+        resolved_count += 1
+
+    if resolved_count > 0:
+        persist_gaps(gaps, project_id, job_id)
+
+    # Recount
+    remaining_high = sum(
+        1 for g in gaps
+        if g.severity == "high"
+        and g.fill_result in ("pending", "unfilled")
+        and g.filled_by != "manual"
+    )
+
+    return {
+        "status": "ok",
+        "resolved_count": resolved_count,
+        "remaining_high_severity": remaining_high,
+        "can_approve": remaining_high == 0,
     }
 
 

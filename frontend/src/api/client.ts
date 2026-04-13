@@ -1482,6 +1482,7 @@ export interface ExtractionGap {
   fill_result: "pending" | "filled" | "unfilled" | "not_applicable"
   filled_value_masked: string | null
   filled_by: "system" | "manual"
+  page_text_snippet?: string
 }
 
 export interface GapListResponse {
@@ -1616,7 +1617,7 @@ export function getQAGaps(
   jobId: string,
   filters?: { status?: string; severity?: string },
 ): Promise<GapListResponse> {
-  const params = new URLSearchParams({ job_id: jobId })
+  const params = new URLSearchParams({ job_id: jobId, include_page_text: "true" })
   if (filters?.status) params.set("status", filters.status)
   if (filters?.severity) params.set("severity", filters.severity)
   return api(`/projects/${projectId}/qa/gaps?${params.toString()}`)
@@ -1629,6 +1630,23 @@ export function resolveQAGap(
   jobId: string,
 ): Promise<{ status: string; gap_index: number; action: string; gap: ExtractionGap }> {
   return api(`/projects/${projectId}/qa/gaps/${gapIndex}/resolve?job_id=${jobId}`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  })
+}
+
+export function bulkResolveQAGaps(
+  projectId: string,
+  body: {
+    action: "mark_na" | "mark_unrecoverable"
+    filter_severity?: string
+    filter_gap_type?: string
+    reviewer_id?: string
+    notes?: string
+  },
+  jobId: string,
+): Promise<{ status: string; resolved_count: number; remaining_high_severity: number; can_approve: boolean }> {
+  return api(`/projects/${projectId}/qa/gaps/bulk-resolve?job_id=${jobId}`, {
     method: "POST",
     body: JSON.stringify(body),
   })
