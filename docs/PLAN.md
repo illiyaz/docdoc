@@ -751,6 +751,73 @@ Current gap fill is slow: 335 gaps × 4-method cascade × per-gap PDF I/O = 25+ 
 - Allow auditor to correct names/addresses inline
 - Highlight records where confidence is low
 
+#### Step 37b — Repeating Unit Detection (multi-subject awareness)
+
+**Goal:** Detect whether a document has one subject per page (Category A/D) or multiple subjects per page (Category B/C) and adapt the extraction prompt accordingly.
+
+**Why:** Text batch extraction gets 96-98% on one-subject-per-page docs (school reports) but only 45% on multi-subject docs (TPHS2 payroll with 493 employees, 2-3 per page). The prompt says "one object per page" which misses additional subjects.
+
+**When it runs:** After segregation + cataloging + onset detection, BEFORE document understanding. One LLM call (~15s) during analysis.
+
+**Approach — ask the LLM to describe the repeating unit:**
+
+Sample 9 pages: 3 consecutive from onset, 3 from middle, 3 from end.
+
+```
+"Here are 9 pages from this document — 3 from the beginning (pages {onset}-{onset+2}), 
+3 from the middle (pages {mid}-{mid+2}), 3 from the end (pages {end-2}-{end}).
+
+Describe the REPEATING STRUCTURE:
+1. What represents ONE person's complete record? 
+   (a full page, a block between separators, a table row, multiple pages)
+2. How do records separate? 
+   (page break, dashed line, blank lines, header repeat, table row boundary)
+3. How many distinct person records appear on page {mid}?
+4. Do any records CONTINUE across page breaks? 
+   (look for 'CONTINUED', split data, or records starting mid-page)
+
+Return JSON:
+{
+  "record_unit": "page | block | row | multi_page",
+  "separator": "page_break | dashed_line | blank_lines | header_repeat | table_row | none",
+  "separator_pattern": "exact text of separator if applicable",
+  "records_per_page": 1,
+  "has_continuation": false,
+  "continuation_marker": null
+}"
+```
+
+**How extraction uses this:**
+
+| record_unit | Extraction strategy |
+|---|---|
+| `page` | Current text batch — one object per page (Category A/D) |
+| `block` | Multi-subject prompt — "extract ALL subjects between separators" (Category B) |
+| `row` | Table extraction prompt — "extract each row as a subject" (Category C) |
+| `multi_page` | Group pages by instance_marker, send grouped pages (Category H) |
+
+**For Category B (block), the extraction prompt changes to:**
+```
+"This page contains MULTIPLE person records separated by {separator_pattern}.
+Extract ALL persons on this page, not just the first one.
+Return a JSON array with one object per person."
+```
+
+**What could break:**
+- Single-page documents → LLM says "one record per page" → current approach works ✓
+- Mixed documents (HR packet) → LLM sees different structures → flags as "mixed" → per-page classification needed (Phase 8+)
+- Very long records (10-page loan app) → existing pages_per_instance handles this ✓
+- Dense tables (20 rows/page) → LLM sees table structure → routes to table extraction ✓
+
+**Implementation:**
+
+| File | Change |
+|---|---|
+| `app/pipeline/repeating_unit_detector.py` | NEW — 9-page sampling, one LLM call, JSON parsing |
+| `app/pipeline/two_phase.py` | Wire between onset detection and document understanding |
+| `app/pipeline/text_batch_extractor.py` | Accept `record_unit` + `separator` to pick prompt variant |
+| `app/llm/prompts.py` | Add DETECT_REPEATING_UNIT prompt + EXTRACT_MULTI_SUBJECT prompt |
+
 #### Migration path
 1. Implement priorities 1-2 (batch size + position verification) — quick wins
 2. Test on all 12 phase2_large_pdfs_mini files
