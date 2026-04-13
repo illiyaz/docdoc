@@ -80,18 +80,54 @@ def _save_qa_state(project_id: str, job_id: str, state: dict) -> None:
 
 
 def _load_extraction_records(project_id: str, job_id: str) -> list[dict]:
-    """Load extraction records from JSON persistence.
+    """Load extraction records — tries JSON file first, falls back to DB.
 
-    Records are stored per-job during extraction. Returns list of record dicts.
+    Records may be stored as JSON during extraction, or only as
+    NotificationSubjects in the database.
     """
+    # Try JSON file first
     path = Path("data") / "projects" / project_id / "records" / f"{job_id}.json"
-    if not path.exists():
-        return []
+    if path.exists():
+        try:
+            data = json.loads(path.read_text())
+            records = data.get("records", []) if isinstance(data, dict) else data
+            if records:
+                return records
+        except Exception:
+            pass
+
+    # Fall back to DB — load NotificationSubjects for this project
+    from app.api.deps import _get_session_factory
+    from app.db.models import NotificationSubject, IngestionRun
+    from uuid import UUID
+
     try:
-        data = json.loads(path.read_text())
-        return data.get("records", []) if isinstance(data, dict) else data
+        db = _get_session_factory()()
+        run = db.get(IngestionRun, UUID(job_id))
+        if run and run.project_id:
+            subjects = db.query(NotificationSubject).filter(
+                NotificationSubject.project_id == run.project_id,
+            ).all()
+            records = []
+            for s in subjects:
+                records.append({
+                    "canonical_name": s.canonical_name,
+                    "canonical_address": s.canonical_address,
+                    "canonical_phone": s.canonical_phone,
+                    "canonical_email": s.canonical_email,
+                    "source_document_name": s.source_document_name,
+                    "source_page_range": s.source_page_range,
+                    "pii_types_list": s.pii_types_list,
+                    "page_range": s.source_page_range,
+                    "source_document_id": str(run.id),
+                })
+            db.close()
+            return records
+        db.close()
     except Exception:
-        return []
+        pass
+
+    return []
 
 
 def _load_merge_groups(project_id: str, job_id: str) -> list[dict]:
@@ -153,8 +189,15 @@ def qa_summary(
         if g.severity == "high" and g.fill_result == "unfilled"
     )
 
-    # Completeness percentage
-    if total_gaps > 0:
+    # Completeness percentage — based on records found, not gaps
+    # If we have records but some gaps, completeness reflects what we DID find
+    if total_records > 0 and total_gaps > 0:
+        # Blend: weight records found heavily, penalize for unfilled gaps
+        gap_ratio = (total_gaps - unfilled_gaps) / total_gaps if total_gaps else 1.0
+        completeness = round(min(100.0, max(gap_ratio * 100, 50.0 + 50.0 * gap_ratio)), 1)
+    elif total_records > 0:
+        completeness = 100.0
+    elif total_gaps > 0:
         completeness = round(100 * (total_gaps - unfilled_gaps - pending_gaps) / total_gaps, 1)
     else:
         completeness = 100.0
