@@ -4110,6 +4110,21 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                 if total_pg <= 0:
                     continue
 
+                # Determine which pages have content (skip blank pages)
+                _content_pages: set[int] | None = None
+                if gdoc.source_path and (gdoc.file_type or "").lower() in ("pdf", ".pdf", "application/pdf"):
+                    try:
+                        import fitz as _cpfitz
+                        _cpdoc = _cpfitz.open(gdoc.source_path)
+                        _content_pages = set()
+                        for _cpg in range(_cpdoc.page_count):
+                            if len(_cpdoc[_cpg].get_text().strip()) > 50:
+                                _content_pages.add(_cpg)
+                            _cpdoc._forget_page(_cpg)
+                        _cpdoc.close()
+                    except Exception:
+                        pass
+
                 doc_gaps = _gap_detector.detect(
                     records=doc_records_for_gap,
                     field_inventory=field_inv,
@@ -4117,6 +4132,7 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                     onset_page=onset,
                     document_id=str(gdoc.id),
                     document_name=gdoc.file_name or gdoc.source_path,
+                    content_pages=_content_pages,
                 )
                 all_detected_gaps.extend(doc_gaps)
 

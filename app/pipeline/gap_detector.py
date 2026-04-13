@@ -75,6 +75,7 @@ class GapDetector:
         document_id: str,
         document_name: str,
         pages_per_instance: int = 1,
+        content_pages: set[int] | None = None,
     ) -> list[ExtractionGap]:
         """Run all gap detection checks.
 
@@ -96,10 +97,11 @@ class GapDetector:
         # Build page → records mapping
         page_records = self._build_page_map(records, total_pages)
 
-        # 1. Page-level gap detection
+        # 1. Page-level gap detection (skip blank pages)
         page_gaps = self._detect_page_gaps(
             page_records, total_pages, onset_page,
             document_id, document_name, pages_per_instance,
+            content_pages=content_pages,
         )
         gaps.extend(page_gaps)
 
@@ -154,22 +156,31 @@ class GapDetector:
         document_id: str,
         document_name: str,
         pages_per_instance: int,
+        content_pages: set[int] | None = None,
     ) -> list[ExtractionGap]:
-        """Find pages after onset that produced zero records."""
+        """Find content pages after onset that produced zero records.
+
+        Blank pages (no text content) are NOT gaps — they're expected
+        in documents with alternating content/blank pages.
+        """
         gaps = []
         onset_1 = onset_page + 1  # convert to 1-indexed
 
         for page_num in range(onset_1, total_pages + 1):
+            # Skip blank pages — they have no content to extract
+            if content_pages is not None:
+                page_0 = page_num - 1  # content_pages uses 0-indexed
+                if page_0 not in content_pages:
+                    continue
+
             recs = page_records.get(page_num, [])
             if len(recs) == 0:
-                # Check if this is a template boundary page (e.g., summary page)
-                # that legitimately has no records
                 is_boundary = (
                     pages_per_instance > 1
                     and (page_num - onset_1) % pages_per_instance != 0
                 )
                 if is_boundary:
-                    continue  # skip non-data pages in multi-page templates
+                    continue
 
                 gaps.append(ExtractionGap(
                     document_id=document_id,
@@ -177,7 +188,7 @@ class GapDetector:
                     page_num=page_num,
                     gap_type="empty_page",
                     severity="high",
-                    context=f"Page {page_num} produced zero records (expected records based on template pattern)",
+                    context=f"Page {page_num} has content but produced zero records",
                 ))
 
         return gaps
