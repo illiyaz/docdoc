@@ -86,8 +86,13 @@ def extract_with_markers(
     sorted_pages = sorted(snippets.keys())
     all_records: list[PIIRecord] = []
     calls_made = 0
+    _marker_consec_fail = 0
 
     for batch_start in range(0, len(sorted_pages), pages_per_batch):
+        if _marker_consec_fail >= 5:
+            logger.error("Marker extraction: circuit breaker — 5 consecutive failures, aborting")
+            break
+
         batch_pages = sorted_pages[batch_start:batch_start + pages_per_batch]
 
         batch_text = ""
@@ -125,17 +130,21 @@ def extract_with_markers(
                 document_id=doc_id,
             )
             calls_made += 1
+            _marker_consec_fail = 0
 
             batch_page_texts = {pg: page_texts.get(pg, "") for pg in batch_pages}
             records = _parse_batch_response(response, doc_id, batch_pages, batch_page_texts)
             all_records.extend(records)
 
         except Exception:
+            _marker_consec_fail += 1
             logger.warning(
-                "Marker extraction failed for pages %s — retrying individually",
-                [p + 1 for p in batch_pages],
+                "Marker extraction failed for pages %s (consecutive=%d) — retrying individually",
+                [p + 1 for p in batch_pages], _marker_consec_fail,
             )
             for retry_pg in batch_pages:
+                if _marker_consec_fail >= 5:
+                    break
                 try:
                     retry_resp = ollama_client.generate(
                         prompt=(
@@ -148,11 +157,13 @@ def extract_with_markers(
                         document_id=doc_id,
                     )
                     calls_made += 1
+                    _marker_consec_fail = 0  # model alive
                     retry_page_texts = {retry_pg: page_texts.get(retry_pg, "")}
                     retry_records = _parse_batch_response(retry_resp, doc_id, [retry_pg], retry_page_texts)
                     all_records.extend(retry_records)
                 except Exception:
-                    logger.debug("Marker retry failed for page %d", retry_pg + 1)
+                    _marker_consec_fail += 1
+                    logger.debug("Marker retry failed for page %d (consecutive=%d)", retry_pg + 1, _marker_consec_fail)
 
     logger.info(
         "Marker extraction: %d records from %d snippets (%d LLM calls)",
@@ -215,8 +226,10 @@ def extract_text_batch(
 
     all_records: list[PIIRecord] = []
     calls_made = 0
-    retries_used = 0
-    max_retries = max(10, len(content_pages) // 10)  # cap at 10% of pages
+    consecutive_failures = 0       # circuit breaker — model health signal
+    total_retries = 0
+    failed_pages: list[int] = []   # pages that failed even after retry
+    CIRCUIT_BREAKER_THRESHOLD = 5  # 5 consecutive failures = model is down
 
     # Overlapping windows when records can span page boundaries
     # Step size = batch size - overlap. Default overlap=0, but overlap=1
@@ -224,8 +237,28 @@ def extract_text_batch(
     use_overlap = record_unit == "multi_page"
     step_size = max(1, pages_per_batch - (1 if use_overlap else 0))
 
+    # Build prompt components once (reused across batches)
+    fields_hint = ", ".join(field_inventory) if field_inventory else "PERSON, LOCATION, PHONE_NUMBER, DATE_OF_BIRTH, US_SSN"
+    _system_prompt = (
+        "You are a document data extraction assistant. "
+        "Extract ONLY the primary subject's information from each page. "
+        "Ignore teachers, doctors, providers, institutional staff, and other supporting names."
+    )
+
     # Process in batches
     for batch_start in range(0, len(content_pages), step_size):
+        # Circuit breaker — if model is consistently failing, stop early
+        if consecutive_failures >= CIRCUIT_BREAKER_THRESHOLD:
+            remaining = content_pages[batch_start:]
+            failed_pages.extend(remaining)
+            logger.error(
+                "Circuit breaker tripped: %d consecutive failures — "
+                "aborting extraction for remaining %d pages. "
+                "LLM model may be overloaded or down.",
+                consecutive_failures, len(remaining),
+            )
+            break
+
         batch_pages = content_pages[batch_start:batch_start + pages_per_batch]
 
         # Build batch text
@@ -234,15 +267,7 @@ def extract_text_batch(
             text = page_texts[pg][:MAX_CHARS_PER_PAGE]
             batch_text += f"\n--- PAGE {pg + 1} ---\n{text}\n"
 
-        # Build prompt
-        fields_hint = ", ".join(field_inventory) if field_inventory else "PERSON, LOCATION, PHONE_NUMBER, DATE_OF_BIRTH, US_SSN"
         prompt = _build_batch_prompt(batch_pages, batch_text, document_type, fields_hint, record_unit, records_per_page)
-
-        _system_prompt = (
-            "You are a document data extraction assistant. "
-            "Extract ONLY the primary subject's information from each page. "
-            "Ignore teachers, doctors, providers, institutional staff, and other supporting names."
-        )
 
         try:
             response = ollama_client.generate(
@@ -252,26 +277,24 @@ def extract_text_batch(
                 document_id=doc_id,
             )
             calls_made += 1
+            consecutive_failures = 0  # reset on success
 
             batch_page_texts = {pg: page_texts.get(pg, "") for pg in batch_pages}
             records = _parse_batch_response(response, doc_id, batch_pages, batch_page_texts)
             all_records.extend(records)
 
         except Exception:
-            # Batch failed (likely timeout) — retry each page individually
-            if retries_used >= max_retries:
-                logger.warning(
-                    "Retry budget exhausted (%d/%d) — skipping pages %s",
-                    retries_used, max_retries, [p + 1 for p in batch_pages],
-                )
-                continue
+            # Batch failed — retry each page individually.
+            # Every page gets a fair retry; circuit breaker handles model-down.
+            consecutive_failures += 1
             logger.info(
-                "Batch failed for pages %s — retrying individually (%d/%d retries used)",
-                [p + 1 for p in batch_pages], retries_used, max_retries,
+                "Batch failed for pages %s — retrying individually (consecutive=%d)",
+                [p + 1 for p in batch_pages], consecutive_failures,
             )
             for retry_pg in batch_pages:
-                if retries_used >= max_retries:
-                    break
+                if consecutive_failures >= CIRCUIT_BREAKER_THRESHOLD:
+                    failed_pages.append(retry_pg)
+                    continue
                 retry_text = page_texts[retry_pg][:MAX_CHARS_PER_PAGE]
                 if len(retry_text.strip()) < 5:
                     continue
@@ -287,15 +310,25 @@ def extract_text_batch(
                         document_id=doc_id,
                     )
                     calls_made += 1
-                    retries_used += 1
+                    total_retries += 1
+                    consecutive_failures = 0  # individual retry succeeded — model is alive
                     retry_page_texts = {retry_pg: page_texts.get(retry_pg, "")}
                     retry_records = _parse_batch_response(
                         retry_response, doc_id, [retry_pg], retry_page_texts,
                     )
                     all_records.extend(retry_records)
                 except Exception:
-                    retries_used += 1
-                    logger.debug("Retry failed for page %d", retry_pg + 1)
+                    total_retries += 1
+                    consecutive_failures += 1
+                    failed_pages.append(retry_pg)
+                    logger.debug("Retry failed for page %d (consecutive=%d)", retry_pg + 1, consecutive_failures)
+
+    if failed_pages:
+        logger.warning(
+            "Text batch extraction: %d pages failed after retry — will appear as gaps: %s",
+            len(failed_pages),
+            [p + 1 for p in failed_pages[:20]],  # log first 20
+        )
 
     logger.info(
         "Text batch extraction: %d records from %d pages (%d LLM calls)",
