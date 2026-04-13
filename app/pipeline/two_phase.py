@@ -706,7 +706,7 @@ def analyze_generator(
                     page_count = get_pdf_page_count(doc.source_path)
                     doc_total_pages[doc.id] = page_count
 
-                    if page_count > 10:
+                    if page_count > 5:
                         sample_page_nums = compute_sample_pages(page_count)
                         reader = PDFReader(doc.source_path)
                         blocks = reader.read_pages(sample_page_nums)
@@ -4118,7 +4118,7 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                         _cpdoc = _cpfitz.open(gdoc.source_path)
                         _content_pages = set()
                         for _cpg in range(_cpdoc.page_count):
-                            if len(_cpdoc[_cpg].get_text().strip()) > 10:
+                            if len(_cpdoc[_cpg].get_text().strip()) > 5:
                                 _content_pages.add(_cpg)
                             _cpdoc._forget_page(_cpg)
                         _cpdoc.close()

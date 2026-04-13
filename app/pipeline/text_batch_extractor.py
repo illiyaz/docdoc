@@ -184,7 +184,7 @@ def extract_text_batch(
     # Filter out blank pages
     content_pages = [
         pg for pg in sorted_pages
-        if len(page_texts[pg].strip()) > 10
+        if len(page_texts[pg].strip()) > 5
     ]
 
     if not content_pages:
@@ -234,7 +234,7 @@ def extract_text_batch(
             )
             for retry_pg in batch_pages:
                 retry_text = page_texts[retry_pg][:MAX_CHARS_PER_PAGE]
-                if len(retry_text.strip()) < 10:
+                if len(retry_text.strip()) < 5:
                     continue
                 retry_prompt = _build_batch_prompt(
                     [retry_pg], f"\n--- PAGE {retry_pg + 1} ---\n{retry_text}\n",
@@ -283,7 +283,7 @@ def _filter_frequent_names(
     """
     from collections import Counter
 
-    if len(content_pages) < 10:
+    if len(content_pages) < 5:
         return records  # too few pages to detect frequency
 
     # Count how many distinct pages each last name appears on
