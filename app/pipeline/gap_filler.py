@@ -181,6 +181,7 @@ class GapFiller:
                 page_idx = page_num - 1  # gaps use 1-indexed
                 if 0 <= page_idx < doc.page_count:
                     page_texts[page_num] = doc[page_idx].get_text()
+                    doc._forget_page(page_idx)
             doc.close()
         except Exception:
             logger.warning("Gap fill: could not read PDF %s", self.doc_path, exc_info=True)
@@ -396,6 +397,7 @@ class GapFiller:
             page = doc[page_idx]
             page_text = page.get_text()
             words = page.get_text("words")  # list of (x0, y0, x1, y1, word, ...)
+            doc._forget_page(page_idx)
             doc.close()
         except Exception:
             return FillAttempt(method=PATH_COORDINATE_RELAXED, success=False)
@@ -460,6 +462,7 @@ class GapFiller:
                 doc.close()
                 return FillAttempt(method=PATH_LLM_TEMPLATE, success=False, llm_calls_used=0)
             page_text = doc[page_idx].get_text()
+            doc._forget_page(page_idx)
             doc.close()
         except Exception:
             return FillAttempt(method=PATH_LLM_TEMPLATE, success=False, llm_calls_used=0)
@@ -573,6 +576,7 @@ class GapFiller:
                 doc.close()
                 return FillAttempt(method=PATH_PRESIDIO, success=False)
             page_text = doc[page_idx].get_text()
+            doc._forget_page(page_idx)
             doc.close()
         except Exception:
             return FillAttempt(method=PATH_PRESIDIO, success=False)

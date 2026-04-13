@@ -2575,14 +2575,15 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                         from app.pipeline.repeating_unit_detector import detect_markers, detect_visual_separators
                         from app.llm.client import OllamaClient as _TBClient
 
-                        # Build page_texts from ALL document pages
+                        # Build page_texts from content pages (skip pre-onset)
                         _tb_page_texts: dict[int, str] = {}
 
                         if (doc.file_type or "").lower() in ("pdf", ".pdf") and doc.source_path:
                             try:
                                 import fitz as _tb_fitz
                                 _tb_doc = _tb_fitz.open(doc.source_path)
-                                for pg_idx in range(_tb_doc.page_count):
+                                _tb_onset = doc.sample_onset_page or 0
+                                for pg_idx in range(_tb_onset, _tb_doc.page_count):
                                     text = _tb_doc[pg_idx].get_text()
                                     if text.strip():
                                         _tb_page_texts[pg_idx] = text
