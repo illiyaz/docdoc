@@ -211,8 +211,8 @@ class GapFiller:
             missing_fields = set()
             for pn in batch_pages:
                 for gap in gaps_by_page.get(pn, []):
-                    if gap.missing_field:
-                        missing_fields.add(gap.missing_field)
+                    if gap.expected_field:
+                        missing_fields.add(gap.expected_field)
                     else:
                         missing_fields.update(["PERSON", "LOCATION"])
 
@@ -258,9 +258,9 @@ class GapFiller:
                             filled_pages.add(page_num)
                             for gap in gaps_by_page[page_num]:
                                 value = ""
-                                if gap.missing_field == "PERSON" and person:
+                                if gap.expected_field == "PERSON" and person:
                                     value = person
-                                elif gap.missing_field == "LOCATION" and location:
+                                elif gap.expected_field == "LOCATION" and location:
                                     value = location
                                 elif gap.gap_type == "empty_page" and person:
                                     value = person
@@ -271,7 +271,7 @@ class GapFiller:
                                         fill_attempted=True,
                                         fill_method="text_batch",
                                         fill_result="filled",
-                                        filled_value_masked=_mask_value(value, gap.missing_field or "PERSON"),
+                                        filled_value_masked=_mask_value(value, gap.expected_field or "PERSON"),
                                     ))
                                 else:
                                     results.append(replace(gap, fill_attempted=True, fill_result="unfilled"))

@@ -430,9 +430,12 @@ def _parse_batch_response(
         )
         records.append(rec)
 
-        # Guardian as separate record
+        # Guardian as separate record — shares primary subject's address
         guardian = entry.get("parent_or_guardian")
         if guardian and isinstance(guardian, str) and len(guardian.strip()) >= 2:
+            g_entity_types = ["PERSON"]
+            if raw_address:
+                g_entity_types.append("LOCATION")
             g_rec = PIIRecord(
                 record_id=str(uuid4()),
                 entity_type="PERSON",
@@ -441,7 +444,7 @@ def _parse_batch_response(
                 raw_address=raw_address,  # same address as primary
                 source_document_id=doc_id,
                 page_range=page_str,
-                entity_types_found=("PERSON",),
+                entity_types_found=tuple(g_entity_types),
                 entity_role="guardian",
             )
             records.append(g_rec)
