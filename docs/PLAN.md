@@ -955,9 +955,11 @@ The analysis LLM discovers these markers from 9 sample pages. The extraction LLM
 
 | Item | Priority | Notes |
 |---|---|---|
-| Comparison mode (`USE_TEXT_LLM_BATCH=compare`) | P4 | Run both coordinate + text batch on sample, pick winner. Development aid only. |
-| Test on 100-page versions | P1 | Files exist in `docs/testingsamples/phase2_100pg/` but not systematically tested through pipeline. |
+| Segregation mid-page sampling | **P1** | Segregation only reads pages 1-2. AWIR-993 (partnership tax) has 50 pages of boilerplate before K-1s with SSNs start at page 52 → misclassified as non-PII. **Fix:** also sample a mid-document page (page total/2) during segregation. One extra page render, +10s per file. Same approach as 9-page sampling in repeating_unit_detector. |
+| Segregation review in pipeline flow | **P2** | SegregationReview screen exists but segregation runs inside analysis — auditor never sees it unless navigating manually. Need: segregation as separate pipeline stage → review → then analysis on approved groups only. Pipeline restructuring task. |
+| Test on 100-page versions | P1 | 12-file test running (April 14). |
 | QA post-approval flow broken | **Known Bug** | Clicking "Approve for Notification" navigates to notification tab, but the notification tab experience is incomplete. Deferred — fix in Step 29b (Batch Approval & Send). |
+| Comparison mode (`USE_TEXT_LLM_BATCH=compare`) | P4 | Run both coordinate + text batch on sample, pick winner. Development aid only. |
 
 ---
 
