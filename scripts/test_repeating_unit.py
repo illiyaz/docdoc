@@ -22,7 +22,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-PDF_DIR = "docs/testingsamples/phase2_large_pdfs_mini"
+PDF_DIR = "docs/testingsamples/phase2_100pg"
 
 # ──────────────────────────────────────────────────────────────
 # Step 1: Sample pages

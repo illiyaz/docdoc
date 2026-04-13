@@ -29,14 +29,14 @@ ollama pull qwen2.5:32b 2>&1 | tail -3 | tee -a "$REPORT"
 
 # --- Test files ---
 TEST_FILES=(
-    "docs/testingsamples/phase2_large_pdfs_mini/3666752.pdf"
-    "docs/testingsamples/phase2_large_pdfs_mini/3733050.pdf"
-    "docs/testingsamples/phase2_large_pdfs_mini/3738594.pdf"
-    "docs/testingsamples/phase2_large_pdfs_mini/3738641.pdf"
-    "docs/testingsamples/phase2_large_pdfs_mini/Complex1.pdf"
-    "docs/testingsamples/phase2_large_pdfs_mini/TPHS2_656_0000067171.pdf"
-    "docs/testingsamples/phase2_large_pdfs_mini/CMG_Inc_0001352703.pdf"
-    "docs/testingsamples/phase2_large_pdfs_mini/WashingtonCMD_0000102080.pdf"
+    "docs/testingsamples/phase2_100pg/3666752.pdf"
+    "docs/testingsamples/phase2_100pg/3733050.pdf"
+    "docs/testingsamples/phase2_100pg/3738594.pdf"
+    "docs/testingsamples/phase2_100pg/3738641.pdf"
+    "docs/testingsamples/phase2_100pg/Complex1.pdf"
+    "docs/testingsamples/phase2_100pg/TPHS2_656_0000067171.pdf"
+    "docs/testingsamples/phase2_100pg/CMG_Inc_0001352703.pdf"
+    "docs/testingsamples/phase2_100pg/WashingtonCMD_0000102080.pdf"
 )
 
 MODELS=("qwen2.5:7b" "qwen2.5:14b" "qwen2.5:32b" "llama3:8b")
