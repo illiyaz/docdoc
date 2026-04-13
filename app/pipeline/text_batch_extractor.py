@@ -33,6 +33,7 @@ def extract_with_markers(
     doc_id: str,
     markers: dict,
     pages_per_batch: int = 10,
+    records_per_page: int = 1,
 ) -> list[PIIRecord]:
     """Strategy A: Extract using marker-filtered snippets.
 
@@ -52,6 +53,8 @@ def extract_with_markers(
         Dict from detect_markers() with name_after_label, name_before_label.
     pages_per_batch:
         Pages per LLM call (can be higher than text batch — snippets are tiny).
+    records_per_page:
+        Expected number of person records per page (1 = Category A/D, >1 = B/C).
     """
     from app.pipeline.repeating_unit_detector import filter_page_by_markers
 
@@ -92,8 +95,20 @@ def extract_with_markers(
             batch_text += f"\n--- PAGE {pg + 1} ---\n{snippets[pg]}\n"
 
         try:
-            response = ollama_client.generate(
-                prompt=(
+            if records_per_page > 1:
+                _marker_prompt = (
+                    f"Extract ALL persons' names and home addresses from each page snippet.\n"
+                    f"Each page may contain {records_per_page} or more person records.\n"
+                    f"Return JSON array with one object per PERSON (not per page):\n"
+                    f'[{{"page": 1, "name": "Full Name", "address": "Street, City ST ZIP"}}]\n'
+                    f"Rules:\n"
+                    f"- Extract ALL subjects, not just the first one\n"
+                    f"- Address must be a real street address with a number\n"
+                    f"- Return ONLY JSON array\n\n"
+                    f"{batch_text}"
+                )
+            else:
+                _marker_prompt = (
                     f"Extract the person's name and home address from each page snippet.\n"
                     f"Return JSON array:\n"
                     f'[{{"page": 1, "name": "Full Name", "address": "Street, City ST ZIP"}}]\n'
@@ -102,7 +117,9 @@ def extract_with_markers(
                     f"- Address must be a real street address with a number\n"
                     f"- Return ONLY JSON array\n\n"
                     f"{batch_text}"
-                ),
+                )
+            response = ollama_client.generate(
+                prompt=_marker_prompt,
                 system="You are a data extraction assistant. Return only JSON.",
                 use_case="marker_extraction",
                 document_id=doc_id,
@@ -152,6 +169,8 @@ def extract_text_batch(
     document_type: str = "unknown",
     field_inventory: list[str] | None = None,
     pages_per_batch: int = DEFAULT_PAGES_PER_BATCH,
+    record_unit: str = "page",
+    records_per_page: int = 1,
 ) -> list[PIIRecord]:
     """Extract PII from text pages using batched LLM calls.
 
@@ -169,6 +188,10 @@ def extract_text_batch(
         Expected field types from segregation (e.g., ["PERSON", "LOCATION"]).
     pages_per_batch:
         Number of pages per LLM call.
+    record_unit:
+        From repeating unit detection: "page" | "block" | "row" | "multi_page".
+    records_per_page:
+        Expected person records per page (1 for Category A/D, >1 for B/C).
 
     Returns
     -------
@@ -193,8 +216,14 @@ def extract_text_batch(
     all_records: list[PIIRecord] = []
     calls_made = 0
 
+    # Overlapping windows when records can span page boundaries
+    # Step size = batch size - overlap. Default overlap=0, but overlap=1
+    # when multi-page records detected.
+    use_overlap = record_unit == "multi_page"
+    step_size = max(1, pages_per_batch - (1 if use_overlap else 0))
+
     # Process in batches
-    for batch_start in range(0, len(content_pages), pages_per_batch):
+    for batch_start in range(0, len(content_pages), step_size):
         batch_pages = content_pages[batch_start:batch_start + pages_per_batch]
 
         # Build batch text
@@ -205,7 +234,7 @@ def extract_text_batch(
 
         # Build prompt
         fields_hint = ", ".join(field_inventory) if field_inventory else "PERSON, LOCATION, PHONE_NUMBER, DATE_OF_BIRTH, US_SSN"
-        prompt = _build_batch_prompt(batch_pages, batch_text, document_type, fields_hint)
+        prompt = _build_batch_prompt(batch_pages, batch_text, document_type, fields_hint, record_unit, records_per_page)
 
         _system_prompt = (
             "You are a document data extraction assistant. "
@@ -238,7 +267,7 @@ def extract_text_batch(
                     continue
                 retry_prompt = _build_batch_prompt(
                     [retry_pg], f"\n--- PAGE {retry_pg + 1} ---\n{retry_text}\n",
-                    document_type, fields_hint,
+                    document_type, fields_hint, record_unit, records_per_page,
                 )
                 try:
                     retry_response = ollama_client.generate(
@@ -261,11 +290,44 @@ def extract_text_batch(
         len(all_records), len(content_pages), calls_made,
     )
 
+    # Dedup records from overlapping page windows — same name+page = same record
+    if use_overlap:
+        all_records = _dedup_overlap_records(all_records)
+
     # Post-extraction: remove names that appear on too many pages
     # (teachers/staff appear across 5+ pages, students appear on 1-2)
     all_records = _filter_frequent_names(all_records, content_pages)
 
     return all_records
+
+
+def _dedup_overlap_records(records: list[PIIRecord]) -> list[PIIRecord]:
+    """Remove duplicate records from overlapping page windows.
+
+    When batches overlap by 1 page, the same person on the overlap page
+    gets extracted twice. Dedup by (name_lower, page_range) — keep the
+    record with more fields populated.
+    """
+    seen: dict[tuple[str, str], PIIRecord] = {}
+    for r in records:
+        key = (r.raw_name.strip().lower() if r.raw_name else "", r.page_range or "")
+        if key[0] and key in seen:
+            # Keep the one with more non-empty fields
+            existing = seen[key]
+            new_fields = sum(1 for v in [r.raw_phone, r.raw_email, r.raw_dob, r.raw_government_id] if v)
+            old_fields = sum(1 for v in [existing.raw_phone, existing.raw_email, existing.raw_dob, existing.raw_government_id] if v)
+            if new_fields > old_fields:
+                seen[key] = r
+        else:
+            seen[key] = r
+
+    deduped = list(seen.values())
+    if len(deduped) < len(records):
+        logger.info(
+            "Overlap dedup: %d → %d records (removed %d duplicates)",
+            len(records), len(deduped), len(records) - len(deduped),
+        )
+    return deduped
 
 
 def _filter_frequent_names(
@@ -332,10 +394,34 @@ def _build_batch_prompt(
     batch_text: str,
     document_type: str,
     fields_hint: str,
+    record_unit: str = "page",
+    records_per_page: int = 1,
 ) -> str:
     """Build the extraction prompt for a batch of pages."""
+    multi_subject = records_per_page > 1 or record_unit in ("block", "row")
+
+    # Multi-subject intro — for payroll registers, tabular docs, etc.
+    if multi_subject:
+        intro = (
+            f"Extract personal information from these {len(pages)} pages of a {document_type} document.\n\n"
+            f"IMPORTANT: Each page contains MULTIPLE person records "
+            f"(approximately {records_per_page} per page).\n"
+            f"Extract ALL persons on each page, not just the first one.\n\n"
+        )
+        count_rule = (
+            f"- Each page has ~{records_per_page} subjects. Return one object PER PERSON, not per page.\n"
+            f"- If a page has 5 people, return 5 objects all with the same page number.\n"
+        )
+    else:
+        intro = (
+            f"Extract personal information from these {len(pages)} pages of a {document_type} document.\n\n"
+        )
+        count_rule = (
+            f"- One object per page. If a page has no primary subject, omit it.\n"
+        )
+
     return (
-        f"Extract personal information from these {len(pages)} pages of a {document_type} document.\n\n"
+        f"{intro}"
         f"For EACH page, extract ONLY the PRIMARY SUBJECT — the person this record is ABOUT:\n"
         f"- In a school report: the STUDENT (not parents, not teachers)\n"
         f"- In a medical record: the PATIENT (not doctors, not nurses)\n"
@@ -345,7 +431,7 @@ def _build_batch_prompt(
         f"Also extract the primary subject's SECONDARY CONTACT if present "
         f"(parent, spouse, guardian, emergency contact, next of kin).\n\n"
         f"Fields to look for: {fields_hint}\n\n"
-        f"Return a JSON array with one object per page:\n"
+        f"Return a JSON array with one object per person:\n"
         f"[\n"
         f'  {{"page": 1, "name": "John Smith", '
         f'"parent_or_guardian": "Mary Smith", '
@@ -366,8 +452,7 @@ def _build_batch_prompt(
         f"  headers (same on EVERY page) are NOT personal — set to null.\n"
         f"- parent_or_guardian: Secondary contact (parent, spouse, guardian, emergency contact).\n"
         f"  This is a related person, NOT the primary subject themselves.\n"
-        f"- One object per page. If a page has no primary subject, omit it.\n"
-        f"- If multiple subjects on one page (e.g., payroll list), return one per subject.\n"
+        f"{count_rule}"
         f"- Use null for any field not found.\n\n"
         f"Respond ONLY with the JSON array.\n\n"
         f"{batch_text}"

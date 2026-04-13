@@ -567,12 +567,14 @@ class TestGapFillerCascade:
         mock_doc.__getitem__ = MagicMock(return_value=mock_page)
         mock_doc.close = MagicMock()
 
+        # Test the per-gap coordinate path directly (fill() routes through
+        # batched text first, which requires ollama_client)
         with patch("fitz.open", return_value=mock_doc):
-            result = filler.fill([gap])
+            result = filler._fill_one(gap)
 
-        assert result[0].fill_result == "filled"
-        assert result[0].fill_method == "coordinate_relaxed"
-        assert "6789" in (result[0].filled_value_masked or "")
+        assert result.fill_result == "filled"
+        assert result.fill_method == "coordinate_relaxed"
+        assert "6789" in (result.filled_value_masked or "")
 
     def test_regex_fallback_for_presidio(self):
         """When Presidio unavailable, regex fallback still finds patterns."""

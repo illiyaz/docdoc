@@ -2572,7 +2572,7 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                     # ── Step 37: Auto-select Strategy A (markers) or B (full text) ──
                     try:
                         from app.pipeline.text_batch_extractor import extract_text_batch, extract_with_markers
-                        from app.pipeline.repeating_unit_detector import detect_markers
+                        from app.pipeline.repeating_unit_detector import detect_markers, detect_visual_separators
                         from app.llm.client import OllamaClient as _TBClient
 
                         # Build page_texts from ALL document pages
@@ -2617,6 +2617,31 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                                 logger.warning("Marker detection failed for %s", doc.file_name, exc_info=True)
 
                             _strategy = _markers.get("strategy", "B")
+                            _record_unit = _markers.get("record_unit", "page")
+                            _records_per_page = _markers.get("records_per_page", 1)
+
+                            # Vision fallback: if text says "page" but page is dense
+                            if _record_unit == "page" and _records_per_page <= 1:
+                                # Check if pages are suspiciously dense for 1 record
+                                _sample_pg = list(_tb_page_texts.keys())[len(_tb_page_texts) // 2]
+                                if len(_tb_page_texts.get(_sample_pg, "")) > 4000:
+                                    try:
+                                        _vis_result = detect_visual_separators(
+                                            doc.source_path, _tb_client,
+                                            page_num=_sample_pg,
+                                            vision_model=settings.ollama_vision_model,
+                                        )
+                                        if _vis_result:
+                                            _record_unit = _vis_result.get("record_unit", _record_unit)
+                                            _records_per_page = _vis_result.get("records_per_page", _records_per_page)
+                                            _markers["record_unit"] = _record_unit
+                                            _markers["records_per_page"] = _records_per_page
+                                            logger.info(
+                                                "[%d/%d] Vision detected separators: unit=%s, rpp=%d for %s",
+                                                i, len(approved_docs), _record_unit, _records_per_page, doc.file_name,
+                                            )
+                                    except Exception:
+                                        pass  # vision fallback is optional
 
                             # --- Strategy A: Marker-filter extraction ---
                             if _strategy == "A":
@@ -2632,6 +2657,7 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                                     ollama_client=_tb_client,
                                     doc_id=str(doc.id),
                                     markers=_markers,
+                                    records_per_page=_records_per_page,
                                 )
 
                                 if records:
@@ -2655,6 +2681,8 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                                     doc_id=str(doc.id),
                                     document_type=_tb_doc_type,
                                     field_inventory=_tb_fields,
+                                    record_unit=_record_unit,
+                                    records_per_page=_records_per_page,
                                 )
 
                                 if records:
