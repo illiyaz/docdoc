@@ -18,7 +18,10 @@ For detailed per-step implementation notes, see [CLAUDE_HISTORY.md](CLAUDE_HISTO
 | Phase 5 Step 30d (OCR Tool Evaluation) | COMPLETE | — |
 | Phase 5 Step 30e (LLM Segregation + Review UI + Extraction QA) | COMPLETE | ~2850 |
 | Phase 5 Step 30f (Performance + Quality Sprint) | **COMPLETE** | ~2850 |
-| **Phase 6 (Security + Governance)** | **NEXT** | — |
+| Phase 5 Step 37 (Text LLM Batch + Strategy A/B/C) | **MOSTLY DONE** | — |
+| Phase 5 Step 37b (Repeating Unit Detection) | **PARTIAL** | — |
+| Phase 5 Step 38 (Production vLLM Deployment) | **NEXT** | — |
+| **Phase 6 (Security + Governance)** | Pending | — |
 | Phase 7 (Workflow Completeness) | Pending | — |
 | Phase 8 (Scale + Polish) | Pending | — |
 
@@ -935,13 +938,29 @@ The analysis LLM discovers these markers from 9 sample pages. The extraction LLM
 - If OCR fails → render page → 90B vision model
 - Works on: faxes, photographed documents, handwritten forms
 
-**Implementation order:**
-1. Add marker detection to analysis phase (new file: `repeating_unit_detector.py`)
-2. Add marker-filter extraction to `text_batch_extractor.py`
-3. Wire strategy selection in `two_phase.py`
-4. Switch all text LLM calls to 32b in .env
-5. Test on 100-page versions of all 12 files
-6. Verify end-to-end pipeline via UI
+**Implementation status (April 13, 2026):**
+
+| Item | Status | Notes |
+|---|---|---|
+| `repeating_unit_detector.py` | **DONE** | Marker detection via 32b LLM on 2 sample pages. Returns strategy A or B + marker labels. |
+| `text_batch_extractor.py` — marker-filter (Strategy A) | **DONE** | `extract_with_markers()` — Python filters pages to ~5 lines, 32b extracts from snippets. |
+| `text_batch_extractor.py` — full text batch (Strategy B) | **DONE** | `extract_text_batch()` — 3 pages per batch, entity_role prompt, hallucination/address/frequency filters. |
+| `two_phase.py` — strategy auto-selection | **DONE** | Marker detection → Strategy A or B → legacy fallback. `_text_batch_produced_records` flag. |
+| `.env` — 32b for all text LLM | **DONE** | `OLLAMA_MODEL=qwen2.5:32b`, `OLLAMA_UNDERSTANDING_MODEL=qwen2.5:32b` |
+| QA screen revamp | **DONE** | Bulk gap resolution, visual progress bar, page text snippets, approval gating. |
+| End-to-end UI flow | **DONE** | Upload → segregation → analysis → extraction → QA → approve. Auto-navigation wired. |
+
+**Pending (deferred):**
+
+| Item | Priority | Notes |
+|---|---|---|
+| 9-page sampling for Step 37b | P2 | Currently uses 2 pages for marker detection. Full 37b spec calls for 9 (3 onset + 3 mid + 3 end) for repeating unit analysis. Low priority — 2-page sampling works for strategy selection. |
+| Vision fallback for invisible separators | P3 | Step 37b spec: if text LLM finds record_unit="page" but page >4000 chars → send ONE page to vision. Not implemented. Affects Category B docs with visual-only separators. |
+| Multi-subject per page (Category B/C) | P2 | Strategy B prompt says "one object per page" — misses additional subjects. Need EXTRACT_MULTI_SUBJECT prompt variant. Payroll registers affected. |
+| Overlapping page windows | P3 | Data spanning page boundaries not handled yet. Spec: overlap 1-2 pages between batches. |
+| Comparison mode (`USE_TEXT_LLM_BATCH=compare`) | P4 | Run both coordinate + text batch on sample, pick winner. Development aid. |
+| Test on 100-page versions | P1 | Files exist in `docs/testingsamples/phase2_100pg/` but not systematically tested through pipeline. |
+| QA post-approval flow broken | **Known Bug** | Clicking "Approve for Notification" navigates to notification tab, but the notification tab experience is incomplete. Deferred — fix in Step 29b (Batch Approval & Send). |
 
 ---
 
