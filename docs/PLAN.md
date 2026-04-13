@@ -757,3 +757,86 @@ Current gap fill is slow: 335 gaps × 4-method cascade × per-gap PDF I/O = 25+ 
 3. Compare accuracy vs coordinate vs Presidio using test_llm_judgment.py
 4. If accuracy ≥ 85%: release as default extraction path
 5. Eventually: coordinate becomes optional optimization, text batch is the reliable default
+
+---
+
+### Step 38 — Production LLM Deployment (vLLM + GPU)
+
+**Goal:** Replace Ollama with vLLM for 5-10x throughput, proper quantization, and concurrent batch processing. Enable qwen2.5:32b at production speed.
+
+#### Why move off Ollama
+- Single request at a time (no concurrent batches)
+- No dynamic batching (GPU sits idle between requests)
+- Limited quantization (GGUF Q4_K_M only)
+- No tensor parallelism, no health checks, slow model loading
+- Fine for development, not for production throughput
+
+#### Recommended production stack
+```
+vLLM + qwen2.5:32b-AWQ (4-bit) on A100 40GB
+```
+- **vLLM**: Continuous batching, PagedAttention, OpenAI-compatible API
+- **AWQ 4-bit**: 95% of FP16 quality, fits A100 40GB with room for KV cache
+- **Performance**: 225-page document in ~30-60s extraction (vs 18 min on Mac Ollama)
+- **Concurrency**: 5-10 simultaneous documents
+
+#### Model benchmark results (April 12-13, 2026 overnight test)
+
+| Model | Size | Accuracy (school reports) | Time/225pg (Mac M4) | Est. time (A100) |
+|---|---|---|---|---|
+| qwen2.5:7b | 4.4GB | 82-92% | 4-5 min | ~30s |
+| qwen2.5:14b | 8GB | 89-95% | 8-10 min | ~1 min |
+| **qwen2.5:32b** | 18GB | **96-98%** | 18-25 min | **~2-3 min** |
+| llama3:8b | 4.3GB | TBD (overnight test) | ~5 min | ~30s |
+
+**Recommendation:** qwen2.5:32b-AWQ as production default. The 98% accuracy justifies the larger model — on GPU hardware, speed difference disappears.
+
+#### Quantization options
+
+| Quantization | Model size | Quality vs FP16 | Speed | When to use |
+|---|---|---|---|---|
+| FP16 | 64GB | 100% | Baseline | A100 80GB only |
+| **AWQ 4-bit** | **18GB** | **95%** | **1.5x faster** | **Production default — A100 40GB** |
+| GPTQ 4-bit | 18GB | 93% | 1.3x faster | Alternative to AWQ |
+| INT8 | 32GB | 98% | 1.2x faster | If 40GB+ VRAM available |
+| GGUF Q4_K_M | 18GB | 90% | Varies | What Ollama uses (dev only) |
+
+#### Hardware recommendation
+
+| Tier | GPU | Cost/hr | 32b speed | Use case |
+|---|---|---|---|---|
+| **Best value** | **A100 40GB** | **$2-3** | **~2-3 min/doc** | **Production sweet spot** |
+| Premium | A100 80GB | $4-5 | ~1.5 min/doc | High throughput |
+| Budget | A10G 24GB | $1-1.50 | ~5 min/doc | Small batches, dev |
+| Maximum | H100 80GB | $8-12 | ~30s/doc | 1000+ docs/day |
+
+#### Cloud provider (air-gap requirement)
+
+| Provider | Air-gap option | GPU | Notes |
+|---|---|---|---|
+| **AWS** | **VPC + private subnet, GovCloud** | p4d (A100) | Best air-gap, compliance certs |
+| Azure | VNET isolation, Azure Government | NC (A100) | Good compliance |
+| GCP | VPC-SC | a2 (A100) | Slightly cheaper |
+
+**Recommended:** AWS with A100 (p4d.xlarge) in private VPC. GovCloud for government contracts.
+
+#### Cost estimate
+
+```
+Per document:  ~3 min on A100 = ~$0.10
+Per case:      50 docs × $0.10 = $5
+Per month:     100 cases × $5 = $500 compute
+Instance:      A100 reserved = ~$1,500/month
+Total:         ~$2,000/month
+```
+
+#### Implementation plan
+
+| File | Change |
+|---|---|
+| `app/llm/client.py` | Add `VLLMClient` adapter (OpenAI-compatible API, ~50 lines). `OllamaClient` stays for dev. |
+| `app/core/settings.py` | Add `LLM_BACKEND=ollama|vllm`, `VLLM_URL`, `VLLM_MODEL` settings |
+| `docker-compose.prod.yml` | vLLM container with model volume mount |
+| `scripts/download_models.sh` | Pre-download qwen2.5:32b-AWQ for air-gap deployment |
+
+Minimal code change — vLLM serves an OpenAI-compatible endpoint. The `generate()` method just posts to a different URL with the same prompt/response format.
