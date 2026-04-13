@@ -809,13 +809,58 @@ Return a JSON array with one object per person."
 - Very long records (10-page loan app) → existing pages_per_instance handles this ✓
 - Dense tables (20 rows/page) → LLM sees table structure → routes to table extraction ✓
 
+**Hybrid detection (text-first, vision-fallback):**
+
+Some separators are invisible to `get_text()` — horizontal rules (vector lines), shaded rows, box borders, color changes. These are common in Crystal Reports, Excel-exported PDFs, and formatted templates.
+
+| Separator type | Visible in text? | Detection method |
+|---|---|---|
+| Dashes/equals/underscores | Yes | Text LLM |
+| Blank lines | Yes | Text LLM |
+| Vector lines (horizontal rules) | **No** | Vision LLM |
+| Shaded/alternating rows | **No** | Vision LLM |
+| Box borders | **No** | Vision LLM |
+
+Strategy:
+1. Text LLM on 9 sampled pages (~10s) — handles 80% of cases
+2. If text LLM says `record_unit: "page"` BUT page has >4000 chars (too dense for one record) → send ONE page image to vision LLM (~30s) to check for visual separators
+3. Vision only called when text analysis is suspicious — not on every document
+
+**Pattern flow (analysis → extraction):**
+
+The repeating unit description is stored in `metadata_json` and passed to the extraction prompt. The extraction LLM doesn't re-discover the pattern — it's told exactly what to look for:
+
+```
+Analysis LLM: "records separated by dashed lines, each starts with 
+              ALL-CAPS LASTNAME, FIRSTNAME, contains SSN + address"
+              → stored in metadata_json["repeating_unit"]
+
+Extraction LLM: receives pattern description in prompt →
+              "Extract ALL persons following this pattern:
+               [pattern from analysis]"
+```
+
+**Memory safety:**
+
+NEVER load the entire PDF. Use page-streaming with PyMuPDF:
+```python
+doc = fitz.open(path)
+for pg_num in sample_pages:
+    text = doc[pg_num].get_text()
+    # process text
+    doc._forget_page(pg_num)  # release page memory
+doc.close()
+```
+9 sampled pages × ~3KB text = ~27KB total. No memory concern.
+For vision fallback: render ONE page to image, send, discard.
+
 **Implementation:**
 
 | File | Change |
 |---|---|
-| `app/pipeline/repeating_unit_detector.py` | NEW — 9-page sampling, one LLM call, JSON parsing |
+| `app/pipeline/repeating_unit_detector.py` | NEW — 9-page sampling, text LLM call, optional vision fallback, JSON parsing |
 | `app/pipeline/two_phase.py` | Wire between onset detection and document understanding |
-| `app/pipeline/text_batch_extractor.py` | Accept `record_unit` + `separator` to pick prompt variant |
+| `app/pipeline/text_batch_extractor.py` | Accept `record_unit` + `separator` + `pattern_description` to build prompt variant |
 | `app/llm/prompts.py` | Add DETECT_REPEATING_UNIT prompt + EXTRACT_MULTI_SUBJECT prompt |
 
 #### Migration path
