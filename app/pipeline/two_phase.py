@@ -2569,13 +2569,13 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                 _doc_meta_pre = doc.metadata_json or {}
 
                 if settings.use_text_llm_batch and settings.llm_assist_enabled and blocks:
-                    # ── Step 37: Text Batch as PRIMARY path for text PDFs ──
+                    # ── Step 37: Auto-select Strategy A (markers) or B (full text) ──
                     try:
-                        from app.pipeline.text_batch_extractor import extract_text_batch
+                        from app.pipeline.text_batch_extractor import extract_text_batch, extract_with_markers
+                        from app.pipeline.repeating_unit_detector import detect_markers
                         from app.llm.client import OllamaClient as _TBClient
 
-                        # Build page_texts from ALL document pages (not just sampled)
-                        # For large PDFs, read directly from PDF for complete coverage
+                        # Build page_texts from ALL document pages
                         _tb_page_texts: dict[int, str] = {}
 
                         if (doc.file_type or "").lower() in ("pdf", ".pdf") and doc.source_path:
@@ -2586,6 +2586,7 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                                     text = _tb_doc[pg_idx].get_text()
                                     if text.strip():
                                         _tb_page_texts[pg_idx] = text
+                                    _tb_doc._forget_page(pg_idx)
                                 _tb_doc.close()
                             except Exception:
                                 pass
@@ -2600,36 +2601,73 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                                     _tb_page_texts[pg] += b.text + "\n"
 
                         if _tb_page_texts:
-                            _tb_client = _TBClient(db_session=db, timeout_s=120)
+                            _tb_client = _TBClient(db_session=db, timeout_s=180)
                             _tb_seg = _doc_meta_pre.get("segregation", {})
                             _tb_doc_type = _tb_seg.get("document_type", "unknown") if isinstance(_tb_seg, dict) else "unknown"
                             _tb_fields = _tb_seg.get("field_inventory", []) if isinstance(_tb_seg, dict) else []
+                            _onset = doc.sample_onset_page or 0
 
-                            logger.info(
-                                "[%d/%d] TEXT BATCH: %s | %d text pages | type=%s",
-                                i, len(approved_docs), doc.file_name,
-                                len(_tb_page_texts), _tb_doc_type,
-                            )
-
-                            records = extract_text_batch(
-                                page_texts=_tb_page_texts,
-                                ollama_client=_tb_client,
-                                doc_id=str(doc.id),
-                                document_type=_tb_doc_type,
-                                field_inventory=_tb_fields,
-                            )
-
-                            if records:
-                                extraction_path = "1-text-batch"
-                                logger.info(
-                                    "[%d/%d] TEXT BATCH DONE: %s | %d records from %d pages",
-                                    i, len(approved_docs), doc.file_name,
-                                    len(records), len(_tb_page_texts),
+                            # --- Marker detection (one LLM call) ---
+                            _markers = {}
+                            try:
+                                _markers = detect_markers(
+                                    doc.source_path, _tb_client, onset_page=_onset,
                                 )
+                            except Exception:
+                                logger.warning("Marker detection failed for %s", doc.file_name, exc_info=True)
+
+                            _strategy = _markers.get("strategy", "B")
+
+                            # --- Strategy A: Marker-filter extraction ---
+                            if _strategy == "A":
+                                logger.info(
+                                    "[%d/%d] STRATEGY A (marker-filter): %s | %d pages | marker='%s'",
+                                    i, len(approved_docs), doc.file_name,
+                                    len(_tb_page_texts),
+                                    (_markers.get("name_after_label") or _markers.get("name_before_label", ""))[:30],
+                                )
+
+                                records = extract_with_markers(
+                                    page_texts=_tb_page_texts,
+                                    ollama_client=_tb_client,
+                                    doc_id=str(doc.id),
+                                    markers=_markers,
+                                )
+
+                                if records:
+                                    extraction_path = "A-marker-filter"
+                                    logger.info(
+                                        "[%d/%d] STRATEGY A DONE: %s | %d records",
+                                        i, len(approved_docs), doc.file_name, len(records),
+                                    )
+
+                            # --- Strategy B: Full text batch ---
+                            if not records:
+                                logger.info(
+                                    "[%d/%d] STRATEGY B (text batch): %s | %d pages | type=%s",
+                                    i, len(approved_docs), doc.file_name,
+                                    len(_tb_page_texts), _tb_doc_type,
+                                )
+
+                                records = extract_text_batch(
+                                    page_texts=_tb_page_texts,
+                                    ollama_client=_tb_client,
+                                    doc_id=str(doc.id),
+                                    document_type=_tb_doc_type,
+                                    field_inventory=_tb_fields,
+                                )
+
+                                if records:
+                                    extraction_path = "B-text-batch"
+                                    logger.info(
+                                        "[%d/%d] STRATEGY B DONE: %s | %d records from %d pages",
+                                        i, len(approved_docs), doc.file_name,
+                                        len(records), len(_tb_page_texts),
+                                    )
 
                     except Exception:
                         logger.warning(
-                            "Text batch extraction failed for %s — falling through to legacy",
+                            "Text extraction failed for %s — falling through to legacy",
                             doc.file_name, exc_info=True,
                         )
 

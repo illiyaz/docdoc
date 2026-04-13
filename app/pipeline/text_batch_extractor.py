@@ -27,6 +27,124 @@ DEFAULT_PAGES_PER_BATCH = 3
 MAX_CHARS_PER_PAGE = 3000
 
 
+def extract_with_markers(
+    page_texts: dict[int, str],
+    ollama_client,
+    doc_id: str,
+    markers: dict,
+    pages_per_batch: int = 10,
+) -> list[PIIRecord]:
+    """Strategy A: Extract using marker-filtered snippets.
+
+    Python filters each page to ~5 lines around context markers,
+    then sends tiny snippets to LLM. Much faster and more accurate
+    than sending full page text.
+
+    Parameters
+    ----------
+    page_texts:
+        Dict mapping 0-based page numbers to full page text.
+    ollama_client:
+        OllamaClient instance.
+    doc_id:
+        Document UUID.
+    markers:
+        Dict from detect_markers() with name_after_label, name_before_label.
+    pages_per_batch:
+        Pages per LLM call (can be higher than text batch — snippets are tiny).
+    """
+    from app.pipeline.repeating_unit_detector import filter_page_by_markers
+
+    name_after = markers.get("name_after_label", "")
+    name_before = markers.get("name_before_label", "")
+
+    if not name_after and not name_before:
+        return []
+
+    # Filter all pages to snippets
+    snippets: dict[int, str] = {}
+    for pg, text in page_texts.items():
+        snippet = filter_page_by_markers(text, name_after, name_before)
+        if snippet:
+            snippets[pg] = snippet
+
+    if not snippets:
+        logger.warning("Marker filter produced 0 snippets from %d pages", len(page_texts))
+        return []
+
+    logger.info(
+        "Marker filter: %d/%d pages have snippets (avg %d chars vs %d full)",
+        len(snippets), len(page_texts),
+        sum(len(s) for s in snippets.values()) // max(len(snippets), 1),
+        sum(len(t) for t in page_texts.values()) // max(len(page_texts), 1),
+    )
+
+    # Batch snippets (can do 10 per call since they're tiny)
+    sorted_pages = sorted(snippets.keys())
+    all_records: list[PIIRecord] = []
+    calls_made = 0
+
+    for batch_start in range(0, len(sorted_pages), pages_per_batch):
+        batch_pages = sorted_pages[batch_start:batch_start + pages_per_batch]
+
+        batch_text = ""
+        for pg in batch_pages:
+            batch_text += f"\n--- PAGE {pg + 1} ---\n{snippets[pg]}\n"
+
+        try:
+            response = ollama_client.generate(
+                prompt=(
+                    f"Extract the person's name and home address from each page snippet.\n"
+                    f"Return JSON array:\n"
+                    f'[{{"page": 1, "name": "Full Name", "address": "Street, City ST ZIP"}}]\n'
+                    f"Rules:\n"
+                    f"- One person per page snippet\n"
+                    f"- Address must be a real street address with a number\n"
+                    f"- Return ONLY JSON array\n\n"
+                    f"{batch_text}"
+                ),
+                system="You are a data extraction assistant. Return only JSON.",
+                use_case="marker_extraction",
+                document_id=doc_id,
+            )
+            calls_made += 1
+
+            batch_page_texts = {pg: page_texts.get(pg, "") for pg in batch_pages}
+            records = _parse_batch_response(response, doc_id, batch_pages, batch_page_texts)
+            all_records.extend(records)
+
+        except Exception:
+            logger.warning(
+                "Marker extraction failed for pages %s — retrying individually",
+                [p + 1 for p in batch_pages],
+            )
+            for retry_pg in batch_pages:
+                try:
+                    retry_resp = ollama_client.generate(
+                        prompt=(
+                            f"Extract the person's name and address from this snippet.\n"
+                            f'Return JSON: [{{"page": {retry_pg + 1}, "name": "Full Name", "address": "Street, City ST ZIP"}}]\n\n'
+                            f"--- PAGE {retry_pg + 1} ---\n{snippets[retry_pg]}\n"
+                        ),
+                        system="Return only JSON.",
+                        use_case="marker_extraction_retry",
+                        document_id=doc_id,
+                    )
+                    calls_made += 1
+                    retry_page_texts = {retry_pg: page_texts.get(retry_pg, "")}
+                    retry_records = _parse_batch_response(retry_resp, doc_id, [retry_pg], retry_page_texts)
+                    all_records.extend(retry_records)
+                except Exception:
+                    logger.debug("Marker retry failed for page %d", retry_pg + 1)
+
+    logger.info(
+        "Marker extraction: %d records from %d snippets (%d LLM calls)",
+        len(all_records), len(snippets), calls_made,
+    )
+
+    return all_records
+
+
 def extract_text_batch(
     page_texts: dict[int, str],
     ollama_client,
