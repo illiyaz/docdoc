@@ -170,7 +170,7 @@ class GapDetector:
             # Skip blank pages — they have no content to extract
             if content_pages is not None:
                 page_0 = page_num - 1  # content_pages uses 0-indexed
-                if page_0 not in content_pages:
+                if page_0 not in content_pages:  # blank page (<10 chars)
                     continue
 
             recs = page_records.get(page_num, [])

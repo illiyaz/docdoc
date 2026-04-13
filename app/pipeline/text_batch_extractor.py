@@ -184,7 +184,7 @@ def extract_text_batch(
     # Filter out blank pages
     content_pages = [
         pg for pg in sorted_pages
-        if len(page_texts[pg].strip()) > 50
+        if len(page_texts[pg].strip()) > 10
     ]
 
     if not content_pages:
@@ -234,7 +234,7 @@ def extract_text_batch(
             )
             for retry_pg in batch_pages:
                 retry_text = page_texts[retry_pg][:MAX_CHARS_PER_PAGE]
-                if len(retry_text.strip()) < 50:
+                if len(retry_text.strip()) < 10:
                     continue
                 retry_prompt = _build_batch_prompt(
                     [retry_pg], f"\n--- PAGE {retry_pg + 1} ---\n{retry_text}\n",

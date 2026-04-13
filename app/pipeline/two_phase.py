@@ -4118,7 +4118,7 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                         _cpdoc = _cpfitz.open(gdoc.source_path)
                         _content_pages = set()
                         for _cpg in range(_cpdoc.page_count):
-                            if len(_cpdoc[_cpg].get_text().strip()) > 50:
+                            if len(_cpdoc[_cpg].get_text().strip()) > 10:
                                 _content_pages.add(_cpg)
                             _cpdoc._forget_page(_cpg)
                         _cpdoc.close()
