@@ -34,6 +34,7 @@ def extract_with_markers(
     markers: dict,
     pages_per_batch: int = 10,
     records_per_page: int = 1,
+    field_inventory: list[str] | None = None,
 ) -> list[PIIRecord]:
     """Strategy A: Extract using marker-filtered snippets.
 
@@ -100,27 +101,51 @@ def extract_with_markers(
             batch_text += f"\n--- PAGE {pg + 1} ---\n{snippets[pg]}\n"
 
         try:
+            # Build field-aware prompt using segregation inventory
+            _fi = field_inventory or []
+            _extra_fields = ""
+            _extra_json = ""
+            _extra_rules = ""
+            if any(t in _fi for t in ("US_SSN", "GOV_ID", "IDENTIFICATION")):
+                _extra_fields += ", SSN/Tax ID"
+                _extra_json += ', "ssn": "123-45-6789"'
+                _extra_rules += "- ssn: Social Security Number, Tax ID, National ID, or similar government identifier.\n"
+            if any(t in _fi for t in ("DATE_OF_BIRTH",)):
+                _extra_fields += ", date of birth"
+                _extra_json += ', "dob": "01/15/1980"'
+            if any(t in _fi for t in ("PHONE_NUMBER",)):
+                _extra_fields += ", phone number"
+                _extra_json += ', "phone": "555-123-4567"'
+            if any(t in _fi for t in ("EMAIL_ADDRESS",)):
+                _extra_fields += ", email"
+                _extra_json += ', "email": "a@b.com"'
+            if any(t in _fi for t in ("FINANCIAL", "US_BANK_NUMBER", "CREDIT_CARD")):
+                _extra_fields += ", account numbers"
+                _extra_json += ', "account": "1234567890"'
+
             if records_per_page > 1:
                 _marker_prompt = (
-                    f"Extract ALL persons' names and home addresses from each page snippet.\n"
+                    f"Extract ALL persons' names, home addresses{_extra_fields} from each page snippet.\n"
                     f"Each page may contain {records_per_page} or more person records.\n"
                     f"Return JSON array with one object per PERSON (not per page):\n"
-                    f'[{{"page": 1, "name": "Full Name", "address": "Street, City ST ZIP"}}]\n'
+                    f'[{{"page": 1, "name": "Full Name", "address": "Street, City ST ZIP"{_extra_json}}}]\n'
                     f"Rules:\n"
                     f"- Extract ALL subjects, not just the first one\n"
                     f"- Address must be a real street address with a number\n"
-                    f"- Return ONLY JSON array\n\n"
+                    f"{_extra_rules}"
+                    f"- Use null for any field not found. Return ONLY JSON array.\n\n"
                     f"{batch_text}"
                 )
             else:
                 _marker_prompt = (
-                    f"Extract the person's name and home address from each page snippet.\n"
+                    f"Extract the person's name, home address{_extra_fields} from each page snippet.\n"
                     f"Return JSON array:\n"
-                    f'[{{"page": 1, "name": "Full Name", "address": "Street, City ST ZIP"}}]\n'
+                    f'[{{"page": 1, "name": "Full Name", "address": "Street, City ST ZIP"{_extra_json}}}]\n'
                     f"Rules:\n"
                     f"- One person per page snippet\n"
                     f"- Address must be a real street address with a number\n"
-                    f"- Return ONLY JSON array\n\n"
+                    f"{_extra_rules}"
+                    f"- Use null for any field not found. Return ONLY JSON array.\n\n"
                     f"{batch_text}"
                 )
             response = ollama_client.generate(
@@ -148,8 +173,8 @@ def extract_with_markers(
                 try:
                     retry_resp = ollama_client.generate(
                         prompt=(
-                            f"Extract the person's name and address from this snippet.\n"
-                            f'Return JSON: [{{"page": {retry_pg + 1}, "name": "Full Name", "address": "Street, City ST ZIP"}}]\n\n'
+                            f"Extract the person's name, address{_extra_fields} from this snippet.\n"
+                            f'Return JSON: [{{"page": {retry_pg + 1}, "name": "Full Name", "address": "Street, City ST ZIP"{_extra_json}}}]\n\n'
                             f"--- PAGE {retry_pg + 1} ---\n{snippets[retry_pg]}\n"
                         ),
                         system="Return only JSON.",
@@ -245,6 +270,12 @@ def extract_text_batch(
         "Ignore teachers, doctors, providers, institutional staff, and other supporting names."
     )
 
+    # Post-batch quality gate state — after first batch, check if we're
+    # extracting the fields segregation expected.  If not, ask the LLM
+    # to diagnose what's wrong and adjust the prompt dynamically.
+    _quality_gate_done = False
+    _quality_adjusted_hint = fields_hint  # may be overridden by gate
+
     # Process in batches
     for batch_start in range(0, len(content_pages), step_size):
         # Circuit breaker — if model is consistently failing, stop early
@@ -282,6 +313,49 @@ def extract_text_batch(
             batch_page_texts = {pg: page_texts.get(pg, "") for pg in batch_pages}
             records = _parse_batch_response(response, doc_id, batch_pages, batch_page_texts)
             all_records.extend(records)
+
+            # --- Post-batch quality gate (runs once after first successful batch) ---
+            if not _quality_gate_done and records and field_inventory:
+                _quality_gate_done = True
+                _extracted_types = set()
+                for r in records:
+                    _extracted_types.update(r.entity_types_found)
+                _expected = set(field_inventory)
+                _missing = _expected - _extracted_types - {"PERSON"}
+                if _missing and len(_missing) >= 2:
+                    _sample_page = batch_pages[0]
+                    _sample_text = page_texts.get(_sample_page, "")[:2000]
+                    try:
+                        _diag_prompt = (
+                            f"I extracted these fields from a {document_type} document: {sorted(_extracted_types)}\n"
+                            f"But I expected to also find: {sorted(_missing)}\n\n"
+                            f"Here is the page text:\n{_sample_text}\n\n"
+                            f"Are the missing fields ({', '.join(sorted(_missing))}) present on this page "
+                            f"but in a different format or label? If yes, describe the format. "
+                            f"If they are genuinely not on this page, say NOT_PRESENT.\n"
+                            f"Reply in one short paragraph."
+                        )
+                        _diag_resp = ollama_client.generate(
+                            prompt=_diag_prompt,
+                            system="You analyze document structure. Be concise.",
+                            use_case="quality_gate_diagnosis",
+                            document_id=doc_id,
+                        )
+                        calls_made += 1
+                        if _diag_resp and "NOT_PRESENT" not in _diag_resp.upper():
+                            _quality_adjusted_hint = fields_hint + f"\n\nIMPORTANT: {_diag_resp.strip()}"
+                            fields_hint = _quality_adjusted_hint
+                            logger.info(
+                                "Quality gate: missing %s — LLM adjusted hints: %s",
+                                sorted(_missing), _diag_resp[:200],
+                            )
+                        else:
+                            logger.info(
+                                "Quality gate: %s genuinely not present on this doc type",
+                                sorted(_missing),
+                            )
+                    except Exception:
+                        logger.debug("Quality gate diagnosis failed", exc_info=True)
 
         except Exception:
             # Batch failed — retry each page individually.

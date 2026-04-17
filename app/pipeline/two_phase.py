@@ -620,6 +620,22 @@ def analyze_generator(
 
                             if seg_result.pii_detected:
                                 seg_pii_count += 1
+                                # Plumb late-onset page → content_onset_page
+                                # so extraction skips boilerplate pages
+                                if seg_result.classification_method == "text_late_onset":
+                                    import re as _onset_re
+                                    _onset_match = _onset_re.search(
+                                        r"page (\d+)", seg_result.summary or ""
+                                    )
+                                    if _onset_match:
+                                        _late_page = int(_onset_match.group(1))
+                                        # Set onset a few pages before the discovered page
+                                        # to catch the boundary (K-1 cover page, etc.)
+                                        doc.content_onset_page = max(0, _late_page - 3)
+                                        logger.info(
+                                            "Late onset plumbing: %s onset set to page %d (PII found at %d)",
+                                            doc.file_name, doc.content_onset_page, _late_page,
+                                        )
                             else:
                                 seg_non_pii_count += 1
 
@@ -691,6 +707,25 @@ def analyze_generator(
         structure_task = StructureAnalysisTask()
         doc_blocks_cache: dict[UUID, list] = {}  # cache blocks for sample_extraction
         doc_total_pages: dict[UUID, int] = {}  # true page count (not derived from blocks)
+
+        # Filter out non-PII docs — skip expensive analysis for files
+        # that segregation classified as non-PII.
+        _pii_docs = []
+        _non_pii_skipped = 0
+        for doc in doc_records:
+            seg = (doc.metadata_json or {}).get("segregation", {})
+            if isinstance(seg, dict) and seg.get("pii_detected") is False:
+                _non_pii_skipped += 1
+                logger.info("Skipping analysis for non-PII doc: %s", doc.file_name)
+            else:
+                _pii_docs.append(doc)
+        if _non_pii_skipped:
+            logger.info("Skipped %d non-PII docs from analysis", _non_pii_skipped)
+            yield _sse({
+                "stage": "structure_analysis", "status": "running",
+                "message": f"Skipped {_non_pii_skipped} non-PII doc(s), analyzing {len(_pii_docs)}...",
+            })
+        doc_records = _pii_docs  # all downstream stages use filtered list
 
         for i, doc in enumerate(doc_records, 1):
             yield _sse({
@@ -809,9 +844,17 @@ def analyze_generator(
                     doc_blocks_cache[doc.id] = blocks
 
                 # PII-verified onset detection
+                # If segregation already set content_onset_page (late-onset),
+                # trust it — Presidio won't find PII on early pages either.
                 onset_page: int | str = 0
 
-                if (doc.file_type or "").lower() == "pdf":
+                if doc.content_onset_page and doc.content_onset_page > 0:
+                    onset_page = doc.content_onset_page
+                    logger.info(
+                        "Using segregation late-onset page %d for %s (skipping Presidio onset)",
+                        onset_page, doc.file_name,
+                    )
+                elif (doc.file_type or "").lower() == "pdf":
                     try:
                         import fitz
                         fitz_doc = fitz.open(doc.source_path)
@@ -1829,6 +1872,13 @@ def analyze_generator(
                 body.protocol_id,
             )
 
+            # If segregation already approved this doc as PII, auto-approve
+            # for extraction — don't make the auditor click Approve again.
+            _seg = (dict(doc.metadata_json or {})).get("segregation", {})
+            if isinstance(_seg, dict) and _seg.get("pii_detected") is True:
+                approved = True
+                reason = (reason or "") + " | segregation-approved"
+
             # Create DocumentAnalysisReview record
             review = DocumentAnalysisReview(
                 document_id=doc.id,
@@ -2605,7 +2655,7 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                             try:
                                 import fitz as _tb_fitz
                                 _tb_doc = _tb_fitz.open(doc.source_path)
-                                _tb_onset = doc.sample_onset_page or 0
+                                _tb_onset = doc.content_onset_page or doc.sample_onset_page or 0
                                 for pg_idx in range(_tb_onset, _tb_doc.page_count):
                                     text = _tb_doc[pg_idx].get_text()
                                     if text.strip():
@@ -2682,6 +2732,7 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                                     doc_id=str(doc.id),
                                     markers=_markers,
                                     records_per_page=_records_per_page,
+                                    field_inventory=_tb_fields,
                                 )
 
                                 if records:
@@ -4098,6 +4149,155 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
             except Exception:
                 logger.warning("Post-extraction gap analysis failed", exc_info=True)
 
+        # --- Stage 1.4: LLM Record Validation ---
+        # Validates extracted records using LLM context awareness.  Purges
+        # garbage (form codes, legal entities, empty names) so those pages
+        # appear as gaps and trigger vision fallback naturally.
+        if all_records and settings.llm_assist_enabled:
+            try:
+                from app.pipeline.record_validator import validate_records as _validate_records
+
+                _update_extraction_progress(
+                    db, run, stage="record_validation",
+                    message="Validating extracted records...",
+                    completed_doc_ids=completed_doc_ids,
+                    total_docs=len(approved_docs), current_doc=len(approved_docs),
+                    records_found=len(all_records),
+                    detail={"status": "running"},
+                )
+
+                # Group records by document for per-doc validation
+                from collections import defaultdict as _rv_dd
+                _rv_by_doc: dict[str, list] = _rv_dd(list)
+                for _rv_r in all_records:
+                    _rv_by_doc[_rv_r.source_document_id].append(_rv_r)
+
+                _total_purged = 0
+                _validated_records: list = []
+                for _rv_doc_key, _rv_doc_records in _rv_by_doc.items():
+                    # Find the document for type info
+                    _rv_doc = next(
+                        (d for d in approved_docs
+                         if str(d.id) == _rv_doc_key or d.source_path == _rv_doc_key),
+                        None,
+                    )
+                    _rv_doc_type = "unknown"
+                    _rv_doc_name = _rv_doc_key
+                    if _rv_doc:
+                        _rv_seg = (dict(_rv_doc.metadata_json or {})).get("segregation", {})
+                        _rv_doc_type = _rv_seg.get("document_type", "unknown") if isinstance(_rv_seg, dict) else "unknown"
+                        _rv_doc_name = _rv_doc.file_name or _rv_doc_key
+
+                    try:
+                        from app.llm.client import OllamaClient as _RVOllama
+                        _rv_client = _RVOllama(db_session=db, timeout_s=300)
+                        _rv_valid, _rv_purged, _rv_stats = _validate_records(
+                            records=_rv_doc_records,
+                            document_type=_rv_doc_type,
+                            document_name=_rv_doc_name,
+                            ollama_client=_rv_client,
+                            doc_id=str(_rv_doc.id) if _rv_doc else None,
+                        )
+                        _validated_records.extend(_rv_valid)
+                        _total_purged += len(_rv_purged)
+                    except Exception:
+                        logger.debug("Record validation failed for %s", _rv_doc_name, exc_info=True)
+                        _validated_records.extend(_rv_doc_records)
+
+                if _total_purged > 0:
+                    logger.info(
+                        "Record validation: purged %d/%d garbage records across %d docs",
+                        _total_purged, len(all_records), len(_rv_by_doc),
+                    )
+                    all_records = _validated_records
+
+                _update_extraction_progress(
+                    db, run, stage="record_validation",
+                    message=f"Validated {len(all_records)} records ({_total_purged} purged)",
+                    completed_doc_ids=completed_doc_ids,
+                    total_docs=len(approved_docs), current_doc=len(approved_docs),
+                    records_found=len(all_records),
+                    detail={"purged": _total_purged, "status": "complete"},
+                )
+            except ImportError:
+                logger.info("Record validator not available — skipping")
+            except Exception:
+                logger.warning("Record validation failed — keeping all records", exc_info=True)
+
+        # --- Stage 1.45: Completeness-driven vision recovery ---
+        # If unique subjects found << expected, get a name roster from summary
+        # pages and vision-extract specific pages to find missing people.
+        if all_records and settings.llm_assist_enabled:
+            try:
+                from app.pipeline.completeness_checker import check_completeness_and_recover
+
+                _update_extraction_progress(
+                    db, run, stage="completeness_check",
+                    message="Checking extraction completeness...",
+                    completed_doc_ids=completed_doc_ids,
+                    total_docs=len(approved_docs), current_doc=len(approved_docs),
+                    records_found=len(all_records),
+                    detail={"status": "running"},
+                )
+
+                _pre_completeness_count = len(all_records)
+                for _cc_doc in approved_docs:
+                    # Get records for this doc
+                    _cc_doc_id = str(_cc_doc.id)
+                    _cc_doc_path = _cc_doc.source_path or ""
+                    _cc_doc_records = [
+                        r for r in all_records
+                        if r.source_document_id == _cc_doc_id
+                        or r.source_document_id == _cc_doc_path
+                    ]
+                    if not _cc_doc_records:
+                        continue
+
+                    try:
+                        from app.llm.client import OllamaClient as _CCOllama
+                        _cc_client = _CCOllama(db_session=db, timeout_s=300)
+                        _cc_result = check_completeness_and_recover(
+                            records=_cc_doc_records,
+                            doc=_cc_doc,
+                            ollama_client=_cc_client,
+                            settings=settings,
+                            db_session=db,
+                        )
+                        # Replace this doc's records with recovered set
+                        if len(_cc_result) > len(_cc_doc_records):
+                            _new_records = [
+                                r for r in all_records
+                                if r.source_document_id != _cc_doc_id
+                                and r.source_document_id != _cc_doc_path
+                            ]
+                            _new_records.extend(_cc_result)
+                            all_records = _new_records
+                    except Exception:
+                        logger.debug(
+                            "Completeness check failed for %s", _cc_doc.file_name,
+                            exc_info=True,
+                        )
+
+                _recovered = len(all_records) - _pre_completeness_count
+                if _recovered > 0:
+                    logger.info(
+                        "Completeness recovery: %d additional records across %d docs",
+                        _recovered, len(approved_docs),
+                    )
+
+                _update_extraction_progress(
+                    db, run, stage="completeness_check",
+                    message=f"Completeness check done ({_recovered} recovered)" if _recovered else "Completeness check done",
+                    completed_doc_ids=completed_doc_ids,
+                    total_docs=len(approved_docs), current_doc=len(approved_docs),
+                    records_found=len(all_records),
+                    detail={"recovered": _recovered, "status": "complete"},
+                )
+            except ImportError:
+                logger.info("Completeness checker not available — skipping")
+            except Exception:
+                logger.warning("Completeness check failed", exc_info=True)
+
         # --- Stage 1.5: GapDetector + GapFiller (4-path cascade) ---
         # Runs after ExtractionVerifier vision gap-fill.  Detects page/field/
         # truncation gaps and attempts auto-fill through coordinate → LLM →
@@ -4141,11 +4341,15 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                 if not field_inv:
                     continue  # No expectations → no gaps to detect
 
-                # Serialize records for this document
+                # Serialize records for this document — match by UUID or file path
+                # (selector/Presidio path uses source_path, Strategy A/B uses doc UUID)
+                _gdoc_id_str = str(gdoc.id)
+                _gdoc_path = gdoc.source_path or ""
                 doc_records_for_gap = [
                     _serialize_pii_record(r)
                     for r in all_records
-                    if r.source_document_id == str(gdoc.id)
+                    if r.source_document_id == _gdoc_id_str
+                    or r.source_document_id == _gdoc_path
                 ]
                 if not doc_records_for_gap:
                     continue
@@ -4230,8 +4434,9 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                     try:
                         from app.llm.client import OllamaClient as _GapOllama
                         ollama_client = _GapOllama(db_session=db, timeout_s=120)
+                        logger.info("Gap fill: OllamaClient created for doc %s", doc_id)
                     except Exception:
-                        pass
+                        logger.warning("Gap fill: OllamaClient creation FAILED for doc %s", doc_id, exc_info=True)
 
                     # Resolve vision model for gap filling
                     _gap_vision_model = None

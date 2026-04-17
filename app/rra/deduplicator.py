@@ -169,7 +169,60 @@ class Deduplicator:
                 "Minimum-PII threshold: skipped %d group(s) with name-only records",
                 skipped_thin,
             )
+
+        # SQL dedup pass: merge subjects with same canonical_name in the same
+        # project.  The Python _find_existing check catches most dupes, but
+        # race conditions and different extraction paths can still produce
+        # duplicates.  This is the final safety net.
+        if subjects:
+            project_id = subjects[0].project_id
+            if project_id:
+                merged = self._sql_dedup(project_id)
+                if merged:
+                    logger.info("SQL dedup: merged %d duplicate subjects for project %s", merged, project_id)
+
         return subjects
+
+    def _sql_dedup(self, project_id) -> int:
+        """Merge duplicate notification_subjects with same name in same project.
+
+        Keeps the subject with the lowest subject_id (first inserted).
+        Combines page ranges before deleting duplicates.
+        Returns count of deleted duplicates.
+        """
+        from sqlalchemy import text as sa_text
+
+        # Find duplicates: same canonical_name, same project
+        dupes = self.db.execute(sa_text("""
+            SELECT canonical_name, array_agg(subject_id ORDER BY subject_id) as ids
+            FROM notification_subjects
+            WHERE project_id = :pid AND canonical_name IS NOT NULL
+            GROUP BY canonical_name
+            HAVING count(*) > 1
+        """), {"pid": str(project_id)}).fetchall()
+
+        if not dupes:
+            return 0
+
+        total_deleted = 0
+        for row in dupes:
+            name, ids = row
+            keep_id = ids[0]  # keep first
+            delete_ids = ids[1:]
+
+            # Merge page ranges from duplicates into the keeper
+            for del_id in delete_ids:
+                dup = self.db.get(NotificationSubject, del_id)
+                keeper = self.db.get(NotificationSubject, keep_id)
+                if dup and keeper:
+                    self._merge_into(keeper, dup)
+                    self.db.delete(dup)
+                    total_deleted += 1
+
+        if total_deleted:
+            self.db.flush()
+
+        return total_deleted
 
     # ------------------------------------------------------------------
     # Internal
@@ -335,7 +388,7 @@ class Deduplicator:
         )
 
     def _find_existing(self, ns: NotificationSubject) -> NotificationSubject | None:
-        """Look up by canonical_email first, then canonical_phone."""
+        """Look up by canonical_email, canonical_phone, or name+gov_id."""
         if ns.canonical_email:
             hit = (
                 self.db.query(NotificationSubject)
@@ -349,6 +402,33 @@ class Deduplicator:
             hit = (
                 self.db.query(NotificationSubject)
                 .filter(NotificationSubject.canonical_phone == ns.canonical_phone)
+                .first()
+            )
+            if hit is not None:
+                return hit
+
+        # Match by name + government ID type (same person, different pages)
+        if ns.canonical_name and ns.government_id_type and ns.project_id:
+            hit = (
+                self.db.query(NotificationSubject)
+                .filter(
+                    NotificationSubject.canonical_name == ns.canonical_name,
+                    NotificationSubject.government_id_type == ns.government_id_type,
+                    NotificationSubject.project_id == ns.project_id,
+                )
+                .first()
+            )
+            if hit is not None:
+                return hit
+
+        # Match by name only within same project (no gov ID but same person)
+        if ns.canonical_name and ns.project_id:
+            hit = (
+                self.db.query(NotificationSubject)
+                .filter(
+                    NotificationSubject.canonical_name == ns.canonical_name,
+                    NotificationSubject.project_id == ns.project_id,
+                )
                 .first()
             )
             if hit is not None:
@@ -376,6 +456,27 @@ class Deduplicator:
                 old_recs.append(r)
                 seen.add(r)
         existing.source_records = old_recs
+
+        # Merge page ranges
+        old_pages = set((existing.source_page_range or "").split(", "))
+        new_pages = set((incoming.source_page_range or "").split(", "))
+        merged_pages = sorted(p for p in old_pages | new_pages if p)
+        if merged_pages:
+            existing.source_page_range = ", ".join(merged_pages)
+
+        # Fill in missing fields from incoming
+        if not existing.canonical_name and incoming.canonical_name:
+            existing.canonical_name = incoming.canonical_name
+        if not existing.canonical_email and incoming.canonical_email:
+            existing.canonical_email = incoming.canonical_email
+        if not existing.canonical_phone and incoming.canonical_phone:
+            existing.canonical_phone = incoming.canonical_phone
+        if not existing.canonical_address and incoming.canonical_address:
+            existing.canonical_address = incoming.canonical_address
+        if not existing.government_id_type and incoming.government_id_type:
+            existing.government_id_type = incoming.government_id_type
+        if incoming.notification_required:
+            existing.notification_required = True
 
         # Keep lower merge_confidence (more conservative)
         inc_conf = incoming.merge_confidence if incoming.merge_confidence is not None else 1.0

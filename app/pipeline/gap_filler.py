@@ -140,8 +140,27 @@ class GapFiller:
 
         # Try batched LLM text extraction (fast path)
         filled_pages: set[int] = set()
+        logger.info(
+            "Gap fill check: ollama_client=%s, llm_calls_used=%d, max_llm_total=%d, gaps_by_page_count=%d, doc_path=%s",
+            type(self.ollama_client).__name__ if self.ollama_client else None,
+            self._llm_calls_used, self.max_llm_total, len(gaps_by_page), self.doc_path,
+        )
         if self.ollama_client and self._llm_calls_used < self.max_llm_total:
             filled_pages = self._fill_batched_text(gaps_by_page, fillable_gaps, results)
+
+        # --- Self-correcting loop ---
+        # If fill rate is low, diagnose WHY pages were missed and retry
+        # with adjusted prompts. Costs 1 diagnostic call + re-extraction.
+        if (
+            self.ollama_client
+            and self._llm_calls_used < self.max_llm_total
+            and len(gaps_by_page) > 5
+        ):
+            _filled_so_far = sum(1 for r in results if r.fill_result == "filled")
+            _fill_rate = _filled_so_far / max(len(fillable_gaps), 1)
+            if _fill_rate < 0.3:  # less than 30% filled — something is wrong
+                _new_fills = self._self_correct(gaps_by_page, filled_pages, results)
+                filled_pages.update(_new_fills)
 
         # Remaining unfilled gaps → mark as unfilled
         for gap in fillable_gaps:
@@ -278,9 +297,330 @@ class GapFiller:
                                     results.append(replace(gap, fill_attempted=True, fill_result="unfilled"))
 
             except Exception:
-                logger.debug("Gap fill batch failed for pages %s", batch_pages, exc_info=True)
+                logger.warning("Gap fill batch failed for pages %s", batch_pages, exc_info=True)
 
         return filled_pages
+
+    def _self_correct(
+        self,
+        gaps_by_page: dict[int, list[ExtractionGap]],
+        already_filled: set[int],
+        results: list[ExtractionGap],
+    ) -> set[int]:
+        """Self-correcting loop: diagnose why extraction missed pages, then retry.
+
+        1. Pick 2-3 unfilled pages as samples
+        2. Send them to LLM with diagnostic prompt: "what PII is here and
+           in what format?"
+        3. Use the diagnosis to build an adjusted extraction prompt
+        4. Re-extract all unfilled pages with the adjusted prompt
+        """
+        unfilled_pages = sorted(p for p in gaps_by_page if p not in already_filled)
+        if not unfilled_pages or self._llm_calls_used >= self.max_llm_total:
+            return set()
+
+        new_fills: set[int] = set()
+
+        # Step 1: Read sample pages — pick from beginning, middle, and end
+        # to get diverse page types (not just the first 3 which may all be boilerplate)
+        _n = len(unfilled_pages)
+        sample_indices = sorted(set([0, _n // 2, _n - 1]))
+        sample_pages = [unfilled_pages[i] for i in sample_indices if i < _n]
+        page_texts: dict[int, str] = {}
+        try:
+            import fitz
+            doc = fitz.open(self.doc_path)
+            for pn in sample_pages:
+                pg_idx = pn - 1
+                if 0 <= pg_idx < doc.page_count:
+                    page_texts[pn] = doc[pg_idx].get_text()
+                    doc._forget_page(pg_idx)
+            doc.close()
+        except Exception:
+            return set()
+
+        if not page_texts:
+            return set()
+
+        # Step 2: Diagnostic prompt
+        sample_text = ""
+        for pn in sample_pages:
+            if pn in page_texts:
+                sample_text += f"\n--- PAGE {pn} ---\n{page_texts[pn][:2000]}\n"
+
+        try:
+            diag_prompt = (
+                f"I tried to extract personal information (names, addresses, SSNs, "
+                f"dates of birth, phone numbers) from this document but got zero "
+                f"results on many pages.\n\n"
+                f"Here are {len(sample_pages)} sample pages that returned nothing:\n"
+                f"{sample_text}\n\n"
+                f"Analyze these pages and tell me:\n"
+                f"1. Is there personal information on these pages? If yes, what fields?\n"
+                f"2. What format is it in? (tabular, key-value, free text, etc.)\n"
+                f"3. What labels or markers precede the personal data?\n"
+                f"4. If there is NO personal information, say NO_PII.\n\n"
+                f"Be specific and concise."
+            )
+            diag_resp = self.ollama_client.generate(
+                prompt=diag_prompt,
+                system="You are a document structure analyst. Be specific and concise.",
+                use_case="self_correct_diagnosis",
+                document_id=self.document_id,
+            )
+            self._llm_calls_used += 1
+        except Exception:
+            logger.debug("Self-correct diagnosis failed", exc_info=True)
+            return set()
+
+        if not diag_resp or "NO_PII" in diag_resp.upper():
+            logger.info(
+                "Self-correct: LLM confirms no PII on sample pages — skipping re-extraction"
+            )
+            return set()
+
+        logger.info(
+            "Self-correct: LLM diagnosis for %d unfilled pages: %s",
+            len(unfilled_pages), diag_resp[:200],
+        )
+
+        # Step 3: Re-extract unfilled pages with adjusted prompt
+        # Read all unfilled page texts
+        try:
+            import fitz
+            doc = fitz.open(self.doc_path)
+            for pn in unfilled_pages:
+                if pn not in page_texts:
+                    pg_idx = pn - 1
+                    if 0 <= pg_idx < doc.page_count:
+                        page_texts[pn] = doc[pg_idx].get_text()
+                        doc._forget_page(pg_idx)
+            doc.close()
+        except Exception:
+            return set()
+
+        # Re-extract in batches of 5 with the diagnosis context
+        import json as _json
+        batch_size = 5
+        re_extract_pages = sorted(pn for pn in unfilled_pages if pn in page_texts)
+
+        for batch_start in range(0, len(re_extract_pages), batch_size):
+            if self._llm_calls_used >= self.max_llm_total:
+                break
+
+            batch = re_extract_pages[batch_start:batch_start + batch_size]
+            batch_text = ""
+            for pn in batch:
+                text = page_texts.get(pn, "")
+                if text.strip():
+                    batch_text += f"\n--- PAGE {pn} ---\n{text[:3000]}\n"
+
+            if not batch_text.strip():
+                continue
+
+            try:
+                re_prompt = (
+                    f"Extract personal information from these {len(batch)} pages.\n\n"
+                    f"CONTEXT from document analysis:\n{diag_resp[:500]}\n\n"
+                    f"Based on the above analysis, extract ALL personal records.\n"
+                    f"Return a JSON array with one object per person:\n"
+                    f'[{{"page": 5, "name": "Full Name", "address": "Street, City ST ZIP", '
+                    f'"ssn": "123-45-6789", "dob": "01/15/1980", "phone": "555-123-4567"}}]\n'
+                    f"Use null for fields not found. If a page has no personal data, omit it.\n\n"
+                    f"{batch_text}"
+                )
+                resp = self.ollama_client.generate(
+                    prompt=re_prompt,
+                    system="You are a data extraction assistant. Return only JSON.",
+                    use_case="self_correct_extract",
+                    document_id=self.document_id,
+                )
+                self._llm_calls_used += 1
+
+                # Parse response
+                cleaned = resp.strip()
+                if cleaned.startswith("```"):
+                    lines = cleaned.split("\n")
+                    lines = [ln for ln in lines if not ln.strip().startswith("```")]
+                    cleaned = "\n".join(lines)
+
+                # Try to extract JSON even from partial responses
+                try:
+                    records = _json.loads(cleaned)
+                except _json.JSONDecodeError:
+                    import re
+                    match = re.search(r'\[.*\]', cleaned, re.DOTALL)
+                    if match:
+                        try:
+                            records = _json.loads(match.group())
+                        except _json.JSONDecodeError:
+                            continue
+                    else:
+                        continue
+
+                if not isinstance(records, list):
+                    records = [records]
+
+                for rec in records:
+                    page_num = rec.get("page")
+                    if not page_num or page_num not in gaps_by_page:
+                        continue
+                    person = rec.get("name", "")
+                    if person and len(person) > 2:
+                        new_fills.add(page_num)
+                        for gap in gaps_by_page[page_num]:
+                            if gap.page_num not in already_filled:
+                                value = person
+                                if gap.expected_field and gap.expected_field != "PERSON":
+                                    value = rec.get(
+                                        gap.expected_field.lower().replace("us_", ""),
+                                        rec.get("ssn", rec.get("address", person))
+                                    )
+                                if value:
+                                    results.append(replace(
+                                        gap,
+                                        fill_attempted=True,
+                                        fill_method="self_correct",
+                                        fill_result="filled",
+                                        filled_value_masked=_mask_value(
+                                            str(value), gap.expected_field or "PERSON"
+                                        ),
+                                    ))
+
+            except Exception:
+                logger.debug("Self-correct batch failed for pages %s", batch, exc_info=True)
+
+        # --- Vision fallback for pages where text extraction completely failed ---
+        # If text re-extraction still left many pages unfilled and we have a
+        # vision model, render those pages as images and send to the 90B model.
+        still_unfilled = [p for p in unfilled_pages if p not in new_fills and p not in already_filled]
+        if (
+            still_unfilled
+            and self.vision_model
+            and self.ollama_client
+            and self._llm_calls_used < self.max_llm_total
+            and len(still_unfilled) >= 3  # worth the overhead
+        ):
+            vision_fills = self._try_vision_fallback(still_unfilled, gaps_by_page, results)
+            new_fills.update(vision_fills)
+
+        logger.info(
+            "Self-correct: filled %d additional pages from %d unfilled (%d LLM calls)",
+            len(new_fills), len(unfilled_pages), self._llm_calls_used,
+        )
+        return new_fills
+
+    def _try_vision_fallback(
+        self,
+        unfilled_pages: list[int],
+        gaps_by_page: dict[int, list[ExtractionGap]],
+        results: list[ExtractionGap],
+    ) -> set[int]:
+        """Render unfilled pages as images and send to vision model.
+
+        This is the last resort for pages where text extraction failed
+        (OCR-degraded forms, complex tabular layouts).  Only called when
+        text-based self-correction also failed.
+        """
+        new_fills: set[int] = set()
+
+        try:
+            from app.pdf.renderer import render_page_to_image
+        except ImportError:
+            logger.debug("PDF renderer not available for vision fallback")
+            return new_fills
+
+        # Cap at 15 pages to avoid excessive vision calls
+        pages_to_try = unfilled_pages[:15]
+        logger.info(
+            "Vision fallback: trying %d pages on %s with model %s",
+            len(pages_to_try), self.doc_path, self.vision_model,
+        )
+
+        import json as _json
+
+        for page_num in pages_to_try:
+            if self._llm_calls_used >= self.max_llm_total:
+                break
+
+            try:
+                page_idx = page_num - 1  # 1-indexed → 0-indexed
+                image_b64 = render_page_to_image(self.doc_path, page_idx, dpi=150)
+
+                prompt = (
+                    "Extract ALL personal information from this document page.\n"
+                    "Look for: names, Social Security Numbers (SSN/TIN), "
+                    "addresses, dates of birth, phone numbers, account numbers.\n\n"
+                    "Return a JSON array:\n"
+                    f'[{{"page": {page_num}, "name": "Full Name", '
+                    f'"ssn": "123-45-6789", "address": "Street, City ST ZIP", '
+                    f'"dob": "01/15/1980", "phone": "555-123-4567"}}]\n\n'
+                    "If no personal data is visible, return an empty array: []\n"
+                    "Return ONLY JSON."
+                )
+
+                resp = self.ollama_client.generate_with_images(
+                    prompt=prompt,
+                    images=[image_b64],
+                    use_case="vision_fallback_gap_fill",
+                    document_id=self.document_id,
+                    model_override=self.vision_model,
+                )
+                self._llm_calls_used += 1
+
+                # Parse response
+                cleaned = resp.strip()
+                if cleaned.startswith("```"):
+                    lines = cleaned.split("\n")
+                    lines = [ln for ln in lines if not ln.strip().startswith("```")]
+                    cleaned = "\n".join(lines)
+
+                try:
+                    records = _json.loads(cleaned)
+                except _json.JSONDecodeError:
+                    import re
+                    match = re.search(r'\[.*\]', cleaned, re.DOTALL)
+                    if match:
+                        try:
+                            records = _json.loads(match.group())
+                        except _json.JSONDecodeError:
+                            continue
+                    else:
+                        continue
+
+                if not isinstance(records, list):
+                    records = [records]
+
+                for rec in records:
+                    person = rec.get("name", "")
+                    if person and len(person) > 2 and page_num in gaps_by_page:
+                        new_fills.add(page_num)
+                        for gap in gaps_by_page[page_num]:
+                            value = person
+                            if gap.expected_field and gap.expected_field != "PERSON":
+                                value = rec.get(
+                                    gap.expected_field.lower().replace("us_", ""),
+                                    rec.get("ssn", rec.get("address", person))
+                                )
+                            if value:
+                                results.append(replace(
+                                    gap,
+                                    fill_attempted=True,
+                                    fill_method="vision_fallback",
+                                    fill_result="filled",
+                                    filled_value_masked=_mask_value(
+                                        str(value), gap.expected_field or "PERSON"
+                                    ),
+                                ))
+
+            except Exception:
+                logger.debug("Vision fallback failed for page %d", page_num, exc_info=True)
+
+        logger.info(
+            "Vision fallback: filled %d of %d pages (%d LLM calls)",
+            len(new_fills), len(pages_to_try), self._llm_calls_used,
+        )
+        return new_fills
 
     @property
     def llm_calls_used(self) -> int:
@@ -715,22 +1055,26 @@ class GapFiller:
 
 
 def _mask_value(value: str, field_type: str | None) -> str:
-    """Mask a value for safe display (no raw PII in UI)."""
+    """Mask a value for QA display — show enough for auditor verification.
+
+    The auditor needs to verify gap-fill correctness against the page text
+    shown alongside, so masking must be recognizable, not fully opaque.
+    """
     if not value:
         return "***"
 
     if field_type in ("US_SSN", "GOVERNMENT_ID", "IDENTIFICATION_NUMBER", "NI_NUMBER"):
-        # Show last 4 digits only
         digits = re.sub(r"[^0-9]", "", value)
         if len(digits) >= 4:
             return f"***-**-{digits[-4:]}"
         return "***"
 
     if field_type == "PERSON":
+        # Show first name + last initial for auditor recognition
         parts = value.split()
         if len(parts) >= 2:
-            return f"{parts[0][0]}*** {parts[-1][0]}***"
-        return f"{value[0]}***" if value else "***"
+            return f"{parts[0]} {parts[-1][0]}."
+        return value[0] + "***" if value else "***"
 
     if field_type in ("PHONE_NUMBER",):
         digits = re.sub(r"[^0-9]", "", value)
@@ -745,14 +1089,15 @@ def _mask_value(value: str, field_type: str | None) -> str:
         return "***"
 
     if field_type == "LOCATION":
-        # Show just city/state pattern
-        if len(value) > 10:
-            return f"{value[:3]}...{value[-5:]}"
-        return "***"
+        # Show street number + first word for auditor to match against page
+        parts = value.split(",")[0].split() if "," in value else value.split()
+        if len(parts) >= 2:
+            return f"{parts[0]} {parts[1]}..."
+        return value[:8] + "..." if len(value) > 8 else value
 
-    # Default: show first and last char
-    if len(value) > 2:
-        return f"{value[0]}{'*' * (len(value) - 2)}{value[-1]}"
+    # Default: show enough to identify
+    if len(value) > 4:
+        return f"{value[:4]}...{value[-2:]}"
     return "***"
 
 

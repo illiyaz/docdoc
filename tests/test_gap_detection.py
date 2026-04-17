@@ -371,9 +371,8 @@ class TestMaskValue:
 
     def test_person_masking(self):
         result = _mask_value("John Smith", "PERSON")
-        assert "J" in result
+        assert "John" in result
         assert "S" in result
-        assert "***" in result
 
     def test_phone_masking(self):
         result = _mask_value("555-123-4567", "PHONE_NUMBER")
@@ -393,9 +392,8 @@ class TestMaskValue:
 
     def test_default_masking(self):
         result = _mask_value("some_value", None)
-        assert result[0] == "s"
-        assert result[-1] == "e"
-        assert "*" in result
+        assert result.startswith("some")
+        assert len(result) < len("some_value")
 
 
 class TestParseLlmFillResponse:
@@ -736,7 +734,10 @@ class TestGapSafety:
         ]:
             masked = _mask_value(value, field_type)
             assert value != masked, f"Raw value leaked for {field_type}"
-            assert "***" in masked or "*" in masked
+            # Masked value must be shorter or different from raw — partial info only
+            assert len(masked) < len(value) or "***" in masked or "." in masked, (
+                f"Masking insufficient for {field_type}: {masked}"
+            )
 
     def test_gap_context_no_raw_pii(self):
         """Gap context messages don't contain raw PII values."""

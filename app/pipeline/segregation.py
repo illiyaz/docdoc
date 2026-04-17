@@ -219,6 +219,27 @@ class SegregationEngine:
             result.error = "Classification failed — see logs"
             result.classification_method = "fallback"
 
+        # If LLM failed and result defaulted to non-PII, try regex fallback
+        # so documents with obvious PII patterns aren't misclassified.
+        if not result.pii_detected and result.classification_method == "fallback":
+            text_for_fallback = None
+            if file_type == "pdf":
+                text_for_fallback = _extract_pdf_text(file_path, max_pages=2)
+            elif file_type in _TEXT_EXTRACTABLE_TYPES:
+                text_for_fallback = self._extract_text(file_path, file_type)
+            if text_for_fallback:
+                self._classify_regex_fallback(result, text_for_fallback)
+
+        # Adaptive onset: if still non-PII but 50+ pages, sample mid-document
+        # pages. Late-onset PII (e.g., K-1 schedules starting at page 52 in
+        # a 100-page tax return) is invisible to pages 1-2 sampling.
+        if (
+            not result.pii_detected
+            and total_pages >= 50
+            and file_type == "pdf"
+        ):
+            self._check_late_onset_pii(result, file_path, total_pages, document_id)
+
         # Apply stored corrections from previous auditor reviews
         if self._corrections:
             result = apply_corrections(result, self._corrections)
@@ -428,6 +449,195 @@ class SegregationEngine:
         result.llm_model_used = "text_model"
         result.classification_method = "text"
         self._parse_response(response_text, result)
+
+    # ----- Regex fallback when LLM is unavailable -----
+
+    def _classify_regex_fallback(self, result: SegregationResult, text: str) -> None:
+        """Deterministic PII pattern scan when LLM is unavailable.
+
+        Scans extracted text for common PII patterns (SSN, DOB, phone,
+        email, driver's license). If enough patterns match, classifies
+        as PII with moderate confidence so it doesn't silently default
+        to non-PII when Ollama is down.
+        """
+        import re
+
+        patterns = {
+            "US_SSN": re.compile(r"\b\d{3}[-‐]?\d{2}[-‐]?\d{4}\b"),
+            "GOV_ID": re.compile(
+                r"\b(?:[A-Z]{2}\d{6}[A-Z]|\d{3}-\d{2}-\d{4}|[A-Z]\d{4,8})\b"
+            ),
+            "DATE_OF_BIRTH": re.compile(
+                r"\b(?:DOB|Date of Birth|Birth\s*Date|BIRTHDATE)\b", re.IGNORECASE
+            ),
+            "PHONE_NUMBER": re.compile(
+                r"\b(?:\(\d{3}\)\s*|\d{3}[-.])\d{3}[-.]?\d{4}\b"
+            ),
+            "EMAIL_ADDRESS": re.compile(
+                r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b"
+            ),
+            "US_DRIVER_LICENSE": re.compile(
+                r"\b(?:DL|Driver'?s?\s*Lic|License\s*#?)\b", re.IGNORECASE
+            ),
+            "PERSON": re.compile(
+                r"\b(?:Name|Member(?:'s)?\s*Name|Employee\s*Name|Patient\s*Name"
+                r"|Student\s*Name|(?:Mr|Mrs|Ms|Miss|Dr)\s+[A-Z])\b",
+                re.IGNORECASE,
+            ),
+            "LOCATION": re.compile(
+                r"\b(?:Address|Street|City|State|Zip|Postcode|Post\s*Code)\s*[:]\s*",
+                re.IGNORECASE,
+            ),
+            "FINANCIAL": re.compile(
+                r"\b(?:Account\s*(?:No|Number|#)|Sort\s*Code|IBAN|Transfer\s*Value"
+                r"|Pension|Entitlement)\b",
+                re.IGNORECASE,
+            ),
+        }
+
+        found_types: list[str] = []
+        for pii_type, pattern in patterns.items():
+            if pattern.search(text):
+                found_types.append(pii_type)
+
+        if len(found_types) >= 2:
+            result.pii_detected = True
+            result.confidence = min(0.6 + len(found_types) * 0.05, 0.85)
+            result.classification_method = "regex_fallback"
+            result.document_type = "pii_document"
+            result.error = (
+                f"LLM unavailable — classified via regex fallback "
+                f"({len(found_types)} PII patterns found: {', '.join(found_types)})"
+            )
+            result.fields = [
+                SegregationField(name=t, type=t, role="primary_subject")
+                for t in found_types
+            ]
+            logger.info(
+                "Regex fallback: %s classified as PII (%d patterns: %s)",
+                result.file_name, len(found_types), ", ".join(found_types),
+            )
+        elif len(found_types) == 1:
+            # Single pattern — flag for review, don't auto-classify
+            result.error = (
+                f"LLM unavailable — 1 PII pattern found ({found_types[0]}), "
+                f"needs manual review"
+            )
+            logger.info(
+                "Regex fallback: %s has 1 PII pattern (%s) — needs review",
+                result.file_name, found_types[0],
+            )
+        else:
+            result.error = "LLM unavailable — no PII patterns detected by regex"
+            logger.info(
+                "Regex fallback: %s — no PII patterns found",
+                result.file_name,
+            )
+
+    # ----- Adaptive onset: mid-document PII sampling -----
+
+    def _check_late_onset_pii(
+        self,
+        result: SegregationResult,
+        file_path: str,
+        total_pages: int,
+        document_id: Optional[str],
+    ) -> None:
+        """Sample mid-document pages for PII when pages 1-2 showed none.
+
+        Some documents (tax returns, legal filings) have 50+ pages of
+        boilerplate before individual PII begins. This binary-search-style
+        sampling catches those cases without reading the entire document.
+        """
+        import re
+
+        # Sample pages at 25%, 50%, 75% of the document
+        sample_indices = sorted(set([
+            total_pages // 4,
+            total_pages // 2,
+            (total_pages * 3) // 4,
+        ]))
+
+        try:
+            import fitz
+            doc = fitz.open(file_path)
+        except Exception:
+            return
+
+        pii_page = None
+        pii_text = None
+        ssn_re = re.compile(r"\b\d{3}[-‐]?\d{2}[-‐]?\d{4}\b")
+        name_re = re.compile(
+            r"\b(?:Name|Member|Employee|Patient|Partner|Beneficiary)\s*[:]\s*",
+            re.IGNORECASE,
+        )
+
+        try:
+            for pg_idx in sample_indices:
+                if pg_idx >= doc.page_count:
+                    continue
+                text = doc[pg_idx].get_text()
+                doc._forget_page(pg_idx)
+                if not text or len(text.strip()) < 30:
+                    continue
+                # Quick PII pattern check
+                has_ssn = bool(ssn_re.search(text))
+                has_name = bool(name_re.search(text))
+                if has_ssn or has_name:
+                    pii_page = pg_idx
+                    pii_text = text
+                    break
+        finally:
+            doc.close()
+
+        if pii_page is None:
+            return
+
+        # Found PII in mid-document — try LLM classification on that page
+        try:
+            client = self._get_client()
+            from app.llm.prompts import SEGREGATION_PROMPT_TEXT
+            prompt = SEGREGATION_PROMPT_TEXT.format(
+                file_name=result.file_name,
+                file_type=result.file_type,
+                total_pages=total_pages,
+                char_count=len(pii_text[:_MAX_TEXT_CHARS]),
+                document_text=pii_text[:_MAX_TEXT_CHARS],
+            )
+            response_text = client.generate(
+                prompt=prompt,
+                system=None,
+                use_case="segregation_late_onset",
+                document_id=document_id,
+            )
+            if response_text:
+                self._parse_response(response_text, result)
+                if result.pii_detected:
+                    result.classification_method = "text_late_onset"
+                    result.summary = (
+                        f"Late-onset PII found at page {pii_page + 1} "
+                        f"(pages 1-2 were non-PII boilerplate). "
+                        f"{result.summary or ''}"
+                    )
+                    logger.info(
+                        "Late onset: %s has PII starting at page %d (of %d)",
+                        result.file_name, pii_page + 1, total_pages,
+                    )
+                    return
+        except Exception as e:
+            logger.warning("Late onset LLM failed for %s: %s", result.file_name, e)
+
+        # LLM unavailable — fall back to regex on the mid-doc page
+        self._classify_regex_fallback(result, pii_text)
+        if result.pii_detected:
+            result.summary = (
+                f"Late-onset PII detected via regex at page {pii_page + 1}. "
+                f"{result.summary or ''}"
+            )
+            logger.info(
+                "Late onset (regex): %s has PII at page %d",
+                result.file_name, pii_page + 1,
+            )
 
     # ----- Response parsing -----
 

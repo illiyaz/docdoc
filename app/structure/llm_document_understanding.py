@@ -589,7 +589,8 @@ class LLMDocumentUnderstanding:
 
         # Parse tabular detection
         is_tabular = bool(data.get("is_tabular", False))
-        records_per_page_estimate = max(1, int(data.get("records_per_page_estimate", 1)))
+        _rpp_raw = data.get("records_per_page_estimate") or 1
+        records_per_page_estimate = max(1, int(_rpp_raw))
 
         # Parse layout assessment (Step 21)
         raw_layout_type = str(data.get("layout_type", "variable")).lower().strip()

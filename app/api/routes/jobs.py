@@ -1546,6 +1546,86 @@ def archive_job(job_id: UUID, db: Session = Depends(get_db)):
     return _ingestion_run_summary(run, db)
 
 
+@router.delete("/{job_id}/purge", summary="Purge job data (extractions, subjects, gaps)")
+def purge_job_data(job_id: UUID, db: Session = Depends(get_db)):
+    """Delete heavy data tables for a job to free DB space.
+
+    Removes: extractions, notification_subjects, gap files on disk.
+    Keeps: ingestion_run metadata, documents (with metadata_json cleared).
+    Only works on archived/completed/failed/cancelled jobs.
+    """
+    run = db.execute(
+        select(IngestionRun).where(IngestionRun.id == job_id)
+    ).scalar_one_or_none()
+
+    if run is None:
+        raise HTTPException(status_code=404, detail=f"Job {str(job_id)!r} not found")
+
+    purgeable = {"completed", "failed", "cancelled", "archived"}
+    if run.status not in purgeable:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cannot purge job with status {run.status!r} — must be completed/failed/cancelled/archived",
+        )
+
+    # Count before purge
+    doc_ids = [
+        d.id for d in db.execute(
+            select(Document).where(Document.ingestion_run_id == job_id)
+        ).scalars().all()
+    ]
+
+    # 1. Delete extractions
+    ext_deleted = 0
+    if doc_ids:
+        from sqlalchemy import delete
+        result = db.execute(
+            delete(Extraction).where(Extraction.document_id.in_(doc_ids))
+        )
+        ext_deleted = result.rowcount
+
+    # 2. Delete notification subjects for this project
+    ns_deleted = 0
+    if run.project_id:
+        result = db.execute(
+            delete(NotificationSubject).where(
+                NotificationSubject.project_id == run.project_id
+            )
+        )
+        ns_deleted = result.rowcount
+
+    # 3. Clear extracted_records from document metadata (heavy JSON)
+    docs_cleared = 0
+    for doc in db.execute(
+        select(Document).where(Document.ingestion_run_id == job_id)
+    ).scalars().all():
+        if doc.metadata_json and "extracted_records" in (doc.metadata_json or {}):
+            meta = dict(doc.metadata_json)
+            meta.pop("extracted_records", None)
+            doc.metadata_json = meta
+            docs_cleared += 1
+
+    # 4. Delete gap files on disk
+    gap_file_deleted = False
+    if run.project_id:
+        import os
+        gap_path = f"data/projects/{run.project_id}/gaps/{job_id}.json"
+        if os.path.exists(gap_path):
+            os.remove(gap_path)
+            gap_file_deleted = True
+
+    db.commit()
+
+    return {
+        "status": "purged",
+        "job_id": str(job_id),
+        "extractions_deleted": ext_deleted,
+        "subjects_deleted": ns_deleted,
+        "docs_metadata_cleared": docs_cleared,
+        "gap_file_deleted": gap_file_deleted,
+    }
+
+
 @router.patch("/{job_id}", summary="Update job (e.g. link to a project)")
 def patch_job(job_id: UUID, body: PatchJobBody, db: Session = Depends(get_db)):
     """Associate an existing job with a project.

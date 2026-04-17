@@ -2363,12 +2363,14 @@ function formatTimestamp(iso: string | null): string {
 function JobsTab({
   projectId,
   onJobCompleted,
+  autoExpandJobId,
 }: {
   projectId: string
   onJobCompleted: () => void
+  autoExpandJobId?: string
 }) {
   const queryClient = useQueryClient()
-  const [expandedJobId, setExpandedJobId] = useState<string | null>(null)
+  const [expandedJobId, setExpandedJobId] = useState<string | null>(autoExpandJobId ?? null)
   const [showLinkJob, setShowLinkJob] = useState(false)
   const [statusFilter, setStatusFilter] = useState<string>("all")
   const [currentPage, setCurrentPage] = useState(1)
@@ -2594,6 +2596,39 @@ function JobsTab({
         )}
       </div>
 
+      {/* Segregation review banner — prominent call to action */}
+      {(() => {
+        const analyzedJobs = jobs.filter(j => j.status === "analyzed")
+        if (analyzedJobs.length === 0) return null
+        return (
+          <div className="mb-4 space-y-2">
+            {analyzedJobs.map(job => (
+              <Link
+                key={job.id}
+                to={`/projects/${projectId}/segregation?job_id=${job.id}`}
+                className="flex items-center justify-between rounded-lg border-2 border-amber-300 bg-amber-50 px-5 py-4 hover:bg-amber-100 hover:border-amber-400 transition-colors group"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-amber-200 text-amber-700">
+                    <FolderOpen className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <p className="font-semibold text-amber-900">Segregation Review Required</p>
+                    <p className="text-sm text-amber-700">
+                      Job {job.id.slice(0, 8)} — {job.document_count ?? 0} documents awaiting PII classification review before extraction
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 text-amber-700 group-hover:text-amber-900">
+                  <span className="text-sm font-medium">Review Now</span>
+                  <ChevronRight className="h-5 w-5" />
+                </div>
+              </Link>
+            ))}
+          </div>
+        )
+      })()}
+
       {/* Jobs table */}
       {isLoading ? (
         <div className="flex items-center justify-center py-12 text-muted-foreground">
@@ -2684,10 +2719,11 @@ function JobsTab({
                                 {job.status === "analyzed" && (
                                   <Link
                                     to={`/projects/${projectId}/segregation?job_id=${job.id}`}
-                                    className="rounded p-1 text-indigo-500 hover:bg-indigo-50 hover:text-indigo-700"
+                                    className="inline-flex items-center gap-1 rounded-md bg-amber-100 px-2 py-1 text-xs font-medium text-amber-800 hover:bg-amber-200 transition-colors"
                                     title="Review Segregation"
                                   >
-                                    <FolderOpen className="h-3.5 w-3.5" />
+                                    <FolderOpen className="h-3 w-3" />
+                                    Review
                                   </Link>
                                 )}
                                 {job.status === "completed" && (
@@ -4568,6 +4604,7 @@ export function ProjectDetail() {
         <JobsTab
           projectId={projectId}
           onJobCompleted={handleJobCompleted}
+          autoExpandJobId={searchParams.get("expand") ?? searchParams.get("extract") ?? undefined}
         />
       )}
       {activeTab === "intelligence" && <IntelligenceTab projectId={projectId} />}

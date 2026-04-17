@@ -21,7 +21,8 @@ For detailed per-step implementation notes, see [CLAUDE_HISTORY.md](CLAUDE_HISTO
 | Phase 5 Step 37 (Text LLM Batch + Strategy A/B/C) | **COMPLETE** | — |
 | Phase 5 Step 37b (Repeating Unit Detection) | **COMPLETE** | — |
 | Phase 5 Step 30g (Scale Hardening for 3000+ pages) | **COMPLETE** | — |
-| Phase 5 Step 38 (Production vLLM Deployment) | **NEXT** | — |
+| Phase 5 Step 30h (Segregation UI + Quality Tuning) | **IN PROGRESS** | — |
+| Phase 5 Step 38 (Production vLLM Deployment) | Pending | — |
 | **Phase 6 (Security + Governance)** | Pending | — |
 | Phase 7 (Workflow Completeness) | Pending | — |
 | Phase 8 (Scale + Polish) | Pending | — |
@@ -959,6 +960,8 @@ The analysis LLM discovers these markers from 9 sample pages. The extraction LLM
 | Segregation review in pipeline flow | **P2** | SegregationReview screen exists but segregation runs inside analysis — auditor never sees it unless navigating manually. Need: segregation as separate pipeline stage → review → then analysis on approved groups only. Pipeline restructuring task. |
 | Test on 100-page versions | P1 | 12-file test running (April 14). |
 | QA post-approval flow broken | **Known Bug** | Clicking "Approve for Notification" navigates to notification tab, but the notification tab experience is incomplete. Deferred — fix in Step 29b (Batch Approval & Send). |
+| Incremental export per document | **P1** | Currently export/CSV only generates after ALL docs finish dedup. With 12 docs taking 5+ hours, auditor sees nothing until the end. Fix: commit notification subjects per-doc as each document completes extraction + dedup, and update the export incrementally. Auditor can preview/download partial results while remaining docs are still processing. |
+| Smart gap fill | **P1** | Current gap fill re-sends the same page text to the same 32b model that already failed — 7% success rate (16/221). Wastes hours of LLM calls on thermally throttled hardware. Needs a fundamentally different approach. To be designed. |
 | Comparison mode (`USE_TEXT_LLM_BATCH=compare`) | P4 | Run both coordinate + text batch on sample, pick winner. Development aid only. |
 
 ---
@@ -1005,6 +1008,107 @@ The analysis LLM discovers these markers from 9 sample pages. The extraction LLM
 - `app/pipeline/gap_filler.py` — `_forget_page()` in 4 locations
 - `tests/test_gap_detection.py` — fixed test for batched fill path
 - `tests/test_two_phase.py` — fixed 3 pre-existing failures (quality gate threshold, settings env override)
+
+---
+
+### Step 30h — Segregation UI Rework + Extraction Quality Tuning
+
+**Goal:** Make segregation review a first-class part of the workflow, not a hidden link. Fix extraction quality on worst-performing docs.
+
+#### Segregation UI (Priority 1)
+
+| Issue | Fix |
+|---|---|
+| Segregation link is a tiny folder icon on Jobs tab | Add prominent "Review Segregation" button/banner on ProjectDetail when job.status="analyzed" |
+| Auditor may skip segregation entirely | Add status indicator showing segregation review is pending |
+| Non-PII docs still go through analysis | Filter analysis doc list to pii=True docs after segregation approval |
+| Segregation only samples pages 1-2 | Also sample a mid-document page (~page 50) to catch late-onset PII (AWIR-993 has PII starting at page 52) |
+
+#### Regex Fallback (DONE — April 15, 2026)
+
+When Ollama is unavailable, segregation now falls back to regex-based PII pattern scan (9 patterns). 2+ matches → PII with 0.65-0.85 confidence. `classification_method="regex_fallback"`. Prevents silent misclassification of breach docs as non-PII.
+
+#### Adaptive Extraction Intelligence (DONE — April 15, 2026)
+
+Four self-tuning features that use the 32b LLM to diagnose and fix extraction quality dynamically:
+
+| Feature | File | What it does | Cost |
+|---|---|---|---|
+| **Strategy A field-aware prompts** | `text_batch_extractor.py` | Marker-filter prompt now dynamically includes SSN/DOB/phone/email/account based on segregation field_inventory. Was hardcoded to name+address only. | 0 extra calls |
+| **Post-batch quality gate** | `text_batch_extractor.py` | After first batch in Strategy B, compares extracted types vs expected. If 2+ fields missing, sends diagnostic prompt to LLM and adjusts `fields_hint` for remaining batches. | 1 call/doc |
+| **Adaptive onset (late-PII)** | `segregation.py` | Non-PII docs with 50+ pages: samples pages at 25%/50%/75% for SSN/name patterns. Catches late-onset PII (AWIR-993: K-1s at page 52). LLM classification or regex fallback. | 1-2 calls/doc |
+| **Self-correcting extraction loop** | `gap_filler.py` | If gap fill rate < 30%, sends 3 sample unfilled pages to LLM for diagnosis ("what PII is here and in what format?"), then re-extracts all unfilled pages with diagnosis as prompt context. Vision fallback renders failed pages as images → 90B model. | 1 diag + N/5 extract calls |
+| **LLM record validation** | `record_validator.py` | After extraction, before gap detection: 1 LLM call per doc with all records + doc type. LLM scores VALID/GARBAGE. Purged records → pages become gaps → vision fallback fires naturally. Zero hardcoding, multi-geo ready. | 1 call/doc |
+
+#### Known worst performers (April 15 overnight run, pre-fix)
+
+| Doc | Records | rec/pg | Root cause | Fix |
+|---|---|---|---|---|
+| AWIR-DOC...00000993 | 8 | 0.1 | Late-onset PII (K-1s at page 52), pages 1-2 non-PII | Adaptive onset sampling |
+| Complex1 | 42 | 0.4 | Strategy A prompt only asked for name+address, missed SSN on same line | Field-aware prompts |
+| CMG_Inc_0000414153 | 43 | 0.4 | Missing fields not diagnosed, gap filler blind retry | Quality gate + self-correct |
+| AWIR-DOC...00000482 | 29 | 0.3 | Late-onset PII, sparse K-1 data | Adaptive onset + self-correct |
+
+#### Late-Onset → Onset Page Plumbing (NEXT)
+
+When adaptive onset identifies PII starting at page N (e.g., page 76 for AWIR-993), feed that into `content_onset_page` so extraction skips boilerplate. Currently segregation discovers the late-onset page but extraction still starts from page 1, wasting ~17 LLM calls on tax boilerplate. Fix: in two_phase.py, after segregation, if `classification_method == "text_late_onset"`, set `doc.content_onset_page` to the discovered page number (or slightly before to catch the K-1 boundary).
+
+#### Vision Fallback + Completeness Recovery (DONE — April 17, 2026)
+
+**Problem:** AWIR-993 K-1 schedule pages have OCR-degraded text. Strategy B returns 0 records. The data IS there but text representation is too garbled.
+
+**Solution implemented — completeness-driven vision recovery chain:**
+
+| Stage | What happens | File |
+|---|---|---|
+| 1.4: Record Validation | LLM scores records as VALID/GARBAGE, purges ~45% garbage | `record_validator.py` |
+| 1.45: Completeness Check | Counts actionable subjects (name+gov ID) vs expected. If <50%, triggers recovery | `completeness_checker.py` |
+| 1.45a: Name Roster | LLM extracts all individual names from summary/index pages (1 call) | `completeness_checker.py` |
+| 1.45b: Vision Recovery | Renders pages at 300 DPI, sends to 90B with geo-neutral prompt targeting missing people | `completeness_checker.py` |
+| 1.5: Gap Detection | Finds remaining gaps after validation + vision | `gap_detector.py` |
+| 1.5a: Gap Fill + Self-Correct | Text batch fill, then diagnostic + re-extract, then vision fallback | `gap_filler.py` |
+
+**Key design decisions:**
+- **300 DPI** (not 150) — 4x more pixels, SSNs in small form boxes become readable
+- **Geo-neutral prompt** — "Find any person's unique government-issued identification number" — no SSN/TIN bias, works for any country
+- **Gov ID parser** accepts: `gov_id`, `ssn`, `tax_id`, `tin`, `national_id`, `ni_number`, `pan`
+- **Actionable metric** — counts name+gov_id pairs, not just names. 19 names without SSNs ≠ complete
+- **Roster fallback** — JSON parser falls back to plain text extraction (numbered lists, bullets)
+- **Self-correct sampling** — picks beginning/middle/end of gap list, not just first 3 (avoids boilerplate)
+- **DB-level dedup** — SQL `GROUP BY (canonical_name, project_id)` after reconciliation. Also `_find_existing` matches on name+gov_id+project
+
+**AWIR-993 benchmark results (8 runs, April 14-17):**
+
+| Run | Records | People w/ SSN | Key fix |
+|---|---|---|---|
+| 1 (baseline) | 8 | 0 | — |
+| 2 (onset) | 44 | 0 | Late-onset plumbing |
+| 3 (validation) | 22 | 2 | Record validation purge |
+| 4 (150 DPI vision) | 53 | 2 | Vision found names but not SSNs |
+| **8 (300 DPI vision)** | **27** | **3** | **Vision found SSNs from K-1 forms** |
+
+**Proven:** 300 DPI + geo-neutral prompt = vision model reads SSNs from IRS K-1 forms. On GPU (A100), all 27 pages scan in ~2 min vs 15+ on throttled M4 — would likely find 8-10+ of 16 partners.
+
+**Benchmark docs (quality targets):**
+
+| Doc | Challenge | Status |
+|---|---|---|
+| AWIR-DOC...00000993 | Late-onset K-1 forms | **3 SSNs recovered via vision** (was 0). Architecture proven. GPU needed for full coverage. |
+| Complex1 | Banking report, SSN on same line | **FIXED** — 50 SSNs (100%) via field-aware Strategy A |
+| AWIR-DOC...00000482 | Pension plan positional headers | Untested with new chain |
+| CMG_Inc_0001352703 | UK pension, NI numbers | Untested with new chain |
+
+#### Remaining work (pending)
+
+| Issue | Fix |
+|---|---|
+| Segregation link hidden | **DONE** — prominent amber banner + "Review" badge |
+| Non-PII docs analyzed | **DONE** — filtered in two_phase.py |
+| "Proceed to Extraction" blank screen | Fix: use `?expand=JOB_ID` (done), auto-start removed |
+| Redundant "Approve All" after segregation | Auto-approve analysis when segregation approved |
+| SQL dedup pass | Add post-reconciliation `DELETE ... USING` to merge same-name subjects |
+| Vision scan density | Scan all pages after onset, not every 2nd — needs GPU for speed |
+| Data purge UI | Wire DELETE /api/jobs/{id}/purge to frontend button |
 
 ---
 

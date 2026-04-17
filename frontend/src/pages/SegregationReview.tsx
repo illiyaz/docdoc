@@ -432,7 +432,7 @@ export function SegregationReview() {
           )}
           {allApproved && (
             <button
-              onClick={() => navigate(`/projects/${projectId}`)}
+              onClick={() => navigate(`/projects/${projectId}?tab=jobs&expand=${jobId}`)}
               className="flex items-center gap-1 rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
             >
               Proceed to Extraction

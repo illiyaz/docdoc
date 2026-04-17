@@ -205,25 +205,64 @@ class GapDetector:
         document_id: str,
         document_name: str,
     ) -> list[ExtractionGap]:
-        """Find pages where expected fields are missing from records."""
+        """Find pages where expected fields are missing from records.
+
+        Only flags a field as missing if it appears on >=30% of pages
+        that have records — this prevents false gaps for fields that
+        the document simply doesn't contain on most pages.
+        """
         gaps = []
         onset_1 = onset_page + 1
         required_fields = set(f.upper() for f in field_inventory)
 
+        # First pass: count how many pages each field appears on
+        pages_with_records = 0
+        field_page_count: dict[str, int] = {f: 0 for f in required_fields}
+        for page_num, recs in page_records.items():
+            if page_num < onset_1 or not recs:
+                continue
+            pages_with_records += 1
+            page_types: set[str] = set()
+            for rec in recs:
+                for et in rec.get("entity_types_found", []):
+                    page_types.add(et.upper())
+            for ft in required_fields:
+                if ft in page_types:
+                    field_page_count[ft] += 1
+
+        if pages_with_records == 0:
+            return gaps
+
+        # Only check fields that appear on >=30% of pages (they're
+        # genuinely part of this document's pattern, not inventory noise).
+        # For small docs (<=5 pages), trust the full inventory — not enough
+        # data to determine prevalence.
+        if pages_with_records <= 5:
+            prevalent_fields = required_fields
+        else:
+            prevalent_fields = {
+                ft for ft, count in field_page_count.items()
+                if count >= max(1, pages_with_records * 0.3)
+            }
+            # PERSON is always expected if in inventory
+            if "PERSON" in required_fields:
+                prevalent_fields.add("PERSON")
+
+        if not prevalent_fields:
+            return gaps
+
+        # Second pass: flag missing prevalent fields
         for page_num, recs in page_records.items():
             if page_num < onset_1 or not recs:
                 continue
 
-            # Collect all entity types found on this page
             found_types: set[str] = set()
             for rec in recs:
                 for et in rec.get("entity_types_found", []):
                     found_types.add(et.upper())
 
-            # Check for missing expected fields
-            for expected in required_fields:
+            for expected in prevalent_fields:
                 if expected not in found_types:
-                    # Determine severity based on field type
                     severity = "high" if expected in (
                         "PERSON", "US_SSN", "GOVERNMENT_ID",
                     ) else "medium"
