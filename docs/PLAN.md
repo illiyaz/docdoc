@@ -21,7 +21,8 @@ For detailed per-step implementation notes, see [CLAUDE_HISTORY.md](CLAUDE_HISTO
 | Phase 5 Step 37 (Text LLM Batch + Strategy A/B/C) | **COMPLETE** | — |
 | Phase 5 Step 37b (Repeating Unit Detection) | **COMPLETE** | — |
 | Phase 5 Step 30g (Scale Hardening for 3000+ pages) | **COMPLETE** | — |
-| Phase 5 Step 30h (Segregation UI + Quality Tuning) | **IN PROGRESS** | — |
+| Phase 5 Step 30h (Adaptive Extraction Intelligence) | **COMPLETE** | 106 |
+| Phase 5 Step 39 (End-to-End Workflow Polish) | **NEXT** | — |
 | Phase 5 Step 38 (Production vLLM Deployment) | Pending | — |
 | **Phase 6 (Security + Governance)** | Pending | — |
 | Phase 7 (Workflow Completeness) | Pending | — |
@@ -1098,17 +1099,39 @@ When adaptive onset identifies PII starting at page N (e.g., page 76 for AWIR-99
 | AWIR-DOC...00000482 | Pension plan positional headers | Untested with new chain |
 | CMG_Inc_0001352703 | UK pension, NI numbers | Untested with new chain |
 
-#### Remaining work (pending)
+#### Completed (April 17, 2026)
 
-| Issue | Fix |
+| Issue | Status |
 |---|---|
 | Segregation link hidden | **DONE** — prominent amber banner + "Review" badge |
 | Non-PII docs analyzed | **DONE** — filtered in two_phase.py |
-| "Proceed to Extraction" blank screen | Fix: use `?expand=JOB_ID` (done), auto-start removed |
-| Redundant "Approve All" after segregation | Auto-approve analysis when segregation approved |
-| SQL dedup pass | Add post-reconciliation `DELETE ... USING` to merge same-name subjects |
-| Vision scan density | Scan all pages after onset, not every 2nd — needs GPU for speed |
-| Data purge UI | Wire DELETE /api/jobs/{id}/purge to frontend button |
+| "Proceed to Extraction" blank screen | **DONE** — `?expand=JOB_ID`, auto-start removed |
+| Redundant "Approve All" after segregation | **DONE** — auto-approve when segregation approved |
+| SQL dedup pass | **DONE** — `_sql_dedup()` merges same-name subjects post-reconciliation |
+| Post-QA notification redirect | **DONE** — `?tab=notification` → `?tab=subjects` |
+| records_per_page_estimate null guard | **DONE** — `llm_document_understanding.py` |
+
+#### Step 30h remaining (carry to Step 39)
+
+| Issue | Priority | Notes |
+|---|---|---|
+| Vision scan density | High | Scan ALL pages after onset, not every 2nd — needs GPU for speed |
+| Test AWIR-482 + CMG pension | Medium | Validate chain on remaining benchmark docs |
+| Data purge UI button | Low | Wire DELETE /api/jobs/{id}/purge to frontend |
+
+---
+
+### Step 39 — End-to-End Workflow Polish (NEXT)
+
+**Goal:** Close the remaining UX gaps so the full flow works without manual DB interventions.
+
+| Task | Description |
+|---|---|
+| **Segregation → extraction auto-flow** | After segregation approval, extraction should start automatically without manual "Approve All" + "Start Extraction" clicks. Currently requires 2 manual steps. |
+| **Notification tab** | Build proper notification tab (or redirect to subjects with notification-focused view). Currently no notification UI after QA approval. (Step 29b) |
+| **Batch approval + send** | Approve multiple subjects for notification in bulk. Generate notification letters. (Step 29b) |
+| **Export improvements** | Per-job export (not just per-project). Incremental export as docs complete. Export format options (CSV, XLSX, JSON). |
+| **Job management** | Purge button in UI. Job comparison view. Re-run failed docs. |
 
 ---
 
