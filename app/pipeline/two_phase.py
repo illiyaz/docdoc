@@ -4095,8 +4095,10 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                         continue
                     if gap_pages:
                         critical_count = sum(
-                            1 for pg in gap_pages
-                            if any(f in pg.get("missing", []) for f in ("US_SSN", "DATE_OF_BIRTH"))
+                            1
+                            for _page_num, items in gap_pages.items()
+                            for _rec_idx, missing in items
+                            if "raw_government_id" in missing
                         )
                         gap_plan.append((doc, gap_pages, critical_count))
 

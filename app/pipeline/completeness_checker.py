@@ -151,6 +151,9 @@ def check_completeness_and_recover(
         ollama_client=ollama_client,
         vision_model=settings.ollama_vision_model,
         doc_id=doc_id,
+        scan_step=max(1, settings.completeness_vision_step),
+        scan_window=max(1, settings.completeness_vision_window),
+        scan_max_pages=max(1, settings.completeness_vision_max_pages),
     )
 
     if recovered:
@@ -176,10 +179,13 @@ def _get_page_count(source_path: str) -> int:
 
 
 def _get_name_roster(doc, ollama_client, doc_id: str, onset: int) -> list[str]:
-    """Extract a roster of names from the document's summary/index pages.
+    """Extract a roster of names from a stratified sample of the document.
 
-    Looks at pages before the onset (cover, summary, TOC) which often
-    list all individuals in the document.
+    Summary/index pages alone miss members listed throughout the body (e.g.
+    pension plans, employee registers, tax K-1 packets). This samples:
+      (1) the first 10 pages (cover/TOC/summary),
+      (2) 5 pages immediately before onset if onset is late,
+      (3) ~15 stratified pages across the body for long documents.
     """
     try:
         import fitz
@@ -187,35 +193,64 @@ def _get_name_roster(doc, ollama_client, doc_id: str, onset: int) -> list[str]:
     except Exception:
         return []
 
-    # Read the first few pages and pages just before onset (summary pages)
-    sample_pages = []
-    # First 10 pages (or fewer)
-    for pg in range(min(10, pdf.page_count)):
+    total_pages = pdf.page_count
+    sample_pages: list[int] = []
+
+    for pg in range(min(10, total_pages)):
         sample_pages.append(pg)
-    # Pages just before onset (often have summary/index)
+
     if onset > 10:
         for pg in range(max(0, onset - 5), onset):
             if pg not in sample_pages:
                 sample_pages.append(pg)
 
+    # Stratified sample across the body so names scattered throughout the
+    # document make it into the roster, not just those on summary pages.
+    if total_pages > 20:
+        body_start = onset if onset else 10
+        if total_pages > body_start:
+            n_body_samples = 15
+            step = max(1, (total_pages - body_start) // n_body_samples)
+            added = 0
+            for pg in range(body_start, total_pages, step):
+                if pg in sample_pages:
+                    continue
+                sample_pages.append(pg)
+                added += 1
+                if added >= n_body_samples:
+                    break
+
+    sample_pages = sorted(set(sample_pages))
+
+    per_page_budget = 1500 if len(sample_pages) > 15 else 2000
+    total_budget = 25000
     page_text = ""
-    for pg in sorted(sample_pages):
+    for pg in sample_pages:
+        if len(page_text) >= total_budget:
+            break
         text = pdf[pg].get_text()
         pdf._forget_page(pg)
         if text.strip():
-            page_text += f"\n--- PAGE {pg + 1} ---\n{text[:2000]}\n"
+            page_text += f"\n--- PAGE {pg + 1} ---\n{text[:per_page_budget]}\n"
 
     pdf.close()
 
     if not page_text or len(page_text.strip()) < 50:
         return []
 
+    logger.info(
+        "Completeness roster: sampling %d pages (of %d) for %s",
+        len(sample_pages), total_pages, doc.file_name,
+    )
+
     # Ask LLM to find all individual names
     prompt = (
         f"This is a {doc.metadata_json.get('segregation', {}).get('document_type', 'document')} "
         f"({doc.file_name}).\n\n"
-        f"From these summary/index pages, list ALL INDIVIDUAL PERSON NAMES "
-        f"(not companies, trusts, LLCs, or institutions).\n\n"
+        f"Below is a stratified sample of pages from the document. List ALL "
+        f"INDIVIDUAL PERSON NAMES you can find across these pages "
+        f"(not companies, trusts, LLCs, or institutions). The same person "
+        f"may appear on multiple pages — include each unique person once.\n\n"
         f"{page_text}\n\n"
         f"Return a JSON array of names:\n"
         f'["John Smith", "Jane Doe", ...]\n\n'
@@ -294,8 +329,16 @@ def _vision_recover(
     ollama_client,
     vision_model: str,
     doc_id: str,
+    scan_step: int = 2,
+    scan_window: int = 40,
+    scan_max_pages: int = 15,
 ) -> list:
-    """Vision-extract pages after onset to find missing people."""
+    """Vision-extract pages after onset to find missing people.
+
+    scan_step=1 scans every page (GPU-class hardware). scan_step=2 samples every
+    other page (M4/CPU — avoids thermal throttle). scan_window bounds how far
+    past onset to look; scan_max_pages caps the LLM call budget.
+    """
     from app.rra.entity_resolver import PIIRecord
 
     try:
@@ -306,11 +349,10 @@ def _vision_recover(
 
     recovered: list[PIIRecord] = []
 
-    # Determine which pages to scan — sample every 2nd page after onset
-    # to find where the missing people's K-1s are
-    pages_to_try = list(range(onset, min(total_pages, onset + 40), 2))
-    # Cap at 15 pages
-    pages_to_try = pages_to_try[:15]
+    pages_to_try = list(
+        range(onset, min(total_pages, onset + scan_window), scan_step)
+    )
+    pages_to_try = pages_to_try[:scan_max_pages]
 
     if not pages_to_try:
         return []

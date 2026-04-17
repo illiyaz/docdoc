@@ -41,6 +41,9 @@ class Settings(BaseSettings):
     use_extraction_selector: bool = Field(default=False, alias="USE_EXTRACTION_SELECTOR")
     use_text_llm_batch: bool = Field(default=True, alias="USE_TEXT_LLM_BATCH")
     doc_hard_timeout_s: int = Field(default=1800, alias="DOC_HARD_TIMEOUT_S")
+    completeness_vision_step: int = Field(default=2, alias="COMPLETENESS_VISION_STEP")
+    completeness_vision_window: int = Field(default=40, alias="COMPLETENESS_VISION_WINDOW")
+    completeness_vision_max_pages: int = Field(default=15, alias="COMPLETENESS_VISION_MAX_PAGES")
 
 
 @lru_cache(maxsize=1)

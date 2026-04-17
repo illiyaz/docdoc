@@ -31,6 +31,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Eye,
+  Eraser,
 } from "lucide-react"
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -61,6 +62,7 @@ import {
   updateFieldMap,
   cancelJob,
   archiveJob,
+  purgeJob,
 } from "@/api/client"
 import { DocumentViewer } from "@/components/DocumentViewer"
 import { IntelligenceTab } from "@/pages/IntelligenceTab"
@@ -2375,6 +2377,7 @@ function JobsTab({
   const [statusFilter, setStatusFilter] = useState<string>("all")
   const [currentPage, setCurrentPage] = useState(1)
   const [confirmArchiveId, setConfirmArchiveId] = useState<string | null>(null)
+  const [purgingJobId, setPurgingJobId] = useState<string | null>(null)
   const perPage = 10
 
   // Link job state
@@ -2471,6 +2474,32 @@ function JobsTab({
     }
   }
 
+  async function handlePurgeJob(jobId: string) {
+    const confirmed = window.confirm(
+      "Purge this job's extracted data?\n\n" +
+      "This permanently deletes all extractions, notification subjects, and gap files " +
+      "for this job. The job record itself is kept.\n\n" +
+      "This cannot be undone."
+    )
+    if (!confirmed) return
+    setPurgingJobId(jobId)
+    try {
+      const result = await purgeJob(jobId)
+      queryClient.invalidateQueries({ queryKey: ["project-jobs", projectId] })
+      queryClient.invalidateQueries({ queryKey: ["exports", projectId] })
+      alert(
+        `Purged: ${result.extractions_deleted} extractions, ` +
+        `${result.subjects_deleted} subjects, ` +
+        `${result.docs_metadata_cleared} docs cleared` +
+        (result.gap_file_deleted ? ", gap file deleted" : "")
+      )
+    } catch (err) {
+      alert(`Failed to purge job: ${err instanceof Error ? err.message : String(err)}`)
+    } finally {
+      setPurgingJobId(null)
+    }
+  }
+
   // Format duration with phase label
   function formatJobDuration(job: JobSummary): string {
     if (job.duration_seconds == null) return "--"
@@ -2485,6 +2514,7 @@ function JobsTab({
 
   const canCancel = (s: string) => ["pending", "running", "analyzing", "extracting"].includes(s)
   const canArchive = (s: string) => ["completed", "failed", "cancelled", "analyzed"].includes(s)
+  const canPurge = (s: string) => ["completed", "failed", "cancelled", "archived"].includes(s)
 
   return (
     <div className="space-y-4">
@@ -2769,6 +2799,20 @@ function JobsTab({
                                       <Trash2 className="h-3.5 w-3.5" />
                                     </button>
                                   )
+                                )}
+                                {canPurge(job.status) && (
+                                  <button
+                                    onClick={() => handlePurgeJob(job.id)}
+                                    disabled={purgingJobId === job.id}
+                                    className="rounded p-1 text-red-500 hover:bg-red-50 hover:text-red-700 disabled:opacity-50"
+                                    title="Purge extractions, subjects, and gap files (keeps job record)"
+                                  >
+                                    {purgingJobId === job.id ? (
+                                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                    ) : (
+                                      <Eraser className="h-3.5 w-3.5" />
+                                    )}
+                                  </button>
                                 )}
                               </span>
                             </div>

@@ -1111,13 +1111,22 @@ When adaptive onset identifies PII starting at page N (e.g., page 76 for AWIR-99
 | Post-QA notification redirect | **DONE** — `?tab=notification` → `?tab=subjects` |
 | records_per_page_estimate null guard | **DONE** — `llm_document_understanding.py` |
 
-#### Step 30h remaining (carry to Step 39)
+#### Step 30h carry-overs (status as of 2026-04-18)
 
-| Issue | Priority | Notes |
+| Issue | Priority | Status |
 |---|---|---|
-| Vision scan density | High | Scan ALL pages after onset, not every 2nd — needs GPU for speed |
-| Test AWIR-482 + CMG pension | Medium | Validate chain on remaining benchmark docs |
-| Data purge UI button | Low | Wire DELETE /api/jobs/{id}/purge to frontend |
+| Vision scan density | High | **DONE** — made configurable via `COMPLETENESS_VISION_STEP/WINDOW/MAX_PAGES` env vars (`app/core/settings.py`). Default unchanged for M4; GPU deploys can set step=1 |
+| Test AWIR-482 + CMG pension | Medium | **DONE** — 2h32min run on both docs (job `a9727317`). CMG: 70 records → 39 valid → 5 subjects (4 with gov IDs, 5 with address). AWIR-482: 0 records (segregation false negative — see bug #4 below) |
+| Data purge UI button | Low | **DONE** — Eraser icon on Jobs tab, `ProjectDetail.tsx` + `purgeJob()` in `api/client.ts` |
+
+#### Bugs surfaced during AWIR-482 + CMG benchmark run (2026-04-18)
+
+| # | Bug | Priority | Where |
+|---|---|---|---|
+| 1 | Roster builder only scans summary pages — found 4 names in a 100pg pension plan with ~30+ members. Completeness vision recovery can only find people the roster names. | High | `app/pipeline/completeness_checker.py` `_build_roster()` |
+| 2 | Post-extraction gap prioritization crashes: `pg.get("missing", [])` treats `pg` as dict but `find_gap_pages()` returns `dict[int, list[tuple[int, list[str]]]]` so iteration yields ints. Crash caught by outer try/except; gap fill still runs but critical-first ordering is lost. | Medium | `app/pipeline/two_phase.py:4097-4100` |
+| 3 | `government_id_type` hard-coded to `US_SSN` even for UK NI numbers (and by extension PAN/SIN/TFN/Aadhaar/etc). Need geo-neutral gov-ID type inference. | High (geo-blocker) | Record mapper / entity resolver |
+| 4 | Segregation classifies AWIR-482 as `pii=False` (conf 0.95) because pages 1-2 are cover/TOC. Doc is skipped entirely — 0 records produced. Same class as known AWIR-993 late-onset issue. | High | `app/pipeline/segregation.py` (or wherever vision segregation samples pages) |
 
 ---
 

@@ -701,6 +701,20 @@ export function archiveJob(jobId: string): Promise<JobSummary> {
   return api(`/jobs/${jobId}`, { method: "DELETE" })
 }
 
+export interface PurgeJobResult {
+  status: string
+  job_id: string
+  extractions_deleted: number
+  subjects_deleted: number
+  docs_metadata_cleared: number
+  gap_file_deleted: boolean
+}
+
+/** Hard-delete extractions, subjects, and gap files for a job. Keeps job metadata. */
+export function purgeJob(jobId: string): Promise<PurgeJobResult> {
+  return api(`/jobs/${jobId}/purge`, { method: "DELETE" })
+}
+
 /** Get pipeline status for a job (8-stage breakdown). */
 export function getJobPipelineStatus(jobId: string): Promise<JobPipelineStatus> {
   return api(`/jobs/${jobId}/status`)
