@@ -1123,10 +1123,10 @@ When adaptive onset identifies PII starting at page N (e.g., page 76 for AWIR-99
 
 | # | Bug | Priority | Where |
 |---|---|---|---|
-| 1 | Roster builder only scans summary pages — found 4 names in a 100pg pension plan with ~30+ members. Completeness vision recovery can only find people the roster names. | High | `app/pipeline/completeness_checker.py` `_build_roster()` |
-| 2 | Post-extraction gap prioritization crashes: `pg.get("missing", [])` treats `pg` as dict but `find_gap_pages()` returns `dict[int, list[tuple[int, list[str]]]]` so iteration yields ints. Crash caught by outer try/except; gap fill still runs but critical-first ordering is lost. | Medium | `app/pipeline/two_phase.py:4097-4100` |
-| 3 | `government_id_type` hard-coded to `US_SSN` even for UK NI numbers (and by extension PAN/SIN/TFN/Aadhaar/etc). Need geo-neutral gov-ID type inference. | High (geo-blocker) | Record mapper / entity resolver |
-| 4 | Segregation classifies AWIR-482 as `pii=False` (conf 0.95) because pages 1-2 are cover/TOC. Doc is skipped entirely — 0 records produced. Same class as known AWIR-993 late-onset issue. | High | `app/pipeline/segregation.py` (or wherever vision segregation samples pages) |
+| 1 | Roster builder only scans summary pages — found 4 names in a 100pg pension plan with ~30+ members. | High | **FIXED** (1cd0658) — `completeness_checker._get_name_roster()` now samples ~15 stratified pages across the whole doc |
+| 2 | Post-extraction gap prioritization crashes: `pg.get("missing", [])` treats `pg` as dict but `find_gap_pages()` returns `dict[int, list[tuple[int, list[str]]]]`. | Medium | **FIXED** (1cd0658) — iterates `.items()` and checks against `raw_government_id` |
+| 3 | `government_id_type` hard-coded to `US_SSN` even for UK NI numbers, IN_PAN/Aadhaar, BR_CPF, etc. | High (geo-blocker) | **FIXED** (f52a448) — new `app/pii/gov_id_classifier.py` with 40+ patterns across 35 countries; segregation emits `country_hint`; deduplicator uses classifier first |
+| 4 | Segregation classifies AWIR-482 as `pii=False` (conf 0.95) because pages 1-2 are cover/TOC. Same class as AWIR-993 late-onset miss. | High | **FIXED** — mid-page + 3/4-page sampling added to `_classify_vision` for docs >20 pages / >50 pages |
 
 ---
 

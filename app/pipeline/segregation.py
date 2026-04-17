@@ -346,16 +346,42 @@ class SegregationEngine:
             and result.total_pages > 1
             and result.confidence < 0.8
         ):
-            self._retry_page2_vision(result, document_id, prompt)
+            self._retry_page_vision(result, document_id, prompt, page=1, label="Page 2")
 
-    def _retry_page2_vision(
+        # Late-onset PII guard: long docs (tax returns, pension reports, member
+        # registers) often have 30-50 pages of cover/TOC/summary before PII
+        # starts. Sample the middle and 3/4-mark if earlier pages were clean.
+        if (
+            not result.pii_detected
+            and result.total_pages > 20
+            and result.confidence < 0.95
+        ):
+            mid = result.total_pages // 2
+            self._retry_page_vision(result, document_id, prompt, page=mid, label=f"Mid-page {mid + 1}")
+
+        if (
+            not result.pii_detected
+            and result.total_pages > 50
+            and result.confidence < 0.95
+        ):
+            three_quarter = (result.total_pages * 3) // 4
+            self._retry_page_vision(result, document_id, prompt, page=three_quarter, label=f"3/4-page {three_quarter + 1}")
+
+    def _retry_page_vision(
         self,
         result: SegregationResult,
         document_id: Optional[str],
         prompt: str,
+        page: int,
+        label: str,
     ) -> None:
-        """Try page 2 if page 1 didn't show PII (e.g., cover page)."""
-        image_b64 = self._render_page(result.file_path, result.file_type, page=1)
+        """Sample a specific page when earlier pages didn't show PII.
+
+        Used for page-2 retry (cover-page workaround) and for mid-doc /
+        late-doc sampling on long documents where PII starts deep inside
+        (AWIR tax-return K-1 packets, pension-plan member sections, etc.).
+        """
+        image_b64 = self._render_page(result.file_path, result.file_type, page=page)
         if not image_b64:
             return
 
@@ -364,35 +390,37 @@ class SegregationEngine:
             response_text = client.generate_with_images(
                 prompt=prompt,
                 images=[image_b64],
-                use_case="segregation_page2",
+                use_case=f"segregation_page{page + 1}",
                 document_id=document_id,
                 model_override=self._vision_model or self._fallback_model,
             )
             if response_text:
-                page2_result = SegregationResult(
+                alt = SegregationResult(
                     file_path=result.file_path,
                     file_name=result.file_name,
                     file_type=result.file_type,
                     total_pages=result.total_pages,
                 )
-                self._parse_response(response_text, page2_result)
-                # If page 2 found PII, use its result
-                if page2_result.pii_detected:
+                self._parse_response(response_text, alt)
+                if alt.pii_detected:
                     result.pii_detected = True
-                    result.confidence = page2_result.confidence
-                    result.document_type = page2_result.document_type
-                    result.document_subtype = page2_result.document_subtype
-                    result.issuing_entity = page2_result.issuing_entity
-                    result.primary_subject_type = page2_result.primary_subject_type
-                    result.summary = page2_result.summary
-                    result.fields = page2_result.fields
+                    result.confidence = alt.confidence
+                    result.document_type = alt.document_type
+                    result.document_subtype = alt.document_subtype
+                    result.issuing_entity = alt.issuing_entity
+                    result.primary_subject_type = alt.primary_subject_type
+                    result.summary = alt.summary
+                    result.fields = alt.fields
                     result.raw_response = response_text
+                    # Inherit country hint if the alt page produced one.
+                    if alt.country_hint and not result.country_hint:
+                        result.country_hint = alt.country_hint
                     logger.info(
-                        "Page 2 found PII for %s (page 1 was clean)",
-                        result.file_name,
+                        "%s found PII for %s (earlier pages were clean)",
+                        label, result.file_name,
                     )
         except Exception:
-            logger.debug("Page 2 retry failed for %s", result.file_name)
+            logger.debug("%s retry failed for %s", label, result.file_name)
 
     # ----- Text classification (XLSX, DOCX, MSG, etc.) -----
 
