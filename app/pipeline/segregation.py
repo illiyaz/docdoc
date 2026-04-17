@@ -60,6 +60,7 @@ class SegregationResult:
     issuing_entity: Optional[str] = None
     primary_subject_type: Optional[str] = None
     summary: Optional[str] = None
+    country_hint: Optional[str] = None  # ISO 3166-1 alpha-2 from LLM
 
     # Field inventory with role attribution
     fields: list[SegregationField] = field(default_factory=list)
@@ -672,6 +673,12 @@ class SegregationEngine:
         result.issuing_entity = data.get("issuing_entity")
         result.primary_subject_type = data.get("primary_subject_type")
         result.summary = data.get("summary")
+
+        # Country hint (ISO 3166-1 alpha-2) — used downstream by the
+        # government-ID classifier to disambiguate digit-only formats.
+        ch = data.get("country_hint")
+        if isinstance(ch, str) and len(ch.strip()) == 2:
+            result.country_hint = ch.strip().upper()
 
         # Field inventory with roles
         raw_fields = data.get("fields", [])

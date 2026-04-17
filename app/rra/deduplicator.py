@@ -287,20 +287,25 @@ class Deduplicator:
         page_ranges = [r.page_range for r in records if r.page_range]
         source_page_range = ", ".join(sorted(set(page_ranges))) if page_ranges else None
 
-        # government_id_type: entity type of the record that has raw_government_id
-        # Check entity_types_found first for specific subtypes (US_SSN, NI_NUMBER, etc.)
-        # since composite records may have entity_type="PERSON" but a gov ID subtype
-        # in their entity_types_found tuple.
+        # government_id_type: pick the most specific label for the raw ID.
+        # Strategy: format-based classifier first (recognises UK_NINO, IN_PAN,
+        # BR_CPF, etc. regardless of what the extractor labeled the record as),
+        # then fall back to entity_types_found / entity_type.
         government_id_type: str | None = None
+        from app.pii.gov_id_classifier import GENERIC_TYPE, infer_gov_id_type
         for r in records:
             if r.raw_government_id:
-                # First check entity_types_found for specific gov ID subtypes
+                inferred = infer_gov_id_type(r.raw_government_id, country_hint=r.country)
+                if inferred != GENERIC_TYPE:
+                    government_id_type = inferred
+                    break
+                # Classifier couldn't narrow it (e.g. bare 9 digits w/o hint).
+                # Fall back to any specific label the extractor produced.
                 if r.entity_types_found:
                     for et in r.entity_types_found:
                         if et.upper() in _GOV_ID_FIELD_TYPES:
                             government_id_type = et
                             break
-                # Fall back to primary entity_type
                 if not government_id_type:
                     if r.entity_type.upper() in _GOV_ID_FIELD_TYPES:
                         government_id_type = r.entity_type
