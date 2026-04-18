@@ -1128,22 +1128,40 @@ When adaptive onset identifies PII starting at page N (e.g., page 76 for AWIR-99
 | 3 | `government_id_type` hard-coded to `US_SSN` even for UK NI numbers, IN_PAN/Aadhaar, BR_CPF, etc. | High (geo-blocker) | **FIXED** (f52a448) — new `app/pii/gov_id_classifier.py` with 40+ patterns across 35 countries; segregation emits `country_hint`; deduplicator uses classifier first |
 | 4 | Segregation classifies AWIR-482 as `pii=False` (conf 0.95) because pages 1-2 are cover/TOC. Same class as AWIR-993 late-onset miss. | High | **FIXED** (5385d97, 3088ad5) — mid-page + 3/4-page sampling, confidence gate removed |
 
-#### Follow-up to fix #4 — stratified N-sample segregation + roster
+#### Follow-up to fix #4 — drop regex gate in late-onset segregation + collapse two code paths
 
-Current state: mid-page (50%) and 3/4-page (75%) sampling use hardcoded
-thresholds (`total_pages > 20` / `> 50`). Roster builder similarly
-hardcodes `15` body samples with fixed per-page char budgets. These
-defaults work for symmetric docs but bias against edge cases (PII
-concentrated in the last 10% of a tax return's appendix, or the first
-20% of a member register).
+**Discovery during benchmark rerun:** `_check_late_onset_pii` in
+`segregation.py` already samples at 25/50/75% for docs ≥50 pages.
+The real bug is its **regex gate** — it only sends a page's text to
+the LLM if the mid-page text matches `\b\d{3}-?\d{2}-?\d{4}\b`
+(US-SSN format) OR contains literal labels like "Name:/Member:/
+Employee:/Partner:/Patient:/Beneficiary:". That gate silently fails for:
 
-Replace point-sampling with **stratified N-sample** in both places:
-- Segregation retry: sample at 25%/50%/75% as one code path, `N` configurable.
-- Roster builder: equally-spaced `N` body pages, no magic constants.
+- AWIR-482 (tax-return K-1s): SSNs sit in form fields that PyMuPDF
+  doesn't extract as text, so the 25/50/75% pages look "empty" to the
+  regex and no LLM call is made → `pii=False` persists.
+- Non-US documents: SSN regex misses UK NI / IN PAN / BR CPF formats.
+- Docs that use non-labeled name headers (tables with just "First Name"
+  row or simply a column of names without a `Name:` prefix).
 
-Leaves behavior identical for observed benchmarks (CMG, AWIR-482) but
-more robust for skewed distributions. To schedule after current
-benchmark validation confirms #4 works at 50%/75%.
+My mid-page/3/4-page addition (5385d97, 3088ad5) only touches
+`_classify_vision`, which is redundant with `_check_late_onset_pii` for
+text-path docs that have extractable text on pages 1-2 (AWIR-482 uses
+the text path, so my fix doesn't run on it).
+
+**Consolidated fix:**
+1. Collapse `_retry_page_vision` (my addition) and `_check_late_onset_pii`
+   (existing) into one stratified-sample path that runs regardless of
+   whether segregation took the text or vision route.
+2. Drop the regex gate — send each sampled page's text directly to the
+   LLM (3 extra calls per long doc, worth it).
+3. **Vision fallback when text extraction yields <100 chars on the
+   sampled page** — this is the key fix for form-PDFs where PyMuPDF
+   misses form-field values.
+4. Same treatment for roster builder's 15 body samples (make stratified,
+   configurable N, geo-neutral cues — not just US SSN + hardcoded labels).
+
+To schedule after current benchmark run completes.
 
 ---
 
