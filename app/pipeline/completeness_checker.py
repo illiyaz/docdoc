@@ -178,14 +178,68 @@ def _get_page_count(source_path: str) -> int:
         return 0
 
 
-def _get_name_roster(doc, ollama_client, doc_id: str, onset: int) -> list[str]:
-    """Extract a roster of names from a stratified sample of the document.
+_ROSTER_PER_PAGE_BUDGET = 2000
+_ROSTER_BATCH_CHAR_BUDGET = 20000
 
-    Summary/index pages alone miss members listed throughout the body (e.g.
-    pension plans, employee registers, tax K-1 packets). This samples:
-      (1) the first 10 pages (cover/TOC/summary),
-      (2) 5 pages immediately before onset if onset is late,
-      (3) ~15 stratified pages across the body for long documents.
+
+def _parse_roster_names(response: str) -> list[str]:
+    """Parse an LLM roster response into a list of names.
+
+    Accepts JSON array (preferred) or plain text with numbered/bulleted
+    lines. Returns deduped, whitespace-trimmed names.
+    """
+    if not response:
+        return []
+    cleaned = response.strip()
+    if cleaned.startswith("```"):
+        cleaned = "\n".join(
+            ln for ln in cleaned.split("\n")
+            if not ln.strip().startswith("```")
+        )
+
+    names: list | None = None
+    try:
+        names = json.loads(cleaned)
+    except json.JSONDecodeError:
+        m = re.search(r'\[.*\]', cleaned, re.DOTALL)
+        if m:
+            try:
+                names = json.loads(m.group())
+            except json.JSONDecodeError:
+                names = None
+
+    if names is None or not isinstance(names, list):
+        names = []
+        for line in cleaned.split("\n"):
+            line = line.strip()
+            line = re.sub(r'^[\d]+[.)]\s*', '', line)
+            line = re.sub(r'^[-•*]\s*', '', line)
+            line = line.strip().strip('"').strip("'")
+            if (
+                len(line) > 4
+                and len(line.split()) >= 2
+                and line[0].isupper()
+                and not any(c in line for c in '{}[]():;/')
+            ):
+                names.append(line)
+
+    valid = []
+    for n in names:
+        if isinstance(n, str) and len(n.strip()) > 2:
+            valid.append(n.strip())
+    return valid
+
+
+def _get_name_roster(doc, ollama_client, doc_id: str, onset: int) -> list[str]:
+    """Extract a roster of all individual names in a document.
+
+    Roster v2 scans every page (batched to fit prompt budget) rather than
+    stratified-sampling a subset. CMG pension benchmark showed the v1
+    25-page sample caught only 14 of ~30+ members; the scatter of member
+    names across all 100 pages meant half were on pages the sampler
+    skipped. Batched full-doc scanning costs N extra LLM calls (≈5-9 for
+    a 100-page doc) but yields a complete roster for the downstream
+    vision-recovery step to target.
     """
     try:
         import fitz
@@ -194,131 +248,83 @@ def _get_name_roster(doc, ollama_client, doc_id: str, onset: int) -> list[str]:
         return []
 
     total_pages = pdf.page_count
-    sample_pages: list[int] = []
 
-    for pg in range(min(10, total_pages)):
-        sample_pages.append(pg)
-
-    if onset > 10:
-        for pg in range(max(0, onset - 5), onset):
-            if pg not in sample_pages:
-                sample_pages.append(pg)
-
-    # Stratified sample across the body so names scattered throughout the
-    # document make it into the roster, not just those on summary pages.
-    if total_pages > 20:
-        body_start = onset if onset else 10
-        if total_pages > body_start:
-            n_body_samples = 15
-            step = max(1, (total_pages - body_start) // n_body_samples)
-            added = 0
-            for pg in range(body_start, total_pages, step):
-                if pg in sample_pages:
-                    continue
-                sample_pages.append(pg)
-                added += 1
-                if added >= n_body_samples:
-                    break
-
-    sample_pages = sorted(set(sample_pages))
-
-    per_page_budget = 1500 if len(sample_pages) > 15 else 2000
-    total_budget = 25000
-    page_text = ""
-    for pg in sample_pages:
-        if len(page_text) >= total_budget:
-            break
-        text = pdf[pg].get_text()
+    page_texts: list[tuple[int, str]] = []
+    for pg in range(total_pages):
+        text = pdf[pg].get_text() or ""
         pdf._forget_page(pg)
         if text.strip():
-            page_text += f"\n--- PAGE {pg + 1} ---\n{text[:per_page_budget]}\n"
-
+            page_texts.append((pg, text[:_ROSTER_PER_PAGE_BUDGET]))
     pdf.close()
 
-    if not page_text or len(page_text.strip()) < 50:
+    if not page_texts:
         return []
+
+    # Group pages into batches that fit within the per-call char budget.
+    batches: list[list[tuple[int, str]]] = []
+    current: list[tuple[int, str]] = []
+    current_len = 0
+    for pg, text in page_texts:
+        chunk_len = len(text) + 40  # +40 for page header overhead
+        if current and current_len + chunk_len > _ROSTER_BATCH_CHAR_BUDGET:
+            batches.append(current)
+            current = []
+            current_len = 0
+        current.append((pg, text))
+        current_len += chunk_len
+    if current:
+        batches.append(current)
+
+    doc_type = (doc.metadata_json or {}).get("segregation", {}).get(
+        "document_type", "document"
+    )
 
     logger.info(
-        "Completeness roster: sampling %d pages (of %d) for %s",
-        len(sample_pages), total_pages, doc.file_name,
+        "Completeness roster: scanning all %d text-bearing pages of %s "
+        "in %d batch(es)",
+        len(page_texts), doc.file_name, len(batches),
     )
 
-    # Ask LLM to find all individual names
-    prompt = (
-        f"This is a {doc.metadata_json.get('segregation', {}).get('document_type', 'document')} "
-        f"({doc.file_name}).\n\n"
-        f"Below is a stratified sample of pages from the document. List ALL "
-        f"INDIVIDUAL PERSON NAMES you can find across these pages "
-        f"(not companies, trusts, LLCs, or institutions). The same person "
-        f"may appear on multiple pages — include each unique person once.\n\n"
-        f"{page_text}\n\n"
-        f"Return a JSON array of names:\n"
-        f'["John Smith", "Jane Doe", ...]\n\n'
-        f"If no individual names are found, return: []\n"
-        f"Return ONLY the JSON array."
-    )
-
-    try:
-        response = ollama_client.generate(
-            prompt=prompt,
-            system="Extract individual person names only. Return JSON array.",
-            use_case="completeness_roster",
-            document_id=doc_id,
+    all_names: set[str] = set()
+    for i, batch in enumerate(batches):
+        batch_text = "".join(
+            f"\n--- PAGE {pg + 1} ---\n{text}\n" for pg, text in batch
         )
-    except Exception as e:
-        logger.warning("Completeness roster LLM failed: %s", e)
-        return []
+        prompt = (
+            f"This is a {doc_type} ({doc.file_name}).\n\n"
+            f"Below are pages from the document (batch {i + 1} of {len(batches)}). "
+            f"List ALL INDIVIDUAL PERSON NAMES you can find across these pages "
+            f"(not companies, trusts, LLCs, or institutions). The same person "
+            f"may appear on multiple pages — include each unique person once.\n\n"
+            f"{batch_text}\n\n"
+            f"Return a JSON array of names:\n"
+            f'["John Smith", "Jane Doe", ...]\n\n'
+            f"If no individual names are found, return: []\n"
+            f"Return ONLY the JSON array."
+        )
+        try:
+            response = ollama_client.generate(
+                prompt=prompt,
+                system="Extract individual person names only. Return JSON array.",
+                use_case="completeness_roster",
+                document_id=doc_id,
+            )
+        except Exception as e:
+            logger.warning(
+                "Roster batch %d/%d LLM failed for %s: %s",
+                i + 1, len(batches), doc.file_name, e,
+            )
+            continue
 
-    if not response:
-        return []
+        for name in _parse_roster_names(response):
+            all_names.add(name)
 
-    # Parse response
-    cleaned = response.strip()
-    if cleaned.startswith("```"):
-        lines = cleaned.split("\n")
-        lines = [l for l in lines if not l.strip().startswith("```")]
-        cleaned = "\n".join(lines)
-
-    try:
-        names = json.loads(cleaned)
-    except json.JSONDecodeError:
-        match = re.search(r'\[.*\]', cleaned, re.DOTALL)
-        if match:
-            try:
-                names = json.loads(match.group())
-            except json.JSONDecodeError:
-                names = None
-        else:
-            names = None
-
-    # Fallback: if LLM returned plain text instead of JSON,
-    # extract names from numbered/bulleted lines
-    if names is None or not isinstance(names, list):
-        names = []
-        for line in cleaned.split("\n"):
-            line = line.strip()
-            # Strip numbering: "1. Name" or "- Name" or "• Name"
-            line = re.sub(r'^[\d]+[.)]\s*', '', line)
-            line = re.sub(r'^[-•*]\s*', '', line)
-            line = line.strip().strip('"').strip("'")
-            # Looks like a name: 2+ words, starts with capital, no special chars
-            if (
-                len(line) > 4
-                and len(line.split()) >= 2
-                and line[0].isupper()
-                and not any(c in line for c in '{}[]():;/')
-            ):
-                names.append(line)
-        if names:
-            logger.info("Roster: parsed %d names from plain text (JSON failed)", len(names))
-
-    # Filter to valid names
-    valid = [
-        n.strip() for n in names
-        if isinstance(n, str) and len(n.strip()) > 2
-    ]
-    logger.info("Completeness roster: %d names found for %s", len(valid), doc.file_name)
-    return valid
+    roster = sorted(all_names)
+    logger.info(
+        "Completeness roster: %d unique names found for %s (across %d batches)",
+        len(roster), doc.file_name, len(batches),
+    )
+    return roster
 
 
 def _vision_recover(
