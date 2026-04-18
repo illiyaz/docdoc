@@ -119,6 +119,28 @@ _TEXT_EXTRACTABLE_TYPES = frozenset({
 _MAX_TEXT_CHARS = 4000
 
 
+def _adopt_alt_result(
+    result: "SegregationResult",
+    alt: "SegregationResult",
+    response_text: str,
+) -> None:
+    """Copy an alternate sample's PII-detected fields onto the primary result.
+
+    Used when a mid-doc sample page turns up PII the cover page missed.
+    """
+    result.pii_detected = True
+    result.confidence = alt.confidence
+    result.document_type = alt.document_type
+    result.document_subtype = alt.document_subtype
+    result.issuing_entity = alt.issuing_entity
+    result.primary_subject_type = alt.primary_subject_type
+    result.summary = alt.summary
+    result.fields = alt.fields
+    result.raw_response = response_text
+    if alt.country_hint and not result.country_hint:
+        result.country_hint = alt.country_hint
+
+
 def _extract_pdf_text(file_path: str, max_pages: int = 2) -> str:
     """Extract text from the first N pages of a PDF using PyMuPDF.
 
@@ -340,26 +362,16 @@ class SegregationEngine:
         result.classification_method = "vision"
         self._parse_response(response_text, result)
 
-        # If page 1 showed no PII but doc has >1 page, try page 2
+        # If page 1 showed no PII but doc has >1 page, try page 2.
+        # Mid-doc and 3/4-doc sampling is handled by `_check_late_onset_pii`
+        # in `classify()`, which runs for all PDF paths (text and vision) and
+        # supports text-LLM + vision-LLM fallback per sampled page.
         if (
             not result.pii_detected
             and result.total_pages > 1
             and result.confidence < 0.8
         ):
             self._retry_page_vision(result, document_id, prompt, page=1, label="Page 2")
-
-        # Late-onset PII guard: long docs (tax returns, pension reports, member
-        # registers) often have 30-50 pages of cover/TOC/summary before PII
-        # starts. Sample the middle and 3/4-mark if earlier pages were clean,
-        # regardless of page 1-2 confidence — high confidence that pages 1-2
-        # contain no PII tells us nothing about what's on page 50.
-        if not result.pii_detected and result.total_pages > 20:
-            mid = result.total_pages // 2
-            self._retry_page_vision(result, document_id, prompt, page=mid, label=f"Mid-page {mid + 1}")
-
-        if not result.pii_detected and result.total_pages > 50:
-            three_quarter = (result.total_pages * 3) // 4
-            self._retry_page_vision(result, document_id, prompt, page=three_quarter, label=f"3/4-page {three_quarter + 1}")
 
     def _retry_page_vision(
         self,
@@ -568,12 +580,18 @@ class SegregationEngine:
     ) -> None:
         """Sample mid-document pages for PII when pages 1-2 showed none.
 
-        Some documents (tax returns, legal filings) have 50+ pages of
-        boilerplate before individual PII begins. This binary-search-style
-        sampling catches those cases without reading the entire document.
-        """
-        import re
+        Some documents (tax returns, pension reports, member registers)
+        have 50+ pages of boilerplate before individual PII begins, or
+        PII in the appendix. Sample at 25/50/75%:
 
+          1. If the sampled page has extractable text → send to text LLM
+             (no regex gate — any content gets classified).
+          2. If the page has <30 chars of extractable text (form-PDFs
+             where PyMuPDF misses form-field values, e.g. AWIR K-1s) →
+             render as image and send to vision LLM.
+
+        Stops on the first page that the LLM classifies as PII.
+        """
         # Sample pages at 25%, 50%, 75% of the document
         sample_indices = sorted(set([
             total_pages // 4,
@@ -587,80 +605,150 @@ class SegregationEngine:
         except Exception:
             return
 
-        pii_page = None
-        pii_text = None
-        ssn_re = re.compile(r"\b\d{3}[-‐]?\d{2}[-‐]?\d{4}\b")
-        name_re = re.compile(
-            r"\b(?:Name|Member|Employee|Patient|Partner|Beneficiary)\s*[:]\s*",
-            re.IGNORECASE,
-        )
-
+        # (page_index, text_if_extractable or None) in visit order.
+        pages_to_try: list[tuple[int, str | None]] = []
         try:
             for pg_idx in sample_indices:
                 if pg_idx >= doc.page_count:
                     continue
-                text = doc[pg_idx].get_text()
+                text = doc[pg_idx].get_text() or ""
                 doc._forget_page(pg_idx)
-                if not text or len(text.strip()) < 30:
-                    continue
-                # Quick PII pattern check
-                has_ssn = bool(ssn_re.search(text))
-                has_name = bool(name_re.search(text))
-                if has_ssn or has_name:
-                    pii_page = pg_idx
-                    pii_text = text
-                    break
+                if len(text.strip()) >= 30:
+                    pages_to_try.append((pg_idx, text))
+                else:
+                    # Empty/near-empty text → will be handled via vision.
+                    pages_to_try.append((pg_idx, None))
         finally:
             doc.close()
 
-        if pii_page is None:
+        if not pages_to_try:
             return
 
-        # Found PII in mid-document — try LLM classification on that page
-        try:
-            client = self._get_client()
-            from app.llm.prompts import SEGREGATION_PROMPT_TEXT
-            prompt = SEGREGATION_PROMPT_TEXT.format(
-                file_name=result.file_name,
-                file_type=result.file_type,
-                total_pages=total_pages,
-                char_count=len(pii_text[:_MAX_TEXT_CHARS]),
-                document_text=pii_text[:_MAX_TEXT_CHARS],
-            )
-            response_text = client.generate(
-                prompt=prompt,
-                system=None,
-                use_case="segregation_late_onset",
-                document_id=document_id,
-            )
-            if response_text:
-                self._parse_response(response_text, result)
-                if result.pii_detected:
-                    result.classification_method = "text_late_onset"
-                    result.summary = (
-                        f"Late-onset PII found at page {pii_page + 1} "
-                        f"(pages 1-2 were non-PII boilerplate). "
-                        f"{result.summary or ''}"
-                    )
-                    logger.info(
-                        "Late onset: %s has PII starting at page %d (of %d)",
-                        result.file_name, pii_page + 1, total_pages,
-                    )
-                    return
-        except Exception as e:
-            logger.warning("Late onset LLM failed for %s: %s", result.file_name, e)
+        client = self._get_client()
 
-        # LLM unavailable — fall back to regex on the mid-doc page
-        self._classify_regex_fallback(result, pii_text)
-        if result.pii_detected:
+        for pg_idx, text in pages_to_try:
+            try:
+                if text is not None:
+                    # Text path: send page's text straight to the text LLM.
+                    if self._try_late_onset_text(
+                        result, text, pg_idx, total_pages, document_id, client
+                    ):
+                        return
+                else:
+                    # Vision path: PyMuPDF found no usable text, try image.
+                    if self._try_late_onset_vision(
+                        result, file_path, pg_idx, total_pages, document_id, client
+                    ):
+                        return
+            except Exception as e:
+                logger.debug(
+                    "Late-onset attempt on page %d failed for %s: %s",
+                    pg_idx + 1, result.file_name, e,
+                )
+
+    def _try_late_onset_text(
+        self,
+        result: SegregationResult,
+        page_text: str,
+        pg_idx: int,
+        total_pages: int,
+        document_id: Optional[str],
+        client,
+    ) -> bool:
+        """Send a mid-doc page's text to the text LLM. Returns True on PII hit."""
+        from app.llm.prompts import SEGREGATION_PROMPT_TEXT
+        snippet = page_text[:_MAX_TEXT_CHARS]
+        prompt = SEGREGATION_PROMPT_TEXT.format(
+            file_name=result.file_name,
+            file_type=result.file_type,
+            total_pages=total_pages,
+            char_count=len(snippet),
+            document_text=snippet,
+        )
+        response_text = client.generate(
+            prompt=prompt,
+            system=None,
+            use_case="segregation_late_onset",
+            document_id=document_id,
+        )
+        if not response_text:
+            return False
+
+        alt = SegregationResult(
+            file_path=result.file_path,
+            file_name=result.file_name,
+            file_type=result.file_type,
+            total_pages=total_pages,
+        )
+        self._parse_response(response_text, alt)
+        if alt.pii_detected:
+            _adopt_alt_result(result, alt, response_text)
+            result.classification_method = "text_late_onset"
             result.summary = (
-                f"Late-onset PII detected via regex at page {pii_page + 1}. "
-                f"{result.summary or ''}"
+                f"Late-onset PII found at page {pg_idx + 1} (pages 1-2 were "
+                f"non-PII boilerplate). {alt.summary or ''}"
             )
             logger.info(
-                "Late onset (regex): %s has PII at page %d",
-                result.file_name, pii_page + 1,
+                "Late onset (text): %s has PII at page %d of %d",
+                result.file_name, pg_idx + 1, total_pages,
             )
+            return True
+        return False
+
+    def _try_late_onset_vision(
+        self,
+        result: SegregationResult,
+        file_path: str,
+        pg_idx: int,
+        total_pages: int,
+        document_id: Optional[str],
+        client,
+    ) -> bool:
+        """Render a mid-doc page and send to vision LLM. Returns True on PII hit.
+
+        Used for form-PDFs where PyMuPDF doesn't extract form-field values
+        (AWIR K-1s, pension statements with filled form fields).
+        """
+        image_b64 = self._render_page(file_path, result.file_type, page=pg_idx)
+        if not image_b64:
+            return False
+
+        from app.llm.prompts import SEGREGATION_PROMPT_VISION
+        prompt = SEGREGATION_PROMPT_VISION.format(
+            file_name=result.file_name,
+            file_type=result.file_type,
+            total_pages=total_pages,
+        )
+        response_text = client.generate_with_images(
+            prompt=prompt,
+            images=[image_b64],
+            use_case="segregation_late_onset_vision",
+            document_id=document_id,
+            model_override=self._vision_model or self._fallback_model,
+        )
+        if not response_text:
+            return False
+
+        alt = SegregationResult(
+            file_path=result.file_path,
+            file_name=result.file_name,
+            file_type=result.file_type,
+            total_pages=total_pages,
+        )
+        self._parse_response(response_text, alt)
+        if alt.pii_detected:
+            _adopt_alt_result(result, alt, response_text)
+            result.classification_method = "vision_late_onset"
+            result.summary = (
+                f"Late-onset PII found via vision at page {pg_idx + 1} "
+                f"(form-field values not in text layer). {alt.summary or ''}"
+            )
+            logger.info(
+                "Late onset (vision): %s has PII at page %d of %d",
+                result.file_name, pg_idx + 1, total_pages,
+            )
+            return True
+        return False
 
     # ----- Response parsing -----
 
