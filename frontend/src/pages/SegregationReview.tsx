@@ -31,6 +31,8 @@ import {
   rejectSegregationGroup,
   reclassifySegregationGroup,
   approveAllSegregationGroups,
+  approveAllDocuments,
+  kickoffExtraction,
   runSegregation,
 } from "@/api/client"
 import type { SegregationGroup } from "@/api/client"
@@ -341,12 +343,16 @@ function GroupCard({
 // Main page component
 // ---------------------------------------------------------------------------
 
+type ChainStep = "idle" | "segregation" | "analysis" | "extraction" | "error"
+
 export function SegregationReview() {
   const { id: projectId } = useParams<{ id: string }>()
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const jobId = searchParams.get("job_id") ?? undefined
+  const [chainStep, setChainStep] = useState<ChainStep>("idle")
+  const [chainError, setChainError] = useState<string | null>(null)
 
   const {
     data,
@@ -364,14 +370,35 @@ export function SegregationReview() {
     onSuccess: () => refetch(),
   })
 
-  const approveAllMut = useMutation({
-    mutationFn: () =>
-      approveAllSegregationGroups(projectId!, { reviewer_id: "auditor" }, jobId),
-    onSuccess: () => {
+  /**
+   * Approve segregation → approve analysis → kick off extraction → navigate to
+   * the live progress view. Runs as a single auditor action. Each step shows
+   * its own loading state; a failure halts the chain and leaves the user on
+   * this screen with an error banner.
+   */
+  async function approveAllAndProceed() {
+    if (!projectId || !jobId) return
+    setChainError(null)
+    try {
+      setChainStep("segregation")
+      await approveAllSegregationGroups(projectId, { reviewer_id: "auditor" }, jobId)
       queryClient.invalidateQueries({ queryKey: ["segregation", projectId] })
-      refetch()
-    },
-  })
+
+      setChainStep("analysis")
+      await approveAllDocuments(jobId, { reviewer_id: "auditor" })
+
+      setChainStep("extraction")
+      await kickoffExtraction(jobId)
+
+      queryClient.invalidateQueries({ queryKey: ["project-jobs", projectId] })
+      navigate(`/projects/${projectId}?tab=jobs&expand=${jobId}`)
+    } catch (e) {
+      setChainStep("error")
+      setChainError(e instanceof Error ? e.message : String(e))
+    }
+  }
+
+  const chainBusy = chainStep !== "idle" && chainStep !== "error"
 
   if (!projectId) return <p className="text-red-500">Missing project ID</p>
 
@@ -418,28 +445,41 @@ export function SegregationReview() {
           )}
           {hasPending && (
             <button
-              onClick={() => approveAllMut.mutate()}
-              disabled={approveAllMut.isPending}
+              onClick={approveAllAndProceed}
+              disabled={chainBusy}
               className="flex items-center gap-1 rounded bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50"
+              title="Approve groups, then automatically approve analysis and start extraction"
             >
-              {approveAllMut.isPending ? (
+              {chainBusy ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
                 <CheckCheck className="h-4 w-4" />
               )}
-              Approve All
+              {chainStep === "segregation" && "Approving groups…"}
+              {chainStep === "analysis" && "Approving analysis…"}
+              {chainStep === "extraction" && "Starting extraction…"}
+              {!chainBusy && "Approve & Start Extraction"}
             </button>
           )}
-          {allApproved && (
+          {allApproved && chainStep === "idle" && (
             <button
               onClick={() => navigate(`/projects/${projectId}?tab=jobs&expand=${jobId}`)}
               className="flex items-center gap-1 rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
             >
-              Proceed to Extraction
+              View Job
             </button>
           )}
         </div>
       </div>
+
+      {chainError && (
+        <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+          <strong>Auto-proceed failed:</strong> {chainError}
+          <div className="mt-1 text-xs text-red-700">
+            Segregation may still be approved — open the Jobs tab to continue manually.
+          </div>
+        </div>
+      )}
 
       {/* Summary bar */}
       {summary && groups.length > 0 && (

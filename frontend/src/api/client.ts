@@ -1,4 +1,4 @@
-const BASE_URL = import.meta.env.VITE_API_URL ?? "/api"
+export const BASE_URL = import.meta.env.VITE_API_URL ?? "/api"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -1044,6 +1044,30 @@ export async function updateFieldMap(
   })
   if (!res.ok) throw new Error(`Failed to update field map: ${res.status}`)
   return res.json()
+}
+
+/**
+ * Kick off extraction without consuming the SSE stream. Extraction runs as
+ * a background daemon server-side; this POST starts the daemon then hangs
+ * up after ~2s so the caller can navigate on to a progress view. Safe to
+ * call — disconnecting from the stream does not cancel extraction.
+ */
+export async function kickoffExtraction(jobId: string): Promise<void> {
+  const controller = new AbortController()
+  const timer = window.setTimeout(() => controller.abort(), 2000)
+  try {
+    await fetch(`${BASE_URL}/jobs/${jobId}/extract/stream`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      signal: controller.signal,
+    })
+  } catch (e) {
+    // AbortError is expected once the 2s timer fires; anything else, rethrow.
+    if (e instanceof DOMException && e.name === "AbortError") return
+    throw e
+  } finally {
+    window.clearTimeout(timer)
+  }
 }
 
 export async function startExtractStreaming(
