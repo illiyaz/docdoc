@@ -1126,7 +1126,24 @@ When adaptive onset identifies PII starting at page N (e.g., page 76 for AWIR-99
 | 1 | Roster builder only scans summary pages — found 4 names in a 100pg pension plan with ~30+ members. | High | **FIXED** (1cd0658) — `completeness_checker._get_name_roster()` now samples ~15 stratified pages across the whole doc |
 | 2 | Post-extraction gap prioritization crashes: `pg.get("missing", [])` treats `pg` as dict but `find_gap_pages()` returns `dict[int, list[tuple[int, list[str]]]]`. | Medium | **FIXED** (1cd0658) — iterates `.items()` and checks against `raw_government_id` |
 | 3 | `government_id_type` hard-coded to `US_SSN` even for UK NI numbers, IN_PAN/Aadhaar, BR_CPF, etc. | High (geo-blocker) | **FIXED** (f52a448) — new `app/pii/gov_id_classifier.py` with 40+ patterns across 35 countries; segregation emits `country_hint`; deduplicator uses classifier first |
-| 4 | Segregation classifies AWIR-482 as `pii=False` (conf 0.95) because pages 1-2 are cover/TOC. Same class as AWIR-993 late-onset miss. | High | **FIXED** — mid-page + 3/4-page sampling added to `_classify_vision` for docs >20 pages / >50 pages |
+| 4 | Segregation classifies AWIR-482 as `pii=False` (conf 0.95) because pages 1-2 are cover/TOC. Same class as AWIR-993 late-onset miss. | High | **FIXED** (5385d97, 3088ad5) — mid-page + 3/4-page sampling, confidence gate removed |
+
+#### Follow-up to fix #4 — stratified N-sample segregation + roster
+
+Current state: mid-page (50%) and 3/4-page (75%) sampling use hardcoded
+thresholds (`total_pages > 20` / `> 50`). Roster builder similarly
+hardcodes `15` body samples with fixed per-page char budgets. These
+defaults work for symmetric docs but bias against edge cases (PII
+concentrated in the last 10% of a tax return's appendix, or the first
+20% of a member register).
+
+Replace point-sampling with **stratified N-sample** in both places:
+- Segregation retry: sample at 25%/50%/75% as one code path, `N` configurable.
+- Roster builder: equally-spaced `N` body pages, no magic constants.
+
+Leaves behavior identical for observed benchmarks (CMG, AWIR-482) but
+more robust for skewed distributions. To schedule after current
+benchmark validation confirms #4 works at 50%/75%.
 
 ---
 
