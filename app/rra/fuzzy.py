@@ -253,6 +253,10 @@ def strip_name_decorators(name: str) -> str:
 def names_match(name1: str, name2: str) -> tuple[bool, float]:
     """Return ``(matched, confidence)`` for two name strings.
 
+    Inputs may be raw or canonical — names are normalised internally so
+    callers can safely pass ``raw_name`` values (resolves "Brown, Dorothy
+    J" vs "Dorothy J Brown" to the same canonical form before comparing).
+
     Rules
     -----
     * Non-Latin names: Jaro-Winkler only, threshold 0.88.
@@ -262,11 +266,6 @@ def names_match(name1: str, name2: str) -> tuple[bool, float]:
       3. Same Soundex AND Jaro-Winkler ≥ 0.80 → confidence = JW score
     * Otherwise: no match, confidence = JW score.
 
-    Parameters
-    ----------
-    name1, name2:
-        Canonical name strings (output of ``normalize_name``).
-
     Returns
     -------
     tuple[bool, float]
@@ -275,6 +274,12 @@ def names_match(name1: str, name2: str) -> tuple[bool, float]:
     """
     if not name1 or not name2:
         return False, 0.0
+
+    # Canonicalise first — handles "Last, First" → "First Last",
+    # honorific stripping, whitespace collapse, title case.
+    from app.normalization.name_normalizer import normalize_name
+    name1 = normalize_name(name1) or name1
+    name2 = normalize_name(name2) or name2
 
     # Strip account decorators before comparing:
     #   "Betty Bertaux Ii (Editor)" → "Betty Bertaux"
