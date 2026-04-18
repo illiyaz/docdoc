@@ -2726,6 +2726,7 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                                     (_markers.get("name_after_label") or _markers.get("name_before_label", ""))[:30],
                                 )
 
+                                _country_hint = (doc.metadata_json or {}).get("segregation", {}).get("country_hint")
                                 records = extract_with_markers(
                                     page_texts=_tb_page_texts,
                                     ollama_client=_tb_client,
@@ -2733,6 +2734,7 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                                     markers=_markers,
                                     records_per_page=_records_per_page,
                                     field_inventory=_tb_fields,
+                                    country_hint=_country_hint,
                                 )
 
                                 if records:
@@ -2750,6 +2752,7 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                                     len(_tb_page_texts), _tb_doc_type,
                                 )
 
+                                _country_hint = (doc.metadata_json or {}).get("segregation", {}).get("country_hint")
                                 records = extract_text_batch(
                                     page_texts=_tb_page_texts,
                                     ollama_client=_tb_client,
@@ -2758,6 +2761,7 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                                     field_inventory=_tb_fields,
                                     record_unit=_record_unit,
                                     records_per_page=_records_per_page,
+                                    country_hint=_country_hint,
                                 )
 
                                 if records:

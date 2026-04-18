@@ -35,6 +35,7 @@ def extract_with_markers(
     pages_per_batch: int = 10,
     records_per_page: int = 1,
     field_inventory: list[str] | None = None,
+    country_hint: str | None = None,
 ) -> list[PIIRecord]:
     """Strategy A: Extract using marker-filtered snippets.
 
@@ -158,7 +159,7 @@ def extract_with_markers(
             _marker_consec_fail = 0
 
             batch_page_texts = {pg: page_texts.get(pg, "") for pg in batch_pages}
-            records = _parse_batch_response(response, doc_id, batch_pages, batch_page_texts)
+            records = _parse_batch_response(response, doc_id, batch_pages, batch_page_texts, country_hint=country_hint)
             all_records.extend(records)
 
         except Exception:
@@ -184,7 +185,7 @@ def extract_with_markers(
                     calls_made += 1
                     _marker_consec_fail = 0  # model alive
                     retry_page_texts = {retry_pg: page_texts.get(retry_pg, "")}
-                    retry_records = _parse_batch_response(retry_resp, doc_id, [retry_pg], retry_page_texts)
+                    retry_records = _parse_batch_response(retry_resp, doc_id, [retry_pg], retry_page_texts, country_hint=country_hint)
                     all_records.extend(retry_records)
                 except Exception:
                     _marker_consec_fail += 1
@@ -207,6 +208,7 @@ def extract_text_batch(
     pages_per_batch: int = DEFAULT_PAGES_PER_BATCH,
     record_unit: str = "page",
     records_per_page: int = 1,
+    country_hint: str | None = None,
 ) -> list[PIIRecord]:
     """Extract PII from text pages using batched LLM calls.
 
@@ -311,7 +313,7 @@ def extract_text_batch(
             consecutive_failures = 0  # reset on success
 
             batch_page_texts = {pg: page_texts.get(pg, "") for pg in batch_pages}
-            records = _parse_batch_response(response, doc_id, batch_pages, batch_page_texts)
+            records = _parse_batch_response(response, doc_id, batch_pages, batch_page_texts, country_hint=country_hint)
             all_records.extend(records)
 
             # --- Post-batch quality gate (runs once after first successful batch) ---
@@ -389,6 +391,7 @@ def extract_text_batch(
                     retry_page_texts = {retry_pg: page_texts.get(retry_pg, "")}
                     retry_records = _parse_batch_response(
                         retry_response, doc_id, [retry_pg], retry_page_texts,
+                        country_hint=country_hint,
                     )
                     all_records.extend(retry_records)
                 except Exception:
@@ -583,6 +586,7 @@ def _parse_batch_response(
     doc_id: str,
     batch_pages: list[int],
     page_texts: dict[int, str] | None = None,
+    country_hint: str | None = None,
 ) -> list[PIIRecord]:
     """Parse LLM JSON response into PIIRecord objects.
 
@@ -745,6 +749,7 @@ def _parse_batch_response(
             raw_email=email,
             raw_dob=dob,
             raw_government_id=ssn,
+            country=country_hint or "US",
             source_document_id=doc_id,
             page_range=page_str,
             entity_types_found=tuple(entity_types),
@@ -764,6 +769,7 @@ def _parse_batch_response(
                 normalized_value=guardian.strip(),
                 raw_name=guardian.strip(),
                 raw_address=raw_address,  # same address as primary
+                country=country_hint or "US",
                 source_document_id=doc_id,
                 page_range=page_str,
                 entity_types_found=tuple(g_entity_types),

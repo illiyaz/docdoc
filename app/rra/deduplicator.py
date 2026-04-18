@@ -289,8 +289,11 @@ class Deduplicator:
 
         # government_id_type: pick the most specific label for the raw ID.
         # Strategy: format-based classifier first (recognises UK_NINO, IN_PAN,
-        # BR_CPF, etc. regardless of what the extractor labeled the record as),
-        # then fall back to entity_types_found / entity_type.
+        # BR_CPF, etc. regardless of what the extractor labeled the record as).
+        # When the classifier can't narrow the type but a non-US country_hint
+        # is present, trust the hint and use GOVERNMENT_ID rather than falling
+        # back to the extractor's "US_SSN" placeholder (the extractor labels
+        # every gov ID US_SSN regardless of jurisdiction).
         government_id_type: str | None = None
         from app.pii.gov_id_classifier import GENERIC_TYPE, infer_gov_id_type
         for r in records:
@@ -299,8 +302,15 @@ class Deduplicator:
                 if inferred != GENERIC_TYPE:
                     government_id_type = inferred
                     break
-                # Classifier couldn't narrow it (e.g. bare 9 digits w/o hint).
-                # Fall back to any specific label the extractor produced.
+                # Classifier couldn't narrow it. If we have a non-US hint, the
+                # "US_SSN" label the extractor wrote is wrong — don't propagate
+                # it. Use the generic label instead.
+                country = (r.country or "").upper()
+                if country and country != "US":
+                    government_id_type = "GOVERNMENT_ID"
+                    break
+                # Default behaviour: fall back to any specific label the
+                # extractor produced.
                 if r.entity_types_found:
                     for et in r.entity_types_found:
                         if et.upper() in _GOV_ID_FIELD_TYPES:

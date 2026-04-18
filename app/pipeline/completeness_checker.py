@@ -445,6 +445,7 @@ def _vision_recover(
                 if dob:
                     entity_types.append("DATE_OF_BIRTH")
 
+                _country_hint = (doc.metadata_json or {}).get("segregation", {}).get("country_hint") or "US"
                 rec = PIIRecord(
                     record_id=str(uuid4()),
                     entity_type="PERSON",
@@ -453,6 +454,7 @@ def _vision_recover(
                     raw_address={"raw": address} if address else None,
                     raw_government_id=str(gov_id) if gov_id else None,
                     raw_dob=str(dob) if dob else None,
+                    country=_country_hint,
                     source_document_id=doc_id,
                     page_range=str(page_idx + 1),
                     entity_types_found=tuple(entity_types),
