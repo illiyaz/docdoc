@@ -32,6 +32,9 @@ import {
   ChevronRight,
   Eye,
   Eraser,
+  Mail,
+  Send,
+  X as XIcon,
 } from "lucide-react"
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -65,6 +68,7 @@ import {
   purgeJob,
 } from "@/api/client"
 import { DocumentViewer } from "@/components/DocumentViewer"
+import { NotificationPreview } from "@/components/NotificationPreview"
 import { IntelligenceTab } from "@/pages/IntelligenceTab"
 import type {
   ProjectDetail as ProjectDetailType,
@@ -84,7 +88,7 @@ import type {
 // Tab type
 // ---------------------------------------------------------------------------
 
-type TabId = "overview" | "protocols" | "catalog" | "jobs" | "intelligence" | "subjects" | "density" | "exports"
+type TabId = "overview" | "protocols" | "catalog" | "jobs" | "intelligence" | "subjects" | "notification" | "density" | "exports"
 
 const TABS: { id: TabId; label: string; icon: typeof FileText }[] = [
   { id: "overview", label: "Overview", icon: FileText },
@@ -93,6 +97,7 @@ const TABS: { id: TabId; label: string; icon: typeof FileText }[] = [
   { id: "jobs", label: "Jobs", icon: Briefcase },
   { id: "intelligence", label: "Intelligence", icon: Eye },
   { id: "subjects", label: "Subjects", icon: Search },
+  { id: "notification", label: "Notification", icon: Mail },
   { id: "density", label: "Density", icon: BarChart3 },
   { id: "exports", label: "Exports", icon: Download },
 ]
@@ -4315,6 +4320,335 @@ function SubjectsTab({ projectId }: { projectId: string }) {
 }
 
 // ---------------------------------------------------------------------------
+// Notification tab (Step 39 #2)
+// ---------------------------------------------------------------------------
+
+type NotificationSubject = {
+  subject_id: string
+  name: string
+  email: string | null
+  review_status: string
+  notification_required: boolean
+  pii_types: string[]
+  source_document: string | null
+  merge_confidence: number | null
+}
+
+function NotificationTab({ projectId }: { projectId: string }) {
+  const BASE = import.meta.env.VITE_API_URL ?? "/api"
+  const queryClient = useQueryClient()
+  const [filter, setFilter] = useState<"all" | "APPROVED" | "NOTIFIED" | "REJECTED" | "pending">("APPROVED")
+  const [previewSubjectId, setPreviewSubjectId] = useState<string | null>(null)
+  const [busyIds, setBusyIds] = useState<Set<string>>(new Set())
+  const [batchStatus, setBatchStatus] = useState<string | null>(null)
+
+  const { data: subjects, isLoading } = useQuery({
+    queryKey: ["project-subjects", projectId],
+    queryFn: async () => {
+      const res = await fetch(`${BASE}/notifications/subjects/${projectId}`)
+      if (!res.ok) return []
+      return res.json() as Promise<NotificationSubject[]>
+    },
+    refetchInterval: 30_000,
+  })
+
+  const { data: delivery } = useQuery({
+    queryKey: ["delivery-status", projectId],
+    queryFn: async () => {
+      const res = await fetch(`${BASE}/notifications/delivery-status/${projectId}`)
+      if (!res.ok) return null
+      return res.json()
+    },
+    refetchInterval: 30_000,
+  })
+
+  const filtered = (subjects ?? []).filter((s) => {
+    if (filter === "all") return true
+    if (filter === "pending") {
+      return s.review_status === "AI_PENDING"
+        || s.review_status === "HUMAN_REVIEW"
+        || s.review_status === "LEGAL_REVIEW"
+    }
+    return s.review_status === filter
+  })
+
+  async function withBusy(id: string, fn: () => Promise<void>) {
+    setBusyIds((prev) => new Set(prev).add(id))
+    try {
+      await fn()
+    } finally {
+      setBusyIds((prev) => {
+        const next = new Set(prev)
+        next.delete(id)
+        return next
+      })
+    }
+  }
+
+  async function updateStatus(subjectId: string, status: string) {
+    await withBusy(subjectId, async () => {
+      const res = await fetch(`${BASE}/notifications/subjects/${subjectId}/status`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ review_status: status, reviewer_id: "auditor" }),
+      })
+      if (!res.ok) {
+        const err = await res.text()
+        alert(`Status update failed: ${err}`)
+        return
+      }
+      queryClient.invalidateQueries({ queryKey: ["project-subjects", projectId] })
+      queryClient.invalidateQueries({ queryKey: ["delivery-status", projectId] })
+    })
+  }
+
+  async function sendEmail(subjectId: string) {
+    await withBusy(subjectId, async () => {
+      const res = await fetch(`${BASE}/notifications/subjects/${subjectId}/send-email`, {
+        method: "POST",
+      })
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        alert(`Send failed: ${body.detail ?? res.status}`)
+        return
+      }
+      if (body.status === "SENT") {
+        // no popup on success — the status badge will flip to NOTIFIED
+      } else {
+        alert(`Send result: ${body.status}${body.smtp_response ? ` — ${body.smtp_response}` : ""}`)
+      }
+      queryClient.invalidateQueries({ queryKey: ["project-subjects", projectId] })
+      queryClient.invalidateQueries({ queryKey: ["delivery-status", projectId] })
+    })
+  }
+
+  async function sendAllApproved() {
+    const approvedCount = delivery?.summary?.approved_ready ?? 0
+    if (approvedCount === 0) {
+      alert("No APPROVED subjects to send.")
+      return
+    }
+    const confirmed = window.confirm(
+      `Send notification emails to ${approvedCount} APPROVED subject(s)?\n\n` +
+      `Each successful send flips the subject to NOTIFIED.`
+    )
+    if (!confirmed) return
+    setBatchStatus("Sending…")
+    try {
+      const res = await fetch(`${BASE}/notifications/projects/${projectId}/send-batch`, {
+        method: "POST",
+      })
+      const body = await res.json()
+      if (!res.ok) {
+        setBatchStatus(`Failed: ${body.detail ?? res.status}`)
+        return
+      }
+      setBatchStatus(`Sent ${body.sent}/${body.total} (${body.failed} failed, ${body.skipped} skipped)`)
+      queryClient.invalidateQueries({ queryKey: ["project-subjects", projectId] })
+      queryClient.invalidateQueries({ queryKey: ["delivery-status", projectId] })
+    } catch (e) {
+      setBatchStatus(`Error: ${e instanceof Error ? e.message : String(e)}`)
+    }
+  }
+
+  const approvedReady = delivery?.summary?.approved_ready ?? 0
+
+  return (
+    <div className="space-y-4">
+      {/* Summary cards */}
+      {delivery && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <Card><CardContent className="pt-4 text-center">
+            <p className="text-2xl font-bold text-amber-600">{delivery.summary.pending_review}</p>
+            <p className="text-xs text-muted-foreground">Pending Review</p>
+          </CardContent></Card>
+          <Card><CardContent className="pt-4 text-center">
+            <p className="text-2xl font-bold text-green-600">{delivery.summary.approved_ready}</p>
+            <p className="text-xs text-muted-foreground">Approved (ready to send)</p>
+          </CardContent></Card>
+          <Card><CardContent className="pt-4 text-center">
+            <p className="text-2xl font-bold text-blue-600">{delivery.summary.notified_sent}</p>
+            <p className="text-xs text-muted-foreground">Notified</p>
+          </CardContent></Card>
+          <Card><CardContent className="pt-4 text-center">
+            <p className="text-2xl font-bold text-red-600">{delivery.summary.rejected}</p>
+            <p className="text-xs text-muted-foreground">Rejected</p>
+          </CardContent></Card>
+        </div>
+      )}
+
+      {/* Toolbar */}
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex gap-1 rounded border p-0.5 text-xs">
+          {[
+            { key: "APPROVED", label: `Approved (${delivery?.summary?.approved_ready ?? 0})` },
+            { key: "NOTIFIED", label: `Notified (${delivery?.summary?.notified_sent ?? 0})` },
+            { key: "REJECTED", label: `Rejected (${delivery?.summary?.rejected ?? 0})` },
+            { key: "pending", label: `Pending (${delivery?.summary?.pending_review ?? 0})` },
+            { key: "all", label: "All" },
+          ].map(({ key, label }) => (
+            <button
+              key={key}
+              onClick={() => setFilter(key as typeof filter)}
+              className={`rounded px-2 py-0.5 ${filter === key ? "bg-blue-100 text-blue-700" : "text-gray-500 hover:bg-gray-50"}`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <div className="flex items-center gap-2">
+          {batchStatus && (
+            <span className="text-xs text-muted-foreground">{batchStatus}</span>
+          )}
+          <button
+            onClick={sendAllApproved}
+            disabled={approvedReady === 0}
+            className="inline-flex items-center gap-1 rounded bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            title={approvedReady === 0 ? "No APPROVED subjects" : `Send email to ${approvedReady} subject(s)`}
+          >
+            <Send className="h-3 w-3" /> Send All Approved
+          </button>
+        </div>
+      </div>
+
+      {/* Subject table */}
+      {isLoading ? (
+        <div className="text-sm text-muted-foreground">Loading subjects…</div>
+      ) : filtered.length === 0 ? (
+        <div className="text-sm text-muted-foreground py-6 text-center border rounded-md">
+          {(subjects ?? []).length === 0
+            ? "No subjects extracted yet."
+            : `No subjects in "${filter}" state.`}
+        </div>
+      ) : (
+        <div className="border rounded-md overflow-hidden">
+          <table className="w-full text-xs">
+            <thead className="bg-muted/50">
+              <tr>
+                <th className="px-3 py-2 text-left font-medium">Name</th>
+                <th className="px-3 py-2 text-left font-medium">Email</th>
+                <th className="px-3 py-2 text-left font-medium">Status</th>
+                <th className="px-3 py-2 text-left font-medium">Source</th>
+                <th className="px-3 py-2 text-right font-medium">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.slice(0, 200).map((s) => {
+                const busy = busyIds.has(s.subject_id)
+                return (
+                  <tr key={s.subject_id} className="border-t hover:bg-muted/30">
+                    <td className="px-3 py-2 font-medium">{s.name}</td>
+                    <td className="px-3 py-2 text-muted-foreground">{s.email || "—"}</td>
+                    <td className="px-3 py-2">
+                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${STATUS_COLORS[s.review_status] ?? "bg-gray-100"}`}>
+                        {s.review_status}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2 text-muted-foreground truncate max-w-[180px]" title={s.source_document ?? ""}>
+                      {s.source_document ? s.source_document.slice(0, 24) : "—"}
+                    </td>
+                    <td className="px-3 py-2 text-right">
+                      <div className="flex items-center justify-end gap-1">
+                        <button
+                          onClick={() => setPreviewSubjectId(s.subject_id)}
+                          className="inline-flex items-center gap-1 rounded border px-2 py-0.5 text-[10px] hover:bg-muted"
+                          title="Preview email"
+                        >
+                          <Eye className="h-3 w-3" /> Preview
+                        </button>
+                        {s.review_status === "AI_PENDING" || s.review_status === "HUMAN_REVIEW" || s.review_status === "LEGAL_REVIEW" ? (
+                          <>
+                            <button
+                              disabled={busy}
+                              onClick={() => updateStatus(s.subject_id, "APPROVED")}
+                              className="inline-flex items-center gap-1 rounded bg-green-600 px-2 py-0.5 text-[10px] text-white hover:bg-green-700 disabled:opacity-50"
+                            >
+                              <CheckCircle className="h-3 w-3" /> Approve
+                            </button>
+                            <button
+                              disabled={busy}
+                              onClick={() => updateStatus(s.subject_id, "REJECTED")}
+                              className="inline-flex items-center gap-1 rounded border border-red-300 px-2 py-0.5 text-[10px] text-red-700 hover:bg-red-50 disabled:opacity-50"
+                            >
+                              Reject
+                            </button>
+                          </>
+                        ) : null}
+                        {s.review_status === "APPROVED" ? (
+                          <>
+                            <button
+                              disabled={busy || !s.email}
+                              onClick={() => sendEmail(s.subject_id)}
+                              className="inline-flex items-center gap-1 rounded bg-blue-600 px-2 py-0.5 text-[10px] text-white hover:bg-blue-700 disabled:opacity-50"
+                              title={s.email ? "Send notification email" : "No email on file — cannot send"}
+                            >
+                              {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
+                              Send
+                            </button>
+                            <button
+                              disabled={busy}
+                              onClick={() => updateStatus(s.subject_id, "REJECTED")}
+                              className="inline-flex items-center gap-1 rounded border border-red-300 px-2 py-0.5 text-[10px] text-red-700 hover:bg-red-50 disabled:opacity-50"
+                            >
+                              Reject
+                            </button>
+                          </>
+                        ) : null}
+                        {s.review_status === "REJECTED" ? (
+                          <button
+                            disabled={busy}
+                            onClick={() => updateStatus(s.subject_id, "APPROVED")}
+                            className="inline-flex items-center gap-1 rounded border px-2 py-0.5 text-[10px] hover:bg-muted disabled:opacity-50"
+                          >
+                            Restore
+                          </button>
+                        ) : null}
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+          {filtered.length > 200 && (
+            <p className="px-3 py-2 text-xs text-muted-foreground border-t">
+              Showing 200 of {filtered.length} subjects
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Preview modal */}
+      {previewSubjectId && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          onClick={() => setPreviewSubjectId(null)}
+        >
+          <div
+            className="bg-white rounded-lg shadow-xl max-w-3xl w-full max-h-[85vh] overflow-hidden flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between p-3 border-b">
+              <h3 className="text-sm font-semibold">Notification Preview</h3>
+              <button
+                onClick={() => setPreviewSubjectId(null)}
+                className="p-1 rounded hover:bg-muted"
+              >
+                <XIcon className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="p-4 overflow-y-auto">
+              <NotificationPreview subjectId={previewSubjectId} />
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+
+// ---------------------------------------------------------------------------
 // Exports tab
 // ---------------------------------------------------------------------------
 
@@ -4653,6 +4987,7 @@ export function ProjectDetail() {
       )}
       {activeTab === "intelligence" && <IntelligenceTab projectId={projectId} />}
       {activeTab === "subjects" && <SubjectsTab projectId={projectId} />}
+      {activeTab === "notification" && <NotificationTab projectId={projectId} />}
       {activeTab === "density" && <DensityTab projectId={projectId} />}
       {activeTab === "exports" && <ExportsTab projectId={projectId} />}
     </div>

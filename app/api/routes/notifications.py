@@ -252,3 +252,198 @@ def get_delivery_status(
         },
         "subjects": subject_list,
     }
+
+
+# ---------------------------------------------------------------------------
+# Status transitions + email send (Step 39 #2)
+# ---------------------------------------------------------------------------
+
+_VALID_STATUSES = {
+    "AI_PENDING",
+    "HUMAN_REVIEW",
+    "LEGAL_REVIEW",
+    "APPROVED",
+    "REJECTED",
+    "NOTIFIED",
+}
+
+
+class StatusUpdate(BaseModel):
+    review_status: str
+    reviewer_id: str | None = None
+
+
+@router.patch("/subjects/{subject_id}/status")
+def update_subject_status(
+    subject_id: UUID,
+    body: StatusUpdate,
+    db: Session = Depends(get_db),
+):
+    """Set ``review_status`` on a NotificationSubject.
+
+    Enforces the enumerated set of valid states. Used by the Notification
+    tab to approve / reject / restore a subject before sending.
+    """
+    status = body.review_status.upper()
+    if status not in _VALID_STATUSES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid review_status {status!r}. "
+                   f"Must be one of: {sorted(_VALID_STATUSES)}",
+        )
+
+    subj = db.query(NotificationSubject).filter(
+        NotificationSubject.subject_id == subject_id
+    ).one_or_none()
+    if subj is None:
+        raise HTTPException(status_code=404, detail=f"Subject {subject_id} not found")
+
+    subj.review_status = status
+    db.commit()
+
+    return {
+        "subject_id": str(subj.subject_id),
+        "review_status": subj.review_status,
+    }
+
+
+def _default_protocol() -> "object":
+    """Return a minimal Protocol for email rendering when project has none.
+
+    Notification-preview already assumes a "default" protocol_id; match it
+    so the same default template renders in both preview and send paths.
+    """
+    from app.protocols.protocol import Protocol
+    return Protocol(
+        protocol_id="default",
+        name="Breach Notification",
+        jurisdiction="unspecified",
+        triggering_entity_types=[],
+        notification_threshold=0,
+        notification_deadline_days=60,
+        required_notification_content=[],
+        regulatory_framework="generic",
+    )
+
+
+@router.post("/subjects/{subject_id}/send-email")
+def send_subject_email(
+    subject_id: UUID,
+    db: Session = Depends(get_db),
+):
+    """Send the notification email for a single subject.
+
+    Guarded: subject must be in APPROVED state. On SENT, flips to NOTIFIED.
+    Uses SMTP config from settings (mailpit in dev). Safe to call in dev —
+    mailpit catches messages, no external delivery.
+    """
+    from app.core.settings import get_settings
+    from app.notification.email_sender import EmailSender
+
+    subj = db.query(NotificationSubject).filter(
+        NotificationSubject.subject_id == subject_id
+    ).one_or_none()
+    if subj is None:
+        raise HTTPException(status_code=404, detail=f"Subject {subject_id} not found")
+
+    if subj.review_status != "APPROVED":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Subject is {subj.review_status!r} — only APPROVED subjects can be sent.",
+        )
+
+    if not subj.canonical_email:
+        raise HTTPException(
+            status_code=422,
+            detail="Subject has no canonical_email — cannot send.",
+        )
+
+    settings = get_settings()
+    sender = EmailSender(
+        smtp_host=settings.smtp_host,
+        smtp_port=settings.smtp_port,
+    )
+
+    receipt = sender.send_notification(
+        subject=subj,
+        protocol=_default_protocol(),
+        template_dir=_DEFAULT_TEMPLATE_DIR,
+    )
+
+    if receipt.status == "SENT":
+        subj.review_status = "NOTIFIED"
+        db.commit()
+
+    return {
+        "subject_id": str(subj.subject_id),
+        "status": receipt.status,
+        "review_status": subj.review_status,
+        "attempt_count": receipt.attempt_count,
+        "smtp_response": receipt.smtp_response,
+        "timestamp": receipt.timestamp.isoformat(),
+    }
+
+
+@router.post("/projects/{project_id}/send-batch")
+def send_project_batch(
+    project_id: UUID,
+    db: Session = Depends(get_db),
+):
+    """Send notification emails to every APPROVED subject in the project.
+
+    Each successful send flips the subject to NOTIFIED. Returns per-subject
+    receipts so the UI can show which failed and why. Respects the
+    EmailSender rate limit (100/min default).
+    """
+    from app.core.settings import get_settings
+    from app.notification.email_sender import EmailSender
+
+    subjects = (
+        db.query(NotificationSubject)
+        .filter(
+            NotificationSubject.project_id == project_id,
+            NotificationSubject.review_status == "APPROVED",
+        )
+        .all()
+    )
+
+    if not subjects:
+        return {"project_id": str(project_id), "total": 0, "sent": 0, "failed": 0,
+                "skipped": 0, "receipts": []}
+
+    settings = get_settings()
+    sender = EmailSender(
+        smtp_host=settings.smtp_host,
+        smtp_port=settings.smtp_port,
+    )
+    protocol = _default_protocol()
+
+    receipts = []
+    for subj in subjects:
+        r = sender.send_notification(
+            subject=subj,
+            protocol=protocol,
+            template_dir=_DEFAULT_TEMPLATE_DIR,
+        )
+        if r.status == "SENT":
+            subj.review_status = "NOTIFIED"
+        receipts.append({
+            "subject_id": r.subject_id,
+            "status": r.status,
+            "attempt_count": r.attempt_count,
+            "smtp_response": r.smtp_response,
+        })
+    db.commit()
+
+    sent = sum(1 for r in receipts if r["status"] == "SENT")
+    failed = sum(1 for r in receipts if r["status"] == "FAILED")
+    skipped = sum(1 for r in receipts if r["status"] == "SKIPPED")
+
+    return {
+        "project_id": str(project_id),
+        "total": len(receipts),
+        "sent": sent,
+        "failed": failed,
+        "skipped": skipped,
+        "receipts": receipts,
+    }
