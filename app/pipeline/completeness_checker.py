@@ -142,10 +142,16 @@ def check_completeness_and_recover(
         missing_names[:5],
     )
 
-    # Step 2: Vision-extract pages after onset to find missing people
+    # Step 2: Build a name→pages map (text-grep). Lets vision recovery
+    # target pages that actually contain the missing people, instead of
+    # sequentially scanning pages 0-28 and missing anyone in pages 30+.
+    name_pages_map = _build_name_pages_map(doc, roster)
+
+    # Step 3: Vision-extract targeted pages to find missing people.
     recovered = _vision_recover(
         doc=doc,
         missing_names=missing_names,
+        name_pages_map=name_pages_map,
         onset=onset,
         total_pages=total_pages,
         ollama_client=ollama_client,
@@ -327,9 +333,46 @@ def _get_name_roster(doc, ollama_client, doc_id: str, onset: int) -> list[str]:
     return roster
 
 
+def _build_name_pages_map(doc, roster: list[str]) -> dict[str, list[int]]:
+    """Return a dict mapping each roster name to the pages where it appears.
+
+    Uses exact substring matching (case-insensitive) on PyMuPDF-extracted
+    text. Names returned by the roster LLM may be formatted differently
+    from the text (e.g. "John Smith" vs "SMITH, J"), but for members
+    listed as rendered text this hits most of them.
+
+    Pages where text extraction fails (form-fields, scanned images) won't
+    surface here — those rely on the fallback sequential scan in
+    `_vision_recover`.
+    """
+    try:
+        import fitz
+        pdf = fitz.open(doc.source_path)
+    except Exception:
+        return {}
+
+    name_to_pages: dict[str, list[int]] = {name: [] for name in roster}
+    lower_names = [(name, name.lower()) for name in roster]
+
+    try:
+        for pg in range(pdf.page_count):
+            text = pdf[pg].get_text() or ""
+            pdf._forget_page(pg)
+            if not text.strip():
+                continue
+            text_lower = text.lower()
+            for name, name_lower in lower_names:
+                if name_lower in text_lower:
+                    name_to_pages[name].append(pg)
+    finally:
+        pdf.close()
+    return name_to_pages
+
+
 def _vision_recover(
     doc,
     missing_names: list[str],
+    name_pages_map: dict[str, list[int]],
     onset: int,
     total_pages: int,
     ollama_client,
@@ -339,11 +382,13 @@ def _vision_recover(
     scan_window: int = 40,
     scan_max_pages: int = 15,
 ) -> list:
-    """Vision-extract pages after onset to find missing people.
+    """Vision-extract pages to find gov IDs for the missing people.
 
-    scan_step=1 scans every page (GPU-class hardware). scan_step=2 samples every
-    other page (M4/CPU — avoids thermal throttle). scan_window bounds how far
-    past onset to look; scan_max_pages caps the LLM call budget.
+    Uses ``name_pages_map`` to target pages that actually contain missing
+    names (from PyMuPDF text search). When the map yields too few pages
+    — e.g. form-PDFs where text extraction is sparse — falls back to a
+    sequential scan controlled by ``scan_step`` / ``scan_window`` /
+    ``scan_max_pages``.
     """
     from app.rra.entity_resolver import PIIRecord
 
@@ -355,10 +400,31 @@ def _vision_recover(
 
     recovered: list[PIIRecord] = []
 
-    pages_to_try = list(
-        range(onset, min(total_pages, onset + scan_window), scan_step)
-    )
-    pages_to_try = pages_to_try[:scan_max_pages]
+    # Targeted pages: union of pages where any missing name appeared.
+    targeted: set[int] = set()
+    for name in missing_names:
+        for pg in name_pages_map.get(name, []):
+            if pg >= onset:
+                targeted.add(pg)
+
+    pages_to_try: list[int]
+    if targeted:
+        pages_to_try = sorted(targeted)[:scan_max_pages]
+        logger.info(
+            "Vision recovery: targeting %d pages containing missing names "
+            "(of %d candidate pages) in %s",
+            len(pages_to_try), len(targeted), doc.file_name,
+        )
+    else:
+        # Fallback — no text-layer hits. Use the legacy sequential scan.
+        pages_to_try = list(
+            range(onset, min(total_pages, onset + scan_window), scan_step)
+        )[:scan_max_pages]
+        logger.info(
+            "Vision recovery: no text-layer matches, falling back to "
+            "sequential scan of %d pages in %s",
+            len(pages_to_try), doc.file_name,
+        )
 
     if not pages_to_try:
         return []
