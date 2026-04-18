@@ -350,20 +350,14 @@ class SegregationEngine:
 
         # Late-onset PII guard: long docs (tax returns, pension reports, member
         # registers) often have 30-50 pages of cover/TOC/summary before PII
-        # starts. Sample the middle and 3/4-mark if earlier pages were clean.
-        if (
-            not result.pii_detected
-            and result.total_pages > 20
-            and result.confidence < 0.95
-        ):
+        # starts. Sample the middle and 3/4-mark if earlier pages were clean,
+        # regardless of page 1-2 confidence — high confidence that pages 1-2
+        # contain no PII tells us nothing about what's on page 50.
+        if not result.pii_detected and result.total_pages > 20:
             mid = result.total_pages // 2
             self._retry_page_vision(result, document_id, prompt, page=mid, label=f"Mid-page {mid + 1}")
 
-        if (
-            not result.pii_detected
-            and result.total_pages > 50
-            and result.confidence < 0.95
-        ):
+        if not result.pii_detected and result.total_pages > 50:
             three_quarter = (result.total_pages * 3) // 4
             self._retry_page_vision(result, document_id, prompt, page=three_quarter, label=f"3/4-page {three_quarter + 1}")
 
