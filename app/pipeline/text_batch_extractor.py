@@ -36,6 +36,7 @@ def extract_with_markers(
     records_per_page: int = 1,
     field_inventory: list[str] | None = None,
     country_hint: str | None = None,
+    field_labels: list[str] | None = None,
 ) -> list[PIIRecord]:
     """Strategy A: Extract using marker-filtered snippets.
 
@@ -66,10 +67,15 @@ def extract_with_markers(
     if not name_after and not name_before:
         return []
 
-    # Filter all pages to snippets
+    # Filter all pages to snippets. Pass segregation field labels so the
+    # filter widens around DOB / NI / address rows that sit below the name
+    # marker instead of capturing only 8 lines around the name.
     snippets: dict[int, str] = {}
     for pg, text in page_texts.items():
-        snippet = filter_page_by_markers(text, name_after, name_before)
+        snippet = filter_page_by_markers(
+            text, name_after, name_before,
+            additional_labels=field_labels,
+        )
         if snippet:
             snippets[pg] = snippet
 
@@ -107,7 +113,11 @@ def extract_with_markers(
             _extra_fields = ""
             _extra_json = ""
             _extra_rules = ""
-            if any(t in _fi for t in ("US_SSN", "GOV_ID", "IDENTIFICATION")):
+            # Include OTHER_ID and NATIONAL_ID so non-US docs (UK NI number,
+            # India PAN/Aadhaar, BR CPF, etc.) trigger the gov-ID branch.
+            # Segregation emits OTHER_ID for IDs that don't cleanly map to
+            # the US enum.
+            if any(t in _fi for t in ("US_SSN", "GOV_ID", "IDENTIFICATION", "OTHER_ID", "NATIONAL_ID", "TAX_ID")):
                 _extra_fields += ", SSN/Tax ID"
                 _extra_json += ', "ssn": "123-45-6789"'
                 _extra_rules += "- ssn: Social Security Number, Tax ID, National ID, or similar government identifier.\n"

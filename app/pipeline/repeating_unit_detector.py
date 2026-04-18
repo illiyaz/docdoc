@@ -346,10 +346,19 @@ def filter_page_by_markers(
     name_before_label: str,
     lines_before: int = 3,
     lines_after: int = 5,
+    additional_labels: list[str] | None = None,
 ) -> str | None:
-    """Filter a page's text to only the lines around the context markers.
+    """Filter a page's text to lines around the name marker plus any
+    supplementary labels (DOB, SSN, address, etc.).
 
-    Returns the snippet (5-10 lines) or None if marker not found on this page.
+    Without ``additional_labels`` this captures ~8 lines around the name
+    marker only — fine for label-dense docs where DOB sits next to the
+    name, but misses fields that live elsewhere on the page. Pass
+    ``additional_labels`` (typically segregation's ``fields[].name``) to
+    widen coverage while keeping the snippet short.
+
+    Returns the merged snippet (roughly 5-30 lines, depending on how many
+    labels matched) or ``None`` if the name marker isn't on this page.
     """
     lines = page_text.split("\n")
     search_label = name_after_label or name_before_label
@@ -357,26 +366,42 @@ def filter_page_by_markers(
     if not search_label or len(search_label) < 3:
         return None
 
-    # Find the marker line
-    marker_idx = None
-    search_lower = search_label.lower()[:20]
-    for i, line in enumerate(lines):
-        if search_lower in line.lower():
-            marker_idx = i
-            break
+    lower_lines = [ln.lower() for ln in lines]
 
+    # Locate the primary name marker — bail early if missing.
+    name_lower = search_label.lower()[:20]
+    marker_idx = next(
+        (i for i, ln in enumerate(lower_lines) if name_lower in ln),
+        None,
+    )
     if marker_idx is None:
         return None
 
-    # Extract snippet around the marker
+    # Build a set of line indices to include. Start with the name window.
+    keep: set[int] = set()
     if name_after_label:
-        # Name appears AFTER this label — grab lines before and after marker
-        start = max(0, marker_idx - lines_before)
-        end = min(len(lines), marker_idx + lines_after)
+        keep.update(range(max(0, marker_idx - lines_before),
+                          min(len(lines), marker_idx + lines_after + 1)))
     else:
-        # Name appears BEFORE this label — grab preceding lines
-        start = max(0, marker_idx - lines_after)
-        end = min(len(lines), marker_idx + lines_before)
+        keep.update(range(max(0, marker_idx - lines_after),
+                          min(len(lines), marker_idx + lines_before + 1)))
 
-    snippet = "\n".join(l.strip() for l in lines[start:end] if l.strip())
+    # Widen around each additional label that's actually present.
+    for label in additional_labels or []:
+        if not label or len(label) < 3:
+            continue
+        lbl_lower = label.lower()[:30]
+        for i, ln in enumerate(lower_lines):
+            if lbl_lower in ln:
+                # Grab a few lines after the label (values usually follow)
+                # and one line before (in case label+value are swapped).
+                keep.update(range(max(0, i - 1),
+                                  min(len(lines), i + lines_after + 1)))
+
+    if not keep:
+        return None
+
+    snippet = "\n".join(
+        lines[i].strip() for i in sorted(keep) if lines[i].strip()
+    )
     return snippet if len(snippet) > 10 else None
