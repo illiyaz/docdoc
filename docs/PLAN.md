@@ -1128,40 +1128,36 @@ When adaptive onset identifies PII starting at page N (e.g., page 76 for AWIR-99
 | 3 | `government_id_type` hard-coded to `US_SSN` even for UK NI numbers, IN_PAN/Aadhaar, BR_CPF, etc. | High (geo-blocker) | **FIXED** (f52a448) — new `app/pii/gov_id_classifier.py` with 40+ patterns across 35 countries; segregation emits `country_hint`; deduplicator uses classifier first |
 | 4 | Segregation classifies AWIR-482 as `pii=False` (conf 0.95) because pages 1-2 are cover/TOC. Same class as AWIR-993 late-onset miss. | High | **FIXED** (5385d97, 3088ad5) — mid-page + 3/4-page sampling, confidence gate removed |
 
-#### Follow-up to fix #4 — drop regex gate in late-onset segregation + collapse two code paths
+#### Quality fixes landed after run 2 (2026-04-18 evening)
 
-**Discovery during benchmark rerun:** `_check_late_onset_pii` in
-`segregation.py` already samples at 25/50/75% for docs ≥50 pages.
-The real bug is its **regex gate** — it only sends a page's text to
-the LLM if the mid-page text matches `\b\d{3}-?\d{2}-?\d{4}\b`
-(US-SSN format) OR contains literal labels like "Name:/Member:/
-Employee:/Partner:/Patient:/Beneficiary:". That gate silently fails for:
+All fixes validated in run 3 benchmark (see "Benchmark progression" below).
 
-- AWIR-482 (tax-return K-1s): SSNs sit in form fields that PyMuPDF
-  doesn't extract as text, so the 25/50/75% pages look "empty" to the
-  regex and no LLM call is made → `pii=False` persists.
-- Non-US documents: SSN regex misses UK NI / IN PAN / BR CPF formats.
-- Docs that use non-labeled name headers (tables with just "First Name"
-  row or simply a column of names without a `Name:` prefix).
+| # | Commit | Fix |
+|---|---|---|
+| 5 | e302a01 | `country_hint` plumbed from segregation → `PIIRecord.country` → `gov_id_classifier`. Fixes 2/5 UK subjects that got labeled `US_SSN` in run 2 because classifier defaulted `country="US"`. |
+| 6 | 1fc16b9 | Dropped regex gate in `_check_late_onset_pii`. Now sends mid-page text to LLM unconditionally for any page with ≥30 chars; falls back to vision LLM on pages with <30 chars (form-PDFs). Consolidated with vision-path mid-page retry I had added earlier. |
+| 7 | 25019fb | Roster v2: full-doc batched scanning (~5-9 LLM calls across all text-bearing pages vs 1 call on 25 stratified samples). Target CMG-class pension member coverage. |
+| 8 | 5166546 | Vision recovery now targets pages containing missing roster names (via PyMuPDF text-grep) instead of sequential-from-onset scan. |
+| 9 | 0136e67 | Strategy A marker filter widened to capture windows around DOB / NI / address labels (from `segregation.fields[].name`), not only the name marker. Also: OTHER_ID / NATIONAL_ID / TAX_ID recognized as gov-ID-equivalent in Strategy A prompt. |
+| 10 | 58e75d1 | `names_match` normalizes inputs internally. Fixes the "BROWN, DOROTHY J" vs "DOROTHY J BROWN" anagram-merge bug (JW 0.69 pre-normalize, 1.0 post). |
 
-My mid-page/3/4-page addition (5385d97, 3088ad5) only touches
-`_classify_vision`, which is redundant with `_check_late_onset_pii` for
-text-path docs that have extractable text on pages 1-2 (AWIR-482 uses
-the text path, so my fix doesn't run on it).
+#### Benchmark progression (AWIR-482 + CMG_Inc_0001352703)
 
-**Consolidated fix:**
-1. Collapse `_retry_page_vision` (my addition) and `_check_late_onset_pii`
-   (existing) into one stratified-sample path that runs regardless of
-   whether segregation took the text or vision route.
-2. Drop the regex gate — send each sampled page's text directly to the
-   LLM (3 extra calls per long doc, worth it).
-3. **Vision fallback when text extraction yields <100 chars on the
-   sampled page** — this is the key fix for form-PDFs where PyMuPDF
-   misses form-field values.
-4. Same treatment for roster builder's 15 body samples (make stratified,
-   configurable N, geo-neutral cues — not just US SSN + hardcoded labels).
+| Run | Subjects | Gov ID label correct | Address | DOB | Duration |
+|---|---|---|---|---|---|
+| 1 (2026-04-17) | 5 | 0% (all `US_SSN`) | 100% | 0% | 2h 32min |
+| 2 (2026-04-18 am) | 5 | 60% (3/5 `UK_NINO`, 2/5 wrong) | 100% | 0% | 49min |
+| **3 (2026-04-18 pm)** | **48** (19 AWIR + 29 CMG) | **100%** | **100%** | **90%** (43/48) | **57min** |
 
-To schedule after current benchmark run completes.
+Run 3 details:
+- AWIR-482 flipped from `pii=false` (runs 1+2) to `pii=true` via `text_late_onset` classification.
+- CMG Strategy A garbage rate dropped from 46.9% → 12.1% (widened marker snippets caused LLM to extract fewer name-only placeholder records).
+- CMG vision recovery not triggered — Strategy A alone hit 88% completeness with the widened filter.
+- Remaining 5 AWIR subjects missing DOB (fix 58e75d1 should land this in next run).
+
+#### Still pending follow-ups
+
+- Stratified N-sample redesign of roster + segregation sampling (task #8, documented 2026-04-18). Current hardcoded 10/5/15-sample thresholds work for 100pg benchmarks but bias against skewed distributions. Not urgent given run-3 recall.
 
 ---
 
