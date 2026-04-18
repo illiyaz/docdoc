@@ -4341,6 +4341,8 @@ function NotificationTab({ projectId }: { projectId: string }) {
   const [previewSubjectId, setPreviewSubjectId] = useState<string | null>(null)
   const [busyIds, setBusyIds] = useState<Set<string>>(new Set())
   const [batchStatus, setBatchStatus] = useState<string | null>(null)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [bulkBusy, setBulkBusy] = useState(false)
 
   const { data: subjects, isLoading } = useQuery({
     queryKey: ["project-subjects", projectId],
@@ -4371,6 +4373,102 @@ function NotificationTab({ projectId }: { projectId: string }) {
     }
     return s.review_status === filter
   })
+
+  // Drop selections that aren't in the current filter view so the bulk
+  // bar doesn't silently operate on rows you can't see.
+  useEffect(() => {
+    setSelectedIds((prev) => {
+      if (prev.size === 0) return prev
+      const visible = new Set(filtered.map((s) => s.subject_id))
+      const next = new Set<string>()
+      for (const id of prev) if (visible.has(id)) next.add(id)
+      return next.size === prev.size ? prev : next
+    })
+  }, [filter, subjects])  // eslint-disable-line react-hooks/exhaustive-deps
+
+  const selectedSubjects = filtered.filter((s) => selectedIds.has(s.subject_id))
+  const allVisibleSelected = filtered.length > 0 && selectedSubjects.length === filtered.length
+  const someSelected = selectedIds.size > 0
+
+  function toggleOne(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id); else next.add(id)
+      return next
+    })
+  }
+  function toggleAllVisible() {
+    if (allVisibleSelected) {
+      setSelectedIds(new Set())
+    } else {
+      setSelectedIds(new Set(filtered.map((s) => s.subject_id)))
+    }
+  }
+
+  async function bulkUpdateStatus(status: "APPROVED" | "REJECTED") {
+    if (selectedIds.size === 0) return
+    const confirmed = window.confirm(
+      `${status === "APPROVED" ? "Approve" : "Reject"} ${selectedIds.size} selected subject(s)?`
+    )
+    if (!confirmed) return
+    setBulkBusy(true)
+    try {
+      const res = await fetch(`${BASE}/notifications/subjects/batch-update`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          subject_ids: Array.from(selectedIds),
+          review_status: status,
+          reviewer_id: "auditor",
+        }),
+      })
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        alert(`Bulk update failed: ${body.detail ?? res.status}`)
+        return
+      }
+      setBatchStatus(`${body.updated} subject(s) → ${status}`)
+      setSelectedIds(new Set())
+      queryClient.invalidateQueries({ queryKey: ["project-subjects", projectId] })
+      queryClient.invalidateQueries({ queryKey: ["delivery-status", projectId] })
+    } finally {
+      setBulkBusy(false)
+    }
+  }
+
+  async function bulkSendSelected() {
+    if (selectedIds.size === 0) return
+    const approvedInSelection = selectedSubjects.filter((s) => s.review_status === "APPROVED").length
+    if (approvedInSelection === 0) {
+      alert("None of the selected subjects are APPROVED. Approve first.")
+      return
+    }
+    const confirmed = window.confirm(
+      `Send notification email to ${approvedInSelection} APPROVED subject(s) from your selection?\n\n` +
+      `(Subjects not in APPROVED state will be skipped.)`
+    )
+    if (!confirmed) return
+    setBulkBusy(true)
+    setBatchStatus("Sending…")
+    try {
+      const res = await fetch(`${BASE}/notifications/subjects/batch-send`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ subject_ids: Array.from(selectedIds) }),
+      })
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setBatchStatus(`Failed: ${body.detail ?? res.status}`)
+        return
+      }
+      setBatchStatus(`Sent ${body.sent}/${body.total} (${body.failed} failed, ${body.skipped} skipped)`)
+      setSelectedIds(new Set())
+      queryClient.invalidateQueries({ queryKey: ["project-subjects", projectId] })
+      queryClient.invalidateQueries({ queryKey: ["delivery-status", projectId] })
+    } finally {
+      setBulkBusy(false)
+    }
+  }
 
   async function withBusy(id: string, fn: () => Promise<void>) {
     setBusyIds((prev) => new Set(prev).add(id))
@@ -4511,6 +4609,51 @@ function NotificationTab({ projectId }: { projectId: string }) {
         </div>
       </div>
 
+      {/* Bulk action bar — only visible when rows are selected */}
+      {someSelected && (
+        <div className="flex items-center justify-between rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs">
+          <span>
+            <strong>{selectedIds.size}</strong> selected
+            {selectedSubjects.filter((s) => s.review_status === "APPROVED").length > 0 && (
+              <> · {selectedSubjects.filter((s) => s.review_status === "APPROVED").length} already APPROVED</>
+            )}
+          </span>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => bulkUpdateStatus("APPROVED")}
+              disabled={bulkBusy}
+              className="inline-flex items-center gap-1 rounded bg-green-600 px-2 py-1 text-[11px] text-white hover:bg-green-700 disabled:opacity-50"
+            >
+              <CheckCircle className="h-3 w-3" /> Approve Selected
+            </button>
+            <button
+              onClick={() => bulkUpdateStatus("REJECTED")}
+              disabled={bulkBusy}
+              className="inline-flex items-center gap-1 rounded border border-red-300 bg-white px-2 py-1 text-[11px] text-red-700 hover:bg-red-50 disabled:opacity-50"
+            >
+              Reject Selected
+            </button>
+            <button
+              onClick={bulkSendSelected}
+              disabled={bulkBusy}
+              className="inline-flex items-center gap-1 rounded bg-blue-600 px-2 py-1 text-[11px] text-white hover:bg-blue-700 disabled:opacity-50"
+              title="Send to APPROVED subjects only; others in the selection will be skipped"
+            >
+              {bulkBusy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
+              Send Selected
+            </button>
+            <button
+              onClick={() => setSelectedIds(new Set())}
+              disabled={bulkBusy}
+              className="inline-flex items-center rounded px-2 py-1 text-[11px] text-muted-foreground hover:bg-muted"
+              title="Clear selection"
+            >
+              Clear
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Subject table */}
       {isLoading ? (
         <div className="text-sm text-muted-foreground">Loading subjects…</div>
@@ -4525,6 +4668,15 @@ function NotificationTab({ projectId }: { projectId: string }) {
           <table className="w-full text-xs">
             <thead className="bg-muted/50">
               <tr>
+                <th className="px-3 py-2 text-left font-medium w-8">
+                  <input
+                    type="checkbox"
+                    checked={allVisibleSelected}
+                    onChange={toggleAllVisible}
+                    aria-label="Select all visible subjects"
+                    className="cursor-pointer"
+                  />
+                </th>
                 <th className="px-3 py-2 text-left font-medium">Name</th>
                 <th className="px-3 py-2 text-left font-medium">Email</th>
                 <th className="px-3 py-2 text-left font-medium">Status</th>
@@ -4535,8 +4687,18 @@ function NotificationTab({ projectId }: { projectId: string }) {
             <tbody>
               {filtered.slice(0, 200).map((s) => {
                 const busy = busyIds.has(s.subject_id)
+                const selected = selectedIds.has(s.subject_id)
                 return (
-                  <tr key={s.subject_id} className="border-t hover:bg-muted/30">
+                  <tr key={s.subject_id} className={`border-t hover:bg-muted/30 ${selected ? "bg-blue-50/50" : ""}`}>
+                    <td className="px-3 py-2">
+                      <input
+                        type="checkbox"
+                        checked={selected}
+                        onChange={() => toggleOne(s.subject_id)}
+                        aria-label={`Select ${s.name}`}
+                        className="cursor-pointer"
+                      />
+                    </td>
                     <td className="px-3 py-2 font-medium">{s.name}</td>
                     <td className="px-3 py-2 text-muted-foreground">{s.email || "—"}</td>
                     <td className="px-3 py-2">

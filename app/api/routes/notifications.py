@@ -384,6 +384,120 @@ def send_subject_email(
     }
 
 
+class BatchStatusUpdate(BaseModel):
+    subject_ids: list[UUID]
+    review_status: str
+    reviewer_id: str | None = None
+
+
+@router.post("/subjects/batch-update")
+def batch_update_status(
+    body: BatchStatusUpdate,
+    db: Session = Depends(get_db),
+):
+    """Apply the same ``review_status`` to a list of subjects.
+
+    Used by the Notification tab's bulk-action bar to approve or reject a
+    selected set of subjects in one call. Missing IDs are reported in
+    ``not_found``; the remainder are updated and persisted together.
+    """
+    status = body.review_status.upper()
+    if status not in _VALID_STATUSES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid review_status {status!r}. "
+                   f"Must be one of: {sorted(_VALID_STATUSES)}",
+        )
+    if not body.subject_ids:
+        return {"updated": 0, "not_found": []}
+
+    subjects = db.query(NotificationSubject).filter(
+        NotificationSubject.subject_id.in_(body.subject_ids)
+    ).all()
+    found_ids = {str(s.subject_id) for s in subjects}
+
+    for s in subjects:
+        s.review_status = status
+    db.commit()
+
+    not_found = [str(sid) for sid in body.subject_ids if str(sid) not in found_ids]
+    return {
+        "updated": len(subjects),
+        "review_status": status,
+        "not_found": not_found,
+    }
+
+
+class BatchSendBody(BaseModel):
+    subject_ids: list[UUID]
+
+
+@router.post("/subjects/batch-send")
+def batch_send_selected(
+    body: BatchSendBody,
+    db: Session = Depends(get_db),
+):
+    """Send notification emails to a user-selected list of subjects.
+
+    Only subjects in APPROVED state are actually sent — others are
+    reported as SKIPPED so the UI can surface why each row didn't flip
+    to NOTIFIED. Respects the EmailSender rate limit.
+    """
+    from app.core.settings import get_settings
+    from app.notification.email_sender import EmailSender
+
+    if not body.subject_ids:
+        return {"total": 0, "sent": 0, "failed": 0, "skipped": 0, "receipts": []}
+
+    subjects = db.query(NotificationSubject).filter(
+        NotificationSubject.subject_id.in_(body.subject_ids)
+    ).all()
+
+    settings = get_settings()
+    sender = EmailSender(
+        smtp_host=settings.smtp_host,
+        smtp_port=settings.smtp_port,
+    )
+    protocol = _default_protocol()
+
+    receipts = []
+    for subj in subjects:
+        if subj.review_status != "APPROVED":
+            receipts.append({
+                "subject_id": str(subj.subject_id),
+                "status": "SKIPPED",
+                "smtp_response": f"not APPROVED (state={subj.review_status})",
+                "attempt_count": 0,
+            })
+            continue
+        r = sender.send_notification(
+            subject=subj,
+            protocol=protocol,
+            template_dir=_DEFAULT_TEMPLATE_DIR,
+        )
+        if r.status == "SENT":
+            subj.review_status = "NOTIFIED"
+        receipts.append({
+            "subject_id": r.subject_id,
+            "status": r.status,
+            "attempt_count": r.attempt_count,
+            "smtp_response": r.smtp_response,
+        })
+    db.commit()
+
+    sent = sum(1 for r in receipts if r["status"] == "SENT")
+    failed = sum(1 for r in receipts if r["status"] == "FAILED")
+    skipped = sum(1 for r in receipts if r["status"] == "SKIPPED")
+
+    return {
+        "total": len(receipts),
+        "sent": sent,
+        "failed": failed,
+        "skipped": skipped,
+        "receipts": receipts,
+    }
+
+
 @router.post("/projects/{project_id}/send-batch")
 def send_project_batch(
     project_id: UUID,
