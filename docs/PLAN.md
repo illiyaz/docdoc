@@ -1155,9 +1155,15 @@ Run 3 details:
 - CMG vision recovery not triggered — Strategy A alone hit 88% completeness with the widened filter.
 - Remaining 5 AWIR subjects missing DOB (fix 58e75d1 should land this in next run).
 
-#### Still pending follow-ups
+#### Still pending follow-ups (as of 2026-04-19)
 
-- Stratified N-sample redesign of roster + segregation sampling (task #8, documented 2026-04-18). Current hardcoded 10/5/15-sample thresholds work for 100pg benchmarks but bias against skewed distributions. Not urgent given run-3 recall.
+| Priority | Item | Why | Size |
+|---|---|---|---|
+| **High** | **Durability — per-doc segregation commits** | Segregation currently batches commits. On 2026-04-19 a uvicorn `--reload` mid-run killed the daemon thread and silently dropped ~6 hours of segregation work on 28 docs (zombie job, DB said `running`, no progress committed). Fix: commit each doc's `metadata_json->'segregation'` as soon as segregation completes for that doc. **Critical: do NOT commit this fix while a long job is running.** | Small |
+| Medium | Post-QA redirect back to Notification tab | QA "Approve for Notification" currently routes to `?tab=subjects` because the notification tab was broken. Step 39 #2 rebuilt it, so flip the redirect back. | Trivial |
+| Medium | Per-project protocol for notification emails | `notifications.py:_default_protocol()` hardcodes a generic protocol; should load the project's selected ProtocolConfig and pass it to EmailSender so the right template renders. | Small |
+| Medium | Step 39 #5 remaining — re-run failed docs + job comparison view | Purge button shipped (1cd0658). Still needed: (a) re-run only failed docs of a completed job without redoing successes, (b) side-by-side subject/coverage comparison of two jobs. | Medium |
+| Low | Stratified N-sample redesign of roster + segregation sampling | Hardcoded 10/5/15-sample thresholds work for 100pg benchmarks but bias against skewed distributions. Not urgent given run-3 recall. | Medium |
 
 ---
 
