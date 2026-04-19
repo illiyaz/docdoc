@@ -333,7 +333,7 @@ def update_subject_status(
 
 
 def _default_protocol() -> "object":
-    """Return a minimal Protocol for email rendering when project has none.
+    """Fallback Protocol when the project has no active ProtocolConfig.
 
     Notification-preview already assumes a "default" protocol_id; match it
     so the same default template renders in both preview and send paths.
@@ -349,6 +349,58 @@ def _default_protocol() -> "object":
         required_notification_content=[],
         regulatory_framework="generic",
     )
+
+
+def _protocol_for_project(db: "Session", project_id: "UUID") -> "object":
+    """Return the Protocol bound to *project_id*'s active ProtocolConfig.
+
+    Lookup order:
+      1. ProtocolConfig where project_id matches AND status == 'active'
+      2. Any ProtocolConfig for the project (first one found)
+      3. Fallback to `_default_protocol()` with generic template
+
+    When a ProtocolConfig is found, its ``base_protocol_id`` is used to
+    resolve the Protocol from the global registry (loaded from
+    config/protocols/*.yaml). The ``config_json`` overlay is merged into
+    the base Protocol's attributes so project-level tweaks stick.
+    """
+    from app.db.models import ProtocolConfig
+
+    pc = (
+        db.query(ProtocolConfig)
+        .filter(ProtocolConfig.project_id == project_id)
+        .order_by(ProtocolConfig.status.desc(), ProtocolConfig.updated_at.desc())
+        .first()
+    )
+    if pc is None or not pc.base_protocol_id:
+        return _default_protocol()
+
+    # Resolve the base Protocol from the registry (YAML-defined).
+    try:
+        from app.protocols.registry import ProtocolRegistry
+        registry = ProtocolRegistry.default()
+        base = registry.get(pc.base_protocol_id)
+    except (KeyError, Exception) as e:
+        logger.warning(
+            "Project %s references unknown base_protocol_id %r: %s — using default",
+            project_id, pc.base_protocol_id, e,
+        )
+        return _default_protocol()
+
+    # Merge ProtocolConfig.config_json overrides on top of the base.
+    # Only a few fields are meaningfully configurable per project; ignore
+    # unknown keys rather than erroring.
+    overrides = pc.config_json or {}
+    import dataclasses
+    if isinstance(overrides, dict) and dataclasses.is_dataclass(base):
+        merged = dataclasses.replace(
+            base,
+            **{k: v for k, v in overrides.items()
+               if k in {"name", "jurisdiction", "notification_threshold",
+                        "notification_deadline_days", "regulatory_framework"}},
+        )
+        return merged
+    return base
 
 
 @router.post("/subjects/{subject_id}/send-email")
@@ -389,9 +441,10 @@ def send_subject_email(
         smtp_port=settings.smtp_port,
     )
 
+    protocol = _protocol_for_project(db, subj.project_id) if subj.project_id else _default_protocol()
     receipt = sender.send_notification(
         subject=subj,
-        protocol=_default_protocol(),
+        protocol=protocol,
         template_dir=_DEFAULT_TEMPLATE_DIR,
     )
 
@@ -483,7 +536,13 @@ def batch_send_selected(
         smtp_host=settings.smtp_host,
         smtp_port=settings.smtp_port,
     )
-    protocol = _default_protocol()
+    # Prefer the project's configured protocol; batch endpoint has
+    # project_id directly, single-select endpoint resolves from subject.
+    first_project_id = subjects[0].project_id if subjects else None
+    protocol = (
+        _protocol_for_project(db, first_project_id) if first_project_id
+        else _default_protocol()
+    )
 
     receipts = []
     for subj in subjects:
@@ -555,7 +614,13 @@ def send_project_batch(
         smtp_host=settings.smtp_host,
         smtp_port=settings.smtp_port,
     )
-    protocol = _default_protocol()
+    # Prefer the project's configured protocol; batch endpoint has
+    # project_id directly, single-select endpoint resolves from subject.
+    first_project_id = subjects[0].project_id if subjects else None
+    protocol = (
+        _protocol_for_project(db, first_project_id) if first_project_id
+        else _default_protocol()
+    )
 
     receipts = []
     for subj in subjects:
