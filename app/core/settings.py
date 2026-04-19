@@ -44,6 +44,13 @@ class Settings(BaseSettings):
     completeness_vision_step: int = Field(default=2, alias="COMPLETENESS_VISION_STEP")
     completeness_vision_window: int = Field(default=40, alias="COMPLETENESS_VISION_WINDOW")
     completeness_vision_max_pages: int = Field(default=15, alias="COMPLETENESS_VISION_MAX_PAGES")
+    # Task #25 / #26 guardrails (2026-04-19): escape hatch + confidence gate
+    # so operators can disable the trivial-doc fast-paths if they suspect
+    # quality regressions.
+    disable_trivial_skips: bool = Field(default=False, alias="DISABLE_TRIVIAL_SKIPS")
+    trivial_skip_min_confidence: float = Field(
+        default=0.9, alias="TRIVIAL_SKIP_MIN_CONFIDENCE"
+    )
 
 
 @lru_cache(maxsize=1)

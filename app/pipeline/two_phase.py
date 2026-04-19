@@ -998,12 +998,15 @@ def analyze_generator(
                     # Speed optimization (task #25): skip the expensive
                     # understand_document LLM call on trivial docs where
                     # segregation already gave us a full field inventory.
-                    # For a 1-2 page passport copy / DL / pay stub / receipt,
-                    # running 32B for schema extraction is pure overhead —
-                    # the schema we'd get back is just the fields segregation
-                    # already identified. Heuristic schema suffices.
+                    # Guards to prevent quality loss from misclassified docs:
+                    #   - Escape hatch (DISABLE_TRIVIAL_SKIPS)
+                    #   - Segregation confidence >= TRIVIAL_SKIP_MIN_CONFIDENCE
+                    #   - Field inventory count consistent with single-subject
+                    #     (2-7 fields; 0 is no-segregation, 8+ is multi-subject)
+                    #   - Exact doc_type string match against curated whitelist
                     _seg = (doc.metadata_json or {}).get("segregation", {})
                     _seg_fields = _seg.get("fields", []) or []
+                    _seg_conf = float(_seg.get("confidence") or 0.0)
                     _trivial_doc_types = {
                         "identification_document", "insurance_card",
                         "passport_data_page", "drivers_license",
@@ -1014,18 +1017,29 @@ def analyze_generator(
                     }
                     _seg_doc_type = (_seg.get("document_type") or "").lower()
                     _is_trivial = (
-                        total_pages > 0 and total_pages <= 2
-                        and len(_seg_fields) >= 2
-                        and (_seg_doc_type in _trivial_doc_types
-                             or any(t == _seg_doc_type.lower() for t in _trivial_doc_types))
+                        not settings.disable_trivial_skips
+                        and total_pages > 0 and total_pages <= 2
+                        and 2 <= len(_seg_fields) <= 7
+                        and _seg_conf >= settings.trivial_skip_min_confidence
+                        and _seg_doc_type in _trivial_doc_types
                     )
                     if _is_trivial:
                         logger.info(
                             "Skipping understand_document for trivial doc %s "
-                            "(type=%s, pages=%d, seg_fields=%d) — using heuristic schema",
-                            doc.file_name, _seg_doc_type, total_pages, len(_seg_fields),
+                            "(type=%s, pages=%d, seg_fields=%d, conf=%.2f) — heuristic schema",
+                            doc.file_name, _seg_doc_type, total_pages,
+                            len(_seg_fields), _seg_conf,
                         )
                         doc_schemas[doc.id] = None  # heuristic path
+                        # Mark this doc so post-extraction anomaly logging
+                        # can flag it if downstream yields zero subjects.
+                        if doc.metadata_json is None:
+                            doc.metadata_json = {}
+                        doc.metadata_json["_trivial_skip"] = {
+                            "understand_skipped": True,
+                            "reason": "task_25_fast_path",
+                        }
+                        flag_modified(doc, "metadata_json")
                         continue
 
                     # Pass ALL blocks — _build_multi_page_text handles page

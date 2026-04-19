@@ -98,11 +98,14 @@ def check_completeness_and_recover(
     expected = max(3, pages_after_onset // 3)
 
     # Speed optimization (task #26): skip the completeness vision trigger
-    # for documents that are inherently single-subject. A 1-page passport
-    # copy, DL, SSN card, pay stub, money order, or personal check has
-    # exactly one person by definition; the "expected 3" threshold
-    # hallucinates a gap that doesn't exist. Vision scan runs, finds
-    # nothing, burns 1-2 min of 90B time per doc.
+    # for documents that are inherently single-subject.
+    # Guards to prevent quality loss from mis-classified docs:
+    #   - Escape hatch (DISABLE_TRIVIAL_SKIPS)
+    #   - Segregation confidence >= TRIVIAL_SKIP_MIN_CONFIDENCE
+    #   - Field inventory count consistent with single-subject (2-7 fields)
+    #   - Already extracted at least 1 subject (so if initial extraction
+    #     completely failed, vision recovery still runs as a safety net)
+    #   - Exact doc_type string match against curated whitelist
     _single_subject_doc_types = {
         "identification_document", "insurance_card", "passport_data_page",
         "drivers_license", "ssn_card", "pay_stub", "money_order",
@@ -112,16 +115,33 @@ def check_completeness_and_recover(
         "1099_misc", "irs_notice",
     }
     _doc_type_lower = (doc_type or "").lower()
+    _seg_conf = float(seg.get("confidence") or 0.0)
+    _seg_fields_count = len(seg.get("fields", []) or [])
     if (
-        total_pages <= 2
+        not settings.disable_trivial_skips
+        and total_pages <= 2
         and len(unique_names_only) >= 1
-        and any(t == _doc_type_lower for t in _single_subject_doc_types)
+        and 2 <= _seg_fields_count <= 7
+        and _seg_conf >= settings.trivial_skip_min_confidence
+        and _doc_type_lower in _single_subject_doc_types
     ):
         logger.info(
             "Completeness: skipping vision trigger for single-subject doc %s "
-            "(type=%s, pages=%d, names=%d)",
+            "(type=%s, pages=%d, names=%d, conf=%.2f, seg_fields=%d)",
             doc_name, doc_type, total_pages, len(unique_names_only),
+            _seg_conf, _seg_fields_count,
         )
+        # Tag for post-extraction anomaly sweep: flag the doc if final
+        # subject count is suspiciously low so the auditor sees it.
+        try:
+            meta = dict(doc.metadata_json or {})
+            marker = meta.get("_trivial_skip", {}) or {}
+            marker["completeness_skipped"] = True
+            marker["reason"] = "task_26_single_subject"
+            meta["_trivial_skip"] = marker
+            doc.metadata_json = meta
+        except Exception:
+            pass  # metadata tagging is best-effort
         return records
 
     completeness = found / max(expected, 1)
