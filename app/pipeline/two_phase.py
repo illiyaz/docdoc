@@ -974,6 +974,39 @@ def analyze_generator(
                     if total_pages == 0:
                         total_pages = len(set(b.page_or_sheet for b in blocks)) if blocks else 0
 
+                    # Speed optimization (task #25): skip the expensive
+                    # understand_document LLM call on trivial docs where
+                    # segregation already gave us a full field inventory.
+                    # For a 1-2 page passport copy / DL / pay stub / receipt,
+                    # running 32B for schema extraction is pure overhead —
+                    # the schema we'd get back is just the fields segregation
+                    # already identified. Heuristic schema suffices.
+                    _seg = (doc.metadata_json or {}).get("segregation", {})
+                    _seg_fields = _seg.get("fields", []) or []
+                    _trivial_doc_types = {
+                        "identification_document", "insurance_card",
+                        "passport_data_page", "drivers_license",
+                        "ssn_card", "pay_stub", "money_order",
+                        "personal_check", "wire_transfer_confirmation",
+                        "receipt", "credit_card_statement",
+                        "bank_statement", "financial",
+                    }
+                    _seg_doc_type = (_seg.get("document_type") or "").lower()
+                    _is_trivial = (
+                        total_pages > 0 and total_pages <= 2
+                        and len(_seg_fields) >= 2
+                        and (_seg_doc_type in _trivial_doc_types
+                             or any(t == _seg_doc_type.lower() for t in _trivial_doc_types))
+                    )
+                    if _is_trivial:
+                        logger.info(
+                            "Skipping understand_document for trivial doc %s "
+                            "(type=%s, pages=%d, seg_fields=%d) — using heuristic schema",
+                            doc.file_name, _seg_doc_type, total_pages, len(_seg_fields),
+                        )
+                        doc_schemas[doc.id] = None  # heuristic path
+                        continue
+
                     # Pass ALL blocks — _build_multi_page_text handles page
                     # slicing (onset + pages_to_read) and char budget internally.
                     # Previously filter_sample_blocks capped at onset+2 pages,
