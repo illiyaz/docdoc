@@ -464,7 +464,7 @@ export function ExtractionQA() {
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["qa-summary", projectId, jobId] })
       if (data?.status === "approved") {
-        setTimeout(() => navigate(`/projects/${projectId}?tab=subjects`), 1500)
+        setTimeout(() => navigate(`/projects/${projectId}?tab=notification`), 1500)
       }
     },
   })
