@@ -591,6 +591,121 @@ def _build_batch_prompt(
     )
 
 
+# ---------------------------------------------------------------------------
+# Placeholder detection — guards against LLM returning example/prompt values
+# as real extracted data. Expanded after 2026-04-19 taxonomy run surfaced
+# six concrete leaks: "Full Name", "the exact ID number", "full mailing
+# address", "NOT FOUND", "[REDACTED]", and classic fake SSNs like
+# 123-45-6789 / 987-65-4321.
+# ---------------------------------------------------------------------------
+
+_GENERIC_PLACEHOLDER_TOKENS: frozenset[str] = frozenset({
+    # Negative / empty responses
+    "not found", "n/a", "na", "none", "null", "nil", "empty", "blank",
+    "unknown", "<unknown>", "(unknown)", "not available", "not provided",
+    "not applicable", "not specified",
+    # Redaction markers
+    "[redacted]", "redacted", "***", "****", "*****", "xxxxx", "xxxx",
+    # Prompt-example leaks we've seen in production
+    "full name", "full mailing address", "the exact id number",
+    "subject name", "street, city st zip", "subject address",
+    "john smith", "jane doe", "john doe", "jane smith",
+})
+
+# SSN patterns known to be fake or placeholder — reject in gov_id field.
+_FAKE_SSN_STRINGS: frozenset[str] = frozenset({
+    "123-45-6789", "123456789",
+    "987-65-4321", "987654321",
+    "111-11-1111", "111111111",
+    "222-22-2222", "333-33-3333", "444-44-4444",
+    "555-55-5555", "666-66-6666", "777-77-7777", "888-88-8888",
+    "999-99-9999", "000-00-0000",
+    "123-12-1234",
+})
+
+# Address fragments that only appear in prompt examples / textbook fakes.
+_FAKE_ADDRESS_FRAGMENTS: tuple[str, ...] = (
+    "anytown",                    # "123 Main St, Anytown, USA 12345"
+    "othertown",                  # paired fake
+    "123 main st",                # over-used canonical example
+    "usa 12345",
+    "sample street",
+    "example address",
+    "123 any street",
+)
+
+# Email / phone placeholders from prompts.
+_FAKE_EMAIL_STRINGS: frozenset[str] = frozenset({
+    "user@example.com", "a@b.com", "test@test.com", "email@example.com",
+    "name@example.com",
+})
+_FAKE_PHONE_STRINGS: frozenset[str] = frozenset({
+    "555-123-4567", "555-555-5555", "123-456-7890",
+    "(555) 123-4567", "(555) 555-5555",
+})
+
+
+def _is_generic_placeholder(value: str) -> bool:
+    """Return True if *value* matches a known placeholder/prompt token.
+
+    Case-insensitive comparison after stripping. Used for any string field.
+    """
+    if not value:
+        return True
+    lowered = value.strip().lower()
+    if not lowered:
+        return True
+    return lowered in _GENERIC_PLACEHOLDER_TOKENS
+
+
+def _is_placeholder_ssn(value: str) -> bool:
+    """Return True if *value* is a known fake SSN or fails SSN format."""
+    if _is_generic_placeholder(value):
+        return True
+    stripped = value.strip()
+    if stripped in _FAKE_SSN_STRINGS:
+        return True
+    # Reject values that don't look remotely like a gov ID: no digits at all,
+    # or <4 digits total. Real SSNs / NI / PAN / Aadhaar etc. all have ≥4 digits.
+    digits_only = re.sub(r"\D", "", stripped)
+    if len(digits_only) < 4:
+        return True
+    return False
+
+
+def _is_placeholder_address(value: str) -> bool:
+    """Return True if *value* looks like a prompt example / textbook fake."""
+    if _is_generic_placeholder(value):
+        return True
+    lowered = value.strip().lower()
+    return any(frag in lowered for frag in _FAKE_ADDRESS_FRAGMENTS)
+
+
+def _is_placeholder_email(value: str) -> bool:
+    if _is_generic_placeholder(value):
+        return True
+    return value.strip().lower() in _FAKE_EMAIL_STRINGS
+
+
+def _is_placeholder_phone(value: str) -> bool:
+    if _is_generic_placeholder(value):
+        return True
+    return value.strip() in _FAKE_PHONE_STRINGS
+
+
+def _is_placeholder_name(value: str) -> bool:
+    """Extra-strict: names matching prompt examples or containing only
+    generic tokens (e.g. 'Full Name', 'Subject Name')."""
+    if _is_generic_placeholder(value):
+        return True
+    lowered = value.strip().lower()
+    # Single-token names that are obviously role words, not real names.
+    if lowered in {"name", "subject", "applicant", "patient", "employee",
+                    "customer", "client", "user", "person"}:
+        return True
+    return False
+
+
 def _parse_batch_response(
     response: str,
     doc_id: str,
@@ -638,6 +753,12 @@ def _parse_batch_response(
             continue
 
         name = name.strip()
+
+        # Reject placeholder / prompt-example names ("Full Name", "John Smith"
+        # echoed from the prompt template, etc.).
+        if _is_placeholder_name(name):
+            logger.debug("Dropping placeholder name: %r", name[:40])
+            continue
 
         # Resolve page number (LLM returns 1-indexed, we use 0-indexed internally)
         page = entry.get("page")
@@ -696,29 +817,35 @@ def _parse_batch_response(
         addr = entry.get("address")
         if addr and isinstance(addr, str) and len(addr.strip()) > 5:
             addr_clean = addr.strip()
-            # Must contain a number (street addresses start with numbers)
-            has_number = any(c.isdigit() for c in addr_clean[:10])
-            # Must not be instructional text (common in page body, not addresses)
-            bad_patterns = ["please contact", "if you have any question",
-                           "final grades", "semester 1", "semester 2",
-                           "daily basis", "login information",
-                           "check skyward", "counseling office"]
-            is_garbage = any(p in addr_clean.lower() for p in bad_patterns)
+            # Reject placeholder addresses from the prompt template or
+            # textbook fakes ("123 Main St, Anytown, USA 12345") before any
+            # other validation.
+            if _is_placeholder_address(addr_clean):
+                logger.debug("Dropping placeholder address: %r", addr_clean[:50])
+            else:
+                # Must contain a number (street addresses start with numbers)
+                has_number = any(c.isdigit() for c in addr_clean[:10])
+                # Must not be instructional text (common in page body, not addresses)
+                bad_patterns = ["please contact", "if you have any question",
+                               "final grades", "semester 1", "semester 2",
+                               "daily basis", "login information",
+                               "check skyward", "counseling office"]
+                is_garbage = any(p in addr_clean.lower() for p in bad_patterns)
 
-            # Validate address text appears on the claimed page
-            on_page = True
-            if actual_page_text and has_number:
-                # Check first significant word of address (street number)
-                addr_words = addr_clean.split()
-                if addr_words and addr_words[0].lower() not in actual_page_text:
-                    on_page = False
-                    logger.debug(
-                        "Dropping address '%s' — not found on page %s",
-                        addr_clean[:30], page_str,
-                    )
+                # Validate address text appears on the claimed page
+                on_page = True
+                if actual_page_text and has_number:
+                    # Check first significant word of address (street number)
+                    addr_words = addr_clean.split()
+                    if addr_words and addr_words[0].lower() not in actual_page_text:
+                        on_page = False
+                        logger.debug(
+                            "Dropping address '%s' — not found on page %s",
+                            addr_clean[:30], page_str,
+                        )
 
-            if has_number and not is_garbage and on_page:
-                raw_address = {"raw": addr_clean}
+                if has_number and not is_garbage and on_page:
+                    raw_address = {"raw": addr_clean}
 
         # Build entity_types
         entity_types = ["PERSON"]
@@ -726,25 +853,25 @@ def _parse_batch_response(
             entity_types.append("LOCATION")
 
         phone = entry.get("phone")
-        if phone and isinstance(phone, str) and len(phone) >= 7:
+        if phone and isinstance(phone, str) and len(phone) >= 7 and not _is_placeholder_phone(phone):
             entity_types.append("PHONE_NUMBER")
         else:
             phone = None
 
         dob = entry.get("dob")
-        if dob and isinstance(dob, str) and len(dob) >= 4:
+        if dob and isinstance(dob, str) and len(dob) >= 4 and not _is_generic_placeholder(dob):
             entity_types.append("DATE_OF_BIRTH")
         else:
             dob = None
 
         ssn = entry.get("ssn")
-        if ssn and isinstance(ssn, str) and len(ssn) >= 4:
+        if ssn and isinstance(ssn, str) and len(ssn) >= 4 and not _is_placeholder_ssn(ssn):
             entity_types.append("US_SSN")
         else:
             ssn = None
 
         email = entry.get("email")
-        if email and isinstance(email, str) and "@" in email:
+        if email and isinstance(email, str) and "@" in email and not _is_placeholder_email(email):
             entity_types.append("EMAIL_ADDRESS")
         else:
             email = None
