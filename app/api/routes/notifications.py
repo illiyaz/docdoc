@@ -183,6 +183,29 @@ def get_project_subjects(
         .all()
     )
 
+    def _first_doc_id(s: NotificationSubject) -> str | None:
+        """Pull the first source_document_id from source_records JSON so the
+        UI can open a DocumentViewer modal directly from the row."""
+        try:
+            records = s.source_records or []
+            if isinstance(records, list) and records:
+                first = records[0]
+                if isinstance(first, dict):
+                    did = first.get("source_document_id")
+                    return str(did) if did else None
+        except Exception:
+            pass
+        return None
+
+    def _first_page(s: NotificationSubject) -> int | None:
+        """Extract the first page number from source_page_range ("17" or "3, 5, 9")."""
+        if not s.source_page_range:
+            return None
+        first = s.source_page_range.split(",")[0].strip()
+        if first.isdigit():
+            return int(first)
+        return None
+
     return [
         {
             "subject_id": str(s.subject_id),
@@ -194,6 +217,8 @@ def get_project_subjects(
             "merge_confidence": s.merge_confidence,
             "pii_types": s.pii_types_found or [],
             "source_document": s.source_document_name,
+            "source_document_id": _first_doc_id(s),
+            "source_page": _first_page(s),
         }
         for s in subjects
     ]

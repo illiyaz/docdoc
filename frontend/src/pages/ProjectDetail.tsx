@@ -4341,6 +4341,8 @@ type NotificationSubject = {
   notification_required: boolean
   pii_types: string[]
   source_document: string | null
+  source_document_id: string | null
+  source_page: number | null
   merge_confidence: number | null
 }
 
@@ -4349,6 +4351,7 @@ function NotificationTab({ projectId }: { projectId: string }) {
   const queryClient = useQueryClient()
   const [filter, setFilter] = useState<"all" | "APPROVED" | "NOTIFIED" | "REJECTED" | "pending">("APPROVED")
   const [previewSubjectId, setPreviewSubjectId] = useState<string | null>(null)
+  const [viewSourceDoc, setViewSourceDoc] = useState<{ docId: string; page: number } | null>(null)
   const [busyIds, setBusyIds] = useState<Set<string>>(new Set())
   const [batchStatus, setBatchStatus] = useState<string | null>(null)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
@@ -4728,6 +4731,18 @@ function NotificationTab({ projectId }: { projectId: string }) {
                         >
                           <Eye className="h-3 w-3" /> Preview
                         </button>
+                        {s.source_document_id && (
+                          <button
+                            onClick={() => setViewSourceDoc({
+                              docId: s.source_document_id!,
+                              page: s.source_page ?? 1,
+                            })}
+                            className="inline-flex items-center gap-1 rounded border px-2 py-0.5 text-[10px] hover:bg-muted"
+                            title={`View source document page ${s.source_page ?? 1}`}
+                          >
+                            <FileText className="h-3 w-3" /> Source
+                          </button>
+                        )}
                         {s.review_status === "AI_PENDING" || s.review_status === "HUMAN_REVIEW" || s.review_status === "LEGAL_REVIEW" ? (
                           <>
                             <button
@@ -4811,6 +4826,37 @@ function NotificationTab({ projectId }: { projectId: string }) {
             </div>
             <div className="p-4 overflow-y-auto">
               <NotificationPreview subjectId={previewSubjectId} />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Source document viewer modal */}
+      {viewSourceDoc && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          onClick={() => setViewSourceDoc(null)}
+        >
+          <div
+            className="bg-white rounded-lg shadow-xl max-w-5xl w-full max-h-[92vh] overflow-hidden flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between p-3 border-b">
+              <h3 className="text-sm font-semibold">Source Document</h3>
+              <button
+                onClick={() => setViewSourceDoc(null)}
+                className="p-1 rounded hover:bg-muted"
+              >
+                <XIcon className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="overflow-y-auto">
+              <DocumentViewer
+                documentId={viewSourceDoc.docId}
+                initialPage={Math.max(0, viewSourceDoc.page - 1)}
+                highlightExtractions={true}
+                onClose={() => setViewSourceDoc(null)}
+              />
             </div>
           </div>
         </div>
