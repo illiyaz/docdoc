@@ -2507,6 +2507,30 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
             records: list[PIIRecord] = []  # A7: init before try so except can always reference it
             extraction_path = "?"
 
+            # --- Direct CSV fast-path (task #31) ---
+            # Structured CSVs don't need the LLM. Parse rows directly using
+            # column-name keyword matching. If the header doesn't yield
+            # recognisable PII columns (e.g. X_hidden_columns.csv's field_1,
+            # field_2, ...), this returns [] and we fall through to the
+            # LLM paths below — preserving the obfuscated-header case.
+            if (doc.file_type or "").lower() == "csv" and doc.source_path:
+                try:
+                    from app.pipeline.csv_extractor import extract_from_csv
+                    _seg_country = (doc.metadata_json or {}).get("segregation", {}).get("country_hint")
+                    _csv_records = extract_from_csv(
+                        doc.source_path, str(doc.id),
+                        country_hint=_seg_country,
+                    )
+                    if _csv_records:
+                        records = _csv_records
+                        extraction_path = "csv-direct"
+                        logger.info(
+                            "[%d/%d] CSV fast-path: %s | %d records (skipped LLM strategies)",
+                            i, len(approved_docs), doc.file_name, len(records),
+                        )
+                except Exception as e:
+                    logger.warning("CSV fast-path failed for %s: %s — falling back", doc.file_name, e)
+
             try:
                 doc_targets = doc_selected_types.get(doc.id) or target_entities
                 reader = get_reader(doc.source_path)
@@ -2674,8 +2698,10 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                 # ============================================================
                 _doc_meta_pre = doc.metadata_json or {}
 
-                if settings.use_text_llm_batch and settings.llm_assist_enabled and blocks:
+                if not records and settings.use_text_llm_batch and settings.llm_assist_enabled and blocks:
                     # ── Step 37: Auto-select Strategy A (markers) or B (full text) ──
+                    # Guarded with `not records` so the CSV fast-path above
+                    # (task #31) isn't steamrolled by the LLM strategies.
                     try:
                         from app.pipeline.text_batch_extractor import extract_text_batch, extract_with_markers
                         from app.pipeline.repeating_unit_detector import detect_markers, detect_visual_separators
