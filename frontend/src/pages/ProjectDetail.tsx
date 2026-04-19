@@ -4819,6 +4819,8 @@ function ExportsTab({ projectId }: { projectId: string }) {
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [selectedSchema, setSelectedSchema] = useState<string>("auditor")
+  const [selectedFormat, setSelectedFormat] = useState<"csv" | "xlsx" | "json">("csv")
+  const [selectedJobId, setSelectedJobId] = useState<string>("all")
   const [approvedOnly, setApprovedOnly] = useState(true)
 
   const { data: exports, isLoading } = useQuery({
@@ -4827,12 +4829,24 @@ function ExportsTab({ projectId }: { projectId: string }) {
     refetchInterval: 15_000,
   })
 
+  // Jobs for the per-job dropdown — only completed or analyzed runs produce subjects.
+  const { data: jobsData } = useQuery({
+    queryKey: ["project-jobs-for-export", projectId],
+    queryFn: () => getProjectJobs(projectId, { per_page: 50 }),
+    refetchInterval: 30_000,
+  })
+  const eligibleJobs = (jobsData?.jobs ?? []).filter(
+    (j) => j.status === "completed" || j.status === "analyzed" || j.status === "archived"
+  )
+
   async function handleCreateExport() {
     setCreating(true)
     setError(null)
     try {
       await createExport(projectId, {
         export_schema: selectedSchema,
+        export_format: selectedFormat,
+        ...(selectedJobId !== "all" ? { ingestion_run_id: selectedJobId } : {}),
         ...(approvedOnly ? { filters: { review_status: "APPROVED" } } : {}),
       })
       queryClient.invalidateQueries({ queryKey: ["exports", projectId] })
@@ -4845,9 +4859,9 @@ function ExportsTab({ projectId }: { projectId: string }) {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold">CSV Exports</h3>
-        <div className="flex items-center gap-2">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <h3 className="text-sm font-semibold">Exports</h3>
+        <div className="flex items-center gap-2 flex-wrap">
           <label className="flex items-center gap-1.5 text-xs cursor-pointer">
             <input
               type="checkbox"
@@ -4858,12 +4872,35 @@ function ExportsTab({ projectId }: { projectId: string }) {
             Approved only
           </label>
           <select
+            value={selectedJobId}
+            onChange={(e) => setSelectedJobId(e.target.value)}
+            className="rounded-md border px-2 py-1.5 text-xs bg-background"
+            title="Restrict export to one job's subjects"
+          >
+            <option value="all">All jobs (project-wide)</option>
+            {eligibleJobs.map((j) => (
+              <option key={j.id} value={j.id}>
+                {(j.first_file_name || j.id.slice(0, 8))} · {j.status} · {j.document_count ?? "?"} doc(s)
+              </option>
+            ))}
+          </select>
+          <select
             value={selectedSchema}
             onChange={(e) => setSelectedSchema(e.target.value)}
             className="rounded-md border px-2 py-1.5 text-xs bg-background"
           >
             <option value="auditor">Auditor (15 cols)</option>
             <option value="minimal">Minimal (3 cols)</option>
+          </select>
+          <select
+            value={selectedFormat}
+            onChange={(e) => setSelectedFormat(e.target.value as "csv" | "xlsx" | "json")}
+            className="rounded-md border px-2 py-1.5 text-xs bg-background"
+            title="Output file format"
+          >
+            <option value="csv">CSV</option>
+            <option value="xlsx">XLSX</option>
+            <option value="json">JSON</option>
           </select>
           <button
             onClick={handleCreateExport}
@@ -4964,6 +5001,9 @@ function ExportJobCard({ job, projectId }: { job: ExportJobSummary; projectId: s
               </Badge>
             </div>
             <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
+              {job.export_type && (
+                <span className="uppercase font-medium">{job.export_type}</span>
+              )}
               {job.row_count != null && <span>{job.row_count} rows</span>}
               {createdAgo && <span>{createdAgo}</span>}
             </div>
@@ -4972,18 +5012,21 @@ function ExportJobCard({ job, projectId }: { job: ExportJobSummary; projectId: s
         <div className="flex items-center gap-2">
           {job.status === "completed" && (
             <>
-              <button
-                onClick={handlePreview}
-                disabled={loadingPreview}
-                className="rounded-md border px-3 py-1.5 text-xs font-medium hover:bg-accent flex items-center gap-1 disabled:opacity-50"
-              >
-                {loadingPreview ? (
-                  <Loader2 className="h-3 w-3 animate-spin" />
-                ) : (
-                  <Eye className="h-3 w-3" />
-                )}
-                {showPreview ? "Hide" : "Preview"}
-              </button>
+              {job.export_type !== "xlsx" && (
+                <button
+                  onClick={handlePreview}
+                  disabled={loadingPreview}
+                  className="rounded-md border px-3 py-1.5 text-xs font-medium hover:bg-accent flex items-center gap-1 disabled:opacity-50"
+                  title="Preview first 5 rows (CSV/JSON only)"
+                >
+                  {loadingPreview ? (
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                  ) : (
+                    <Eye className="h-3 w-3" />
+                  )}
+                  {showPreview ? "Hide" : "Preview"}
+                </button>
+              )}
               <a
                 href={getExportDownloadUrl(projectId, job.id)}
                 className="rounded-md border px-3 py-1.5 text-xs font-medium hover:bg-accent flex items-center gap-1"

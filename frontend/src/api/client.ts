@@ -495,6 +495,8 @@ export interface CreateExportBody {
   protocol_config_id?: string | null
   filters?: Record<string, unknown> | null
   export_schema?: string | null
+  export_format?: "csv" | "xlsx" | "json" | null
+  ingestion_run_id?: string | null
 }
 
 export interface ExportPreviewResponse {

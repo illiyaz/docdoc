@@ -4553,6 +4553,8 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
         for subj in subjects:
             if subj.project_id is None and run.project_id is not None:
                 subj.project_id = run.project_id
+            if subj.ingestion_run_id is None:
+                subj.ingestion_run_id = run.id
 
         review_count = 0
         try:

@@ -41,6 +41,9 @@ class CreateExportBody(BaseModel):
     protocol_config_id: str | None = None
     filters: dict | None = None
     export_schema: str | None = None
+    # Step 39 #4 additions
+    export_format: str | None = None          # "csv" (default), "xlsx", "json"
+    ingestion_run_id: str | None = None        # restrict to one job's subjects
 
 
 # ---------------------------------------------------------------------------
@@ -62,9 +65,17 @@ def create_export(
     if body.protocol_config_id is not None:
         pc_id = UUID(body.protocol_config_id)
 
+    run_id: UUID | None = None
+    if body.ingestion_run_id is not None:
+        try:
+            run_id = UUID(body.ingestion_run_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid ingestion_run_id")
+
     output_dir = _DEFAULT_EXPORT_DIR / str(project_id)
 
     schema_name = body.export_schema or "auditor"
+    format_name = (body.export_format or "csv").lower()
 
     try:
         exporter = CSVExporter(db)
@@ -74,6 +85,8 @@ def create_export(
             protocol_config_id=pc_id,
             filters=body.filters,
             export_schema=schema_name,
+            export_format=format_name,
+            ingestion_run_id=run_id,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -113,7 +126,11 @@ def preview_export(
     rows: int = Query(5, ge=1, le=100, description="Number of rows to preview"),
     db: Session = Depends(get_db),
 ):
-    """Read the CSV file and return the first *rows* data rows as JSON."""
+    """Read the exported file and return the first *rows* rows as JSON.
+
+    CSV and JSON formats render inline; XLSX is not previewable here (the
+    frontend should just offer the download for binary formats).
+    """
     job = _get_or_404(db, project_id, export_id)
 
     if job.status != "completed":
@@ -125,6 +142,27 @@ def preview_export(
     path = Path(job.file_path)
     if not path.is_file():
         raise HTTPException(status_code=404, detail="Export file not found on disk")
+
+    fmt = (job.export_type or "csv").lower()
+    if fmt == "xlsx":
+        raise HTTPException(
+            status_code=400,
+            detail="XLSX exports are not previewable — use the download endpoint.",
+        )
+    if fmt == "json":
+        import json as _json
+        data = _json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(data, list):
+            data = []
+        preview = data[:rows]
+        cols = list(preview[0].keys()) if preview else []
+        return {
+            "export_id": str(export_id),
+            "columns": cols,
+            "rows": preview,
+            "total_rows": job.row_count or 0,
+            "preview_count": len(preview),
+        }
 
     content = path.read_text(encoding="utf-8")
     reader = csv.DictReader(io.StringIO(content))
@@ -144,7 +182,14 @@ def preview_export(
     }
 
 
-@router.get("/{export_id}/download", summary="Download the exported CSV file")
+_MEDIA_TYPES = {
+    "csv": "text/csv",
+    "json": "application/json",
+    "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+}
+
+
+@router.get("/{export_id}/download", summary="Download the exported file")
 def download_export(
     project_id: UUID,
     export_id: UUID,
@@ -162,11 +207,8 @@ def download_export(
     if not path.is_file():
         raise HTTPException(status_code=404, detail="Export file not found on disk")
 
-    return FileResponse(
-        path=str(path),
-        media_type="text/csv",
-        filename=path.name,
-    )
+    media = _MEDIA_TYPES.get((job.export_type or "csv").lower(), "application/octet-stream")
+    return FileResponse(path=str(path), media_type=media, filename=path.name)
 
 
 # ---------------------------------------------------------------------------

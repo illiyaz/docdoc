@@ -333,6 +333,11 @@ class NotificationSubject(Base):
     canonical_government_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     # Step 27: merge explanation for auditor review
     merge_explanation: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # Step 39 #4: link back to the ingestion run that produced this subject,
+    # so exports can be filtered per-job instead of per-project.
+    ingestion_run_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("ingestion_runs.id", ondelete="SET NULL"), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

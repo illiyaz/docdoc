@@ -313,6 +313,51 @@ def build_csv_content_v2(
     return buf.getvalue()
 
 
+def build_json_content(
+    rows: list[SubjectRow],
+    columns: list[ExportColumn],
+) -> str:
+    """Render the same schema-masked rows as a JSON array of objects.
+
+    Same masking rules as the CSV path — exports never leak raw PII
+    regardless of format.
+    """
+    out = [
+        {c.name: _apply_mask(_get_field_value(row, c), c) for c in columns}
+        for row in rows
+    ]
+    return json.dumps(out, indent=2, default=str)
+
+
+def build_xlsx_content(
+    rows: list[SubjectRow],
+    columns: list[ExportColumn],
+    file_path: Path,
+) -> None:
+    """Write a schema-masked workbook to disk.
+
+    Unlike the CSV / JSON builders, XLSX is streamed directly to the
+    file because openpyxl's save() needs a path and a BytesIO roundtrip
+    buys nothing here.
+    """
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Subjects"
+    ws.append([c.name for c in columns])
+    for row in rows:
+        ws.append([
+            _apply_mask(_get_field_value(row, c), c) for c in columns
+        ])
+    # Light touch on column widths — just enough so names/emails aren't clipped.
+    for idx, col in enumerate(columns, start=1):
+        ws.column_dimensions[ws.cell(row=1, column=idx).column_letter].width = max(
+            12, min(48, len(col.name) + 4)
+        )
+    wb.save(file_path)
+
+
 # Legacy build_csv_content — kept for backward compat
 def build_csv_content(
     rows: list[SubjectRow],
@@ -359,8 +404,19 @@ class CSVExporter:
         protocol_config_id: UUID | None = None,
         filters: dict | None = None,
         export_schema: str = "auditor",
+        export_format: str = "csv",
+        ingestion_run_id: UUID | None = None,
     ) -> ExportJob:
-        """Execute the export and return the completed ExportJob record."""
+        """Execute the export and return the completed ExportJob record.
+
+        ``export_format`` selects the on-disk format: ``csv`` (default),
+        ``xlsx``, or ``json``. All formats use the same schema-driven column
+        set so what the auditor sees matches across formats.
+
+        ``ingestion_run_id`` restricts the export to subjects produced by
+        a single job — makes re-running a doc set cleanly re-exportable
+        without mixing with prior runs' subjects.
+        """
         from app.core.settings import get_settings
         settings = get_settings()
 
@@ -375,15 +431,27 @@ class CSVExporter:
                 "(pii_masking_enabled=True). Use 'auditor' or 'minimal'."
             )
 
+        fmt = (export_format or "csv").lower()
+        if fmt not in ("csv", "xlsx", "json"):
+            raise ValueError(
+                f"Unknown export_format: {export_format!r}. Valid: csv, xlsx, json."
+            )
+
         columns = EXPORT_SCHEMAS[export_schema]
+
+        # Merge ingestion_run_id into filters_json so the ExportJob record
+        # preserves the filter used to produce it (useful for audit + UI).
+        stored_filters = dict(filters or {})
+        if ingestion_run_id is not None:
+            stored_filters["ingestion_run_id"] = str(ingestion_run_id)
 
         # 1. Create the ExportJob record (pending).
         export_job = ExportJob(
             project_id=project_id,
             protocol_config_id=protocol_config_id,
-            export_type="csv",
+            export_type=fmt,
             status="pending",
-            filters_json=filters,
+            filters_json=stored_filters or None,
         )
         self._db.add(export_job)
         self._db.flush()
@@ -395,6 +463,9 @@ class CSVExporter:
                 .where(NotificationSubject.project_id == project_id)
                 .order_by(NotificationSubject.canonical_name)
             )
+
+            if ingestion_run_id is not None:
+                stmt = stmt.where(NotificationSubject.ingestion_run_id == ingestion_run_id)
 
             # Apply optional filters.
             if filters:
@@ -424,16 +495,19 @@ class CSVExporter:
                 for i, s in enumerate(subjects, 1)
             ]
 
-            # 4. Build CSV content.
-            csv_content = build_csv_content_v2(rows, columns)
-
-            # 5. Write to file.
+            # 4. Write to the format-appropriate file.
             output_dir.mkdir(parents=True, exist_ok=True)
-            file_name = f"export_{export_job.id}.csv"
+            file_name = f"export_{export_job.id}.{fmt}"
             file_path = output_dir / file_name
-            file_path.write_text(csv_content, encoding="utf-8")
 
-            # 6. Update job record.
+            if fmt == "csv":
+                file_path.write_text(build_csv_content_v2(rows, columns), encoding="utf-8")
+            elif fmt == "json":
+                file_path.write_text(build_json_content(rows, columns), encoding="utf-8")
+            elif fmt == "xlsx":
+                build_xlsx_content(rows, columns, file_path)
+
+            # 5. Update job record.
             export_job.status = "completed"
             export_job.file_path = str(file_path)
             export_job.row_count = len(rows)
