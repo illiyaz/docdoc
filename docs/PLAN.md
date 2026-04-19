@@ -1155,6 +1155,34 @@ Run 3 details:
 - CMG vision recovery not triggered — Strategy A alone hit 88% completeness with the widened filter.
 - Remaining 5 AWIR subjects missing DOB (fix 58e75d1 should land this in next run).
 
+#### Quality sprint — 10 fixes landed 2026-04-19 evening (post-taxonomy-run)
+
+After the 44-doc taxonomy run (5h30min, 92 subjects) surfaced several
+real quality + UX bugs, shipped ten focused fixes in one sprint:
+
+| # | Commit | Fix |
+|---|---|---|
+| #28 | ac3c1dc | Reject LLM placeholder strings at parse time — NOT FOUND / [REDACTED] / Full Name / the exact ID number / 123-45-6789 etc |
+| #29 | 2f88f02 | Sanity-validate canonical_* fields before persisting subject — belt-and-suspenders in deduplicator |
+| #25 | 75d81b4 | Skip understand_document LLM call for trivial 1-2 page single-subject docs (passport copy, DL, pay stub, SSN card, etc.) |
+| #26 | 1eff77e | Skip completeness vision trigger for single-subject docs (no futile vision scans on 1-page passport copies) |
+| #23 | 886cda9 | Segregation link visible on extracting/completed/archived jobs (was gated to the 1-2 min "analyzed" window) |
+| #19 | fa2507c | Post-QA redirect goes to Notification tab (was going to Subjects because Notification tab had been broken) |
+| #27 | bb2132c | "View Source" button on Notification tab rows — opens DocumentViewer modal at source page, solves "how does auditor verify masked data" |
+| #31 | 82007b7 | Direct CSV fast-path extractor — `app/pipeline/csv_extractor.py` parses structured CSVs row-by-row using header keyword matching, skipping LLM entirely. employees.csv: 29-empty-records → 20 full subjects |
+| #20 | 7e7485c | Per-project protocol for notification emails — `_protocol_for_project(db, project_id)` resolves from ProtocolConfig instead of hardcoded default |
+| #18 | d5a0a33 | Per-doc segregation commits (durability) — fixes the 2026-04-19 zombie-job incident where 6h of segregation work was lost to uvicorn hot-reload |
+
+Task #30 (same-doc duplicate subjects like Jane Martin × 4) verified as
+cascade-fixed by #28: all duplicates had hallucinated values (fake
+SSNs, prompt-example addresses) that #28 now nulls, triggering the
+minimum-PII threshold to drop them.
+
+Deferred (too big for autonomous sprint, will tackle with user):
+- #21 Step 39 #5 — re-run failed docs + job comparison view
+- #22 Stratified N-sample redesign of roster + segregation sampling
+- #24 Segregation tab — project-wide flat table
+
 #### Still pending follow-ups (as of 2026-04-19)
 
 | Priority | Item | Why | Size |
