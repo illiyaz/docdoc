@@ -97,6 +97,33 @@ def check_completeness_and_recover(
     # Estimate expected subjects: at least 1 per 3 pages after onset
     expected = max(3, pages_after_onset // 3)
 
+    # Speed optimization (task #26): skip the completeness vision trigger
+    # for documents that are inherently single-subject. A 1-page passport
+    # copy, DL, SSN card, pay stub, money order, or personal check has
+    # exactly one person by definition; the "expected 3" threshold
+    # hallucinates a gap that doesn't exist. Vision scan runs, finds
+    # nothing, burns 1-2 min of 90B time per doc.
+    _single_subject_doc_types = {
+        "identification_document", "insurance_card", "passport_data_page",
+        "drivers_license", "ssn_card", "pay_stub", "money_order",
+        "personal_check", "wire_transfer_confirmation", "receipt",
+        "credit_card_statement", "bank_statement", "financial",
+        "academic_transcript", "w2_form", "w4", "w4_filled",
+        "1099_misc", "irs_notice",
+    }
+    _doc_type_lower = (doc_type or "").lower()
+    if (
+        total_pages <= 2
+        and len(unique_names_only) >= 1
+        and any(t == _doc_type_lower for t in _single_subject_doc_types)
+    ):
+        logger.info(
+            "Completeness: skipping vision trigger for single-subject doc %s "
+            "(type=%s, pages=%d, names=%d)",
+            doc_name, doc_type, total_pages, len(unique_names_only),
+        )
+        return records
+
     completeness = found / max(expected, 1)
     logger.info(
         "Completeness check for %s: %d actionable subjects (of %d names), "
