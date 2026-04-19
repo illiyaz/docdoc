@@ -2761,6 +2761,16 @@ function JobsTab({
                                     Review
                                   </Link>
                                 )}
+                                {(job.status === "extracting" || job.status === "completed" || job.status === "archived") && (
+                                  <Link
+                                    to={`/projects/${projectId}/segregation?job_id=${job.id}`}
+                                    className="inline-flex items-center gap-1 rounded-md border border-gray-200 px-2 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50 transition-colors"
+                                    title="View segregation results (read-only after extraction)"
+                                  >
+                                    <FolderOpen className="h-3 w-3" />
+                                    Segregation
+                                  </Link>
+                                )}
                                 {job.status === "completed" && (
                                   <Link
                                     to={`/projects/${projectId}/qa?job_id=${job.id}`}
