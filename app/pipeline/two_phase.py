@@ -646,6 +646,22 @@ def analyze_generator(
                                 seg_result.field_inventory,
                                 seg_result.processing_time_ms / 1000,
                             )
+                            # Durability (task #18): commit this doc's
+                            # segregation result immediately. Segregation on
+                            # a large batch takes hours; a uvicorn --reload
+                            # or crash mid-loop used to silently drop every
+                            # segregation that hadn't hit the batch commit
+                            # at the bottom. Per-doc commits make the loop
+                            # resumable and cap data loss at ~one doc.
+                            try:
+                                db.commit()
+                            except Exception:
+                                logger.warning(
+                                    "Per-doc segregation commit failed for %s — "
+                                    "continuing with in-memory state",
+                                    doc.file_name, exc_info=True,
+                                )
+                                db.rollback()
                     except Exception:
                         logger.warning("Segregation failed for %s", doc.file_name, exc_info=True)
 
@@ -656,7 +672,12 @@ def analyze_generator(
                             "detail": {"total": len(doc_records), "current": seg_idx},
                         })
 
-                db.commit()
+                # Final safety commit in case the last iteration's commit
+                # raced with a shutdown (no-op if already committed).
+                try:
+                    db.commit()
+                except Exception:
+                    db.rollback()
                 yield _sse({
                     "stage": "segregation", "status": "complete",
                     "message": f"Segregation: {seg_pii_count} PII, {seg_non_pii_count} non-PII",
