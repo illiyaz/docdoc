@@ -381,6 +381,40 @@ class Deduplicator:
                 ],
             }
 
+        # Belt-and-suspenders: null out any canonical_* field that matches a
+        # known placeholder / prompt-leak string. Task #28 catches these at
+        # parse time; this is the second line of defence for cases that
+        # slipped through (vision paths, legacy records, etc.).
+        from app.pipeline.text_batch_extractor import (
+            _is_placeholder_address,
+            _is_placeholder_email,
+            _is_placeholder_name,
+            _is_placeholder_phone,
+            _is_placeholder_ssn,
+        )
+
+        if canonical_name and _is_placeholder_name(canonical_name):
+            logger.debug("Sanity-null canonical_name placeholder: %r", canonical_name[:40])
+            canonical_name = None
+        if canonical_email and _is_placeholder_email(canonical_email):
+            logger.debug("Sanity-null canonical_email placeholder: %r", canonical_email[:40])
+            canonical_email = None
+        if canonical_phone and _is_placeholder_phone(canonical_phone):
+            logger.debug("Sanity-null canonical_phone placeholder: %r", canonical_phone[:40])
+            canonical_phone = None
+        if canonical_government_id and _is_placeholder_ssn(canonical_government_id):
+            logger.debug(
+                "Sanity-null canonical_government_id placeholder: %r",
+                canonical_government_id[:40],
+            )
+            canonical_government_id = None
+            government_id_type = None  # drop the (now-meaningless) type too
+        if canonical_address and isinstance(canonical_address, dict):
+            raw_addr = canonical_address.get("raw") if canonical_address else None
+            if raw_addr and isinstance(raw_addr, str) and _is_placeholder_address(raw_addr):
+                logger.debug("Sanity-null canonical_address placeholder: %r", raw_addr[:40])
+                canonical_address = None
+
         return NotificationSubject(
             subject_id=uuid4(),
             canonical_name=canonical_name,
