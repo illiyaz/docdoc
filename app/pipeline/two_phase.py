@@ -1242,6 +1242,53 @@ def analyze_generator(
                             except Exception:
                                 pass
 
+                        # Task #33: trivial-doc vision skip. For 1-2 page
+                        # single-subject docs (passport/DL/SSN card/receipt/
+                        # pay stub), skip vision routing entirely. These
+                        # docs extract cleanly via Strategy A/B or the
+                        # CSV fast-path; the vision routing LLM call just
+                        # burns 10+ min per doc with frequent timeouts on
+                        # CPU Ollama (Run 5: 28 timeouts, 12h lost).
+                        _trivial_vision_skip_types = {
+                            "identification_document", "insurance_card",
+                            "passport_data_page", "drivers_license",
+                            "ssn_card", "pay_stub", "money_order",
+                            "personal_check", "wire_transfer_confirmation",
+                            "receipt", "credit_card_statement",
+                            "bank_statement", "financial",
+                            "academic_transcript", "w2_form", "w4",
+                            "w4_filled", "1099_misc", "irs_notice",
+                        }
+                        _vs_seg = (doc.metadata_json or {}).get("segregation", {})
+                        _vs_type = (_vs_seg.get("document_type") or "").lower()
+                        _vs_conf = float(_vs_seg.get("confidence") or 0.0)
+                        _vs_fields = len(_vs_seg.get("fields", []) or [])
+                        if (
+                            not settings.disable_trivial_skips
+                            and total_pages > 0 and total_pages <= 2
+                            and 2 <= _vs_fields <= 7
+                            and _vs_conf >= settings.trivial_skip_min_confidence
+                            and _vs_type in _trivial_vision_skip_types
+                        ):
+                            logger.info(
+                                "Skipping vision routing for trivial doc %s "
+                                "(type=%s, pages=%d, conf=%.2f) — extract-only path",
+                                doc.file_name, _vs_type, total_pages, _vs_conf,
+                            )
+                            schema_skipped_docs.add(doc.id)
+                            # Tag for post-extraction anomaly sweep.
+                            try:
+                                meta = dict(doc.metadata_json or {})
+                                marker = meta.get("_trivial_skip", {}) or {}
+                                marker["vision_routing_skipped"] = True
+                                marker["reason"] = "task_33_trivial_doc"
+                                meta["_trivial_skip"] = marker
+                                doc.metadata_json = meta
+                                flag_modified(doc, "metadata_json")
+                            except Exception:
+                                pass
+                            continue
+
                         # Try schema-based skip first
                         schema = doc_schemas.get(doc.id)
                         skip_result = _try_schema_skip(schema, total_pages)
