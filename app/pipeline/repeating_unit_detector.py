@@ -361,30 +361,51 @@ def filter_page_by_markers(
     labels matched) or ``None`` if the name marker isn't on this page.
     """
     lines = page_text.split("\n")
-    search_label = name_after_label or name_before_label
 
-    if not search_label or len(search_label) < 3:
+    if not (name_after_label or name_before_label):
         return None
 
     lower_lines = [ln.lower() for ln in lines]
 
-    # Locate the primary name marker — bail early if missing.
-    name_lower = search_label.lower()[:20]
-    marker_idx = next(
-        (i for i, ln in enumerate(lower_lines) if name_lower in ln),
-        None,
-    )
-    if marker_idx is None:
+    def _normalize_marker(m: str) -> str:
+        """Strip leading section numbers / punctuation so "2. MEMBER DETAILS"
+        matches a line that's just "MEMBER DETAILS" (the PDF may split
+        "2." and the label onto separate lines)."""
+        # Remove leading "1.", "2.1", "A.", "§", bullets, etc.
+        s = re.sub(r"^[\s\d.\-§•]+", "", m).strip()
+        return s.lower()[:20]
+
+    # Try both markers. Multi-page member docs (pension/payroll) often
+    # have the "before" marker ("2. MEMBER DETAILS") on a different page
+    # than the "after" marker ("SUMMARY OF DETAILS IN RESPECT "); earlier
+    # logic bailed on any page missing the primary, which dropped NI
+    # labels. Now we accept either — widening is still performed below.
+    candidates: list[tuple[str, int]] = []  # (which_label, marker_idx)
+    if name_after_label and len(name_after_label) >= 3:
+        nl = _normalize_marker(name_after_label)
+        if nl:
+            idx = next((i for i, ln in enumerate(lower_lines) if nl in ln), None)
+            if idx is not None:
+                candidates.append(("after", idx))
+    if name_before_label and len(name_before_label) >= 3:
+        nl = _normalize_marker(name_before_label)
+        if nl:
+            idx = next((i for i, ln in enumerate(lower_lines) if nl in ln), None)
+            if idx is not None:
+                candidates.append(("before", idx))
+
+    if not candidates:
         return None
 
-    # Build a set of line indices to include. Start with the name window.
+    # Build a set of line indices to include. Start with the marker window(s).
     keep: set[int] = set()
-    if name_after_label:
-        keep.update(range(max(0, marker_idx - lines_before),
-                          min(len(lines), marker_idx + lines_after + 1)))
-    else:
-        keep.update(range(max(0, marker_idx - lines_after),
-                          min(len(lines), marker_idx + lines_before + 1)))
+    for which, marker_idx in candidates:
+        if which == "after":
+            keep.update(range(max(0, marker_idx - lines_before),
+                              min(len(lines), marker_idx + lines_after + 1)))
+        else:
+            keep.update(range(max(0, marker_idx - lines_after),
+                              min(len(lines), marker_idx + lines_before + 1)))
 
     # Widen around each additional label that's actually present.
     for label in additional_labels or []:

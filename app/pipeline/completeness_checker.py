@@ -380,13 +380,35 @@ def _get_name_roster(doc, ollama_client, doc_id: str, onset: int) -> list[str]:
     return roster
 
 
+def _name_variants(name: str) -> list[str]:
+    """Return lowercased variants of *name* for substring matching.
+
+    Pension schemes, payroll registers, and many legacy systems render
+    names as "LASTNAME, FIRST INITIAL" while LLM rosters return them in
+    "First Last" order. This function produces both directions plus a
+    last-name-only variant (low precision but catches dense-layout docs
+    where only the surname appears on a given page).
+    """
+    tokens = [t for t in re.split(r"\s+", name.strip()) if t]
+    if not tokens:
+        return []
+    variants: list[str] = [" ".join(tokens).lower()]  # original order
+    if len(tokens) >= 2:
+        # "LAST, FIRST MIDDLE" pension-style
+        variants.append(f"{tokens[-1]}, {' '.join(tokens[:-1])}".lower())
+        # "LAST FIRST" (no comma)
+        variants.append(f"{tokens[-1]} {' '.join(tokens[:-1])}".lower())
+        # Last name alone (lowest precision, keep for sparse matches)
+        variants.append(tokens[-1].lower())
+    return variants
+
+
 def _build_name_pages_map(doc, roster: list[str]) -> dict[str, list[int]]:
     """Return a dict mapping each roster name to the pages where it appears.
 
-    Uses exact substring matching (case-insensitive) on PyMuPDF-extracted
-    text. Names returned by the roster LLM may be formatted differently
-    from the text (e.g. "John Smith" vs "SMITH, J"), but for members
-    listed as rendered text this hits most of them.
+    Matches multiple name variants (direct order, last-comma-first,
+    last-space-first, last-only) so pension/payroll docs that render
+    "SMITH, JOHN" still match an LLM roster entry "John Smith".
 
     Pages where text extraction fails (form-fields, scanned images) won't
     surface here — those rely on the fallback sequential scan in
@@ -399,7 +421,11 @@ def _build_name_pages_map(doc, roster: list[str]) -> dict[str, list[int]]:
         return {}
 
     name_to_pages: dict[str, list[int]] = {name: [] for name in roster}
-    lower_names = [(name, name.lower()) for name in roster]
+    # Build variant list per roster entry so we look up each page in the
+    # widest possible way.
+    variants_by_name: list[tuple[str, list[str]]] = [
+        (name, _name_variants(name)) for name in roster
+    ]
 
     try:
         for pg in range(pdf.page_count):
@@ -408,8 +434,8 @@ def _build_name_pages_map(doc, roster: list[str]) -> dict[str, list[int]]:
             if not text.strip():
                 continue
             text_lower = text.lower()
-            for name, name_lower in lower_names:
-                if name_lower in text_lower:
+            for name, variants in variants_by_name:
+                if any(v and v in text_lower for v in variants):
                     name_to_pages[name].append(pg)
     finally:
         pdf.close()
