@@ -747,6 +747,103 @@ export function linkJobToProject(jobId: string, projectId: string): Promise<JobS
   })
 }
 
+// ---- Step 39 #5 — re-run failed + job comparison (task #21) --------------
+
+export interface FailedDoc {
+  id: string
+  file_name: string
+  source_path: string
+  file_type: string
+  subject_count: number
+  extraction_status: string
+  segregation_has_pii: boolean
+}
+
+export interface FailedDocsResponse {
+  job_id: string
+  failed_count: number
+  docs: FailedDoc[]
+}
+
+/** List docs in a job that failed or produced 0 subjects despite having PII. */
+export function getFailedDocs(jobId: string): Promise<FailedDocsResponse> {
+  return api(`/jobs/${jobId}/failed-docs`)
+}
+
+export interface JobCoverage {
+  gov_id_pct: number
+  dob_pct: number
+  address_pct: number
+  email_pct: number
+  phone_pct: number
+}
+
+export interface JobStats {
+  job_id: string
+  status: string
+  created_at: string | null
+  subject_count: number
+  doc_count: number
+  coverage: JobCoverage
+  counts: { gov_id: number; dob: number; address: number; email: number; phone: number }
+  docs: Array<{ id: string; file_name: string; subject_count: number; status: string }>
+}
+
+export interface JobCompareResponse {
+  a: JobStats
+  b: JobStats
+  delta: {
+    subject_count: number
+    doc_count: number
+    gov_id_pct: number
+    dob_pct: number
+    address_pct: number
+    email_pct: number
+    phone_pct: number
+  }
+}
+
+/** Side-by-side comparison of two jobs' subject counts and coverage. */
+export function compareJobs(a: string, b: string): Promise<JobCompareResponse> {
+  const qs = new URLSearchParams({ a, b }).toString()
+  return api(`/jobs/compare?${qs}`)
+}
+
+// ---- Segregation flat view (task #24) ------------------------------------
+
+export interface SegregationFlatRow {
+  job_id: string
+  job_status: string | null
+  job_created_at: string | null
+  doc_id: string
+  file_name: string
+  file_type: string
+  size_bytes: number | null
+  document_type: string
+  contains_pii: boolean
+  field_count: number
+  country_hint: string | null
+  confidence: number | null
+  extraction_status: string
+}
+
+export interface SegregationFlatResponse {
+  project_id: string
+  rows: SegregationFlatRow[]
+  summary: {
+    total_files: number
+    pii_files: number
+    non_pii_files: number
+    jobs: number
+    unique_doc_types: number
+  }
+}
+
+/** Project-wide flat segregation table across all jobs. */
+export function getSegregationFlat(projectId: string): Promise<SegregationFlatResponse> {
+  return api(`/projects/${projectId}/segregation/flat`)
+}
+
 // ---------------------------------------------------------------------------
 // Diagnostic
 // ---------------------------------------------------------------------------
