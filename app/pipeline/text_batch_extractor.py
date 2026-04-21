@@ -117,7 +117,22 @@ def extract_with_markers(
             # India PAN/Aadhaar, BR CPF, etc.) trigger the gov-ID branch.
             # Segregation emits OTHER_ID for IDs that don't cleanly map to
             # the US enum.
-            if any(t in _fi for t in ("US_SSN", "GOV_ID", "IDENTIFICATION", "OTHER_ID", "NATIONAL_ID", "TAX_ID")):
+            if any(t in _fi for t in (
+                "US_SSN", "GOV_ID", "IDENTIFICATION", "OTHER_ID",
+                "NATIONAL_ID", "TAX_ID",
+                # Broadened 2026-04-21: Batch A lost TX87860944 because
+                # segregation labeled it US_DRIVER_LICENSE and this gate
+                # didn't activate. Add every gov-ID-ish segregation field
+                # type. Net effect: Strategy A prompt will ALWAYS ask the
+                # LLM for a gov ID when segregation indicated one exists.
+                "US_DRIVER_LICENSE", "DRIVER_LICENSE",
+                "US_PASSPORT", "PASSPORT", "PASSPORT_ICAO",
+                "UK_NINO", "NATIONAL_INSURANCE_UK", "NI_NUMBER",
+                "AADHAAR", "IN_AADHAAR", "PAN", "IN_PAN", "PAN_CARD",
+                "STUDENT_ID", "EMPLOYEE_ID", "EMPLOYER_ID",
+                "MEDICAL_RECORD", "MRN", "MEDICARE",
+                "INSURANCE_ID",
+            )):
                 _extra_fields += ", SSN/Tax ID"
                 _extra_json += ', "ssn": "123-45-6789"'
                 _extra_rules += "- ssn: Social Security Number, Tax ID, National ID, or similar government identifier.\n"
