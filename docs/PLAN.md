@@ -1201,8 +1201,39 @@ next benchmark run to pick up the new endpoints.
 | #22 | 0c0f344 | Stratified vision recovery — `_vision_recover` now round-robins missing-name roster so each name gets one page before any name gets two. Prevents a single high-density name from hogging the `scan_max_pages` budget. |
 
 Still pending:
-- #40 STRETCH — hard-doc stress test (benchmark moonshot) — folders staged in `docs/testingsamples/`, orchestrator scripts ready at `/tmp/serial_orchestrator.sh`. Needs uvicorn restart + user presence to monitor multi-hour run.
 - Frontend wiring for the new `/compare`, `/failed-docs`, and `/segregation/flat` endpoints — backend ready, UI to follow.
+
+#### Batch D stress test verdict (2026-04-21 evening, task #40)
+
+Stress test ran twice tonight, with a code fix landing between runs.
+
+| Run | Job | Duration | Subjects | CMG | AWIR | Gov ID | DOB | Verdict |
+|---|---|---|---|---|---|---|---|---|
+| Morning baseline (05:37) | 5ac90f9a | 40 min | 48 | 29 | 19 | 98% | 90% | **A+** |
+| Afternoon regression (11:30) | abc9ca65 | 99 min | 23 | **4** | 19 | 96% | 83% | **Fail** — CMG regression caught |
+| Evening re-run (16:34) | 613dd2bd | **60 min** | **47** | **26** | **21** | **100%** | **96%** | **A+** — matched/exceeded baseline |
+
+Root cause of afternoon regression: `filter_page_by_markers` only searched
+`name_after_label`, so CMG pension pages with "2. MEMBER DETAILS" +
+National Insurance labels (but no "SUMMARY OF DETAILS" marker) were
+skipped entirely. Strategy A saw 34/100 pages instead of the full
+66+ relevant pages, and the LLM returned names only.
+
+Fix (e71bc22):
+- Dual-marker filter tries both `name_after_label` and `name_before_label`.
+- `_normalize_marker()` strips leading section numbers so "2. MEMBER
+  DETAILS" matches a line rendered as just "MEMBER DETAILS".
+- `_name_variants()` in completeness_checker generates 4 name-order
+  permutations (direct, "LAST, FIRST", "LAST FIRST", last-only) so
+  vision-recovery text-grep hits pension-style "SMITH, J" rendering.
+
+Evening run result with fix: CMG `26 actionable subjects (of 26
+names), 79% complete` — up from `0 actionable` in afternoon. All 26
+CMG subjects carry `UK_NINO` gov ID, DOB, and address.
+
+Tonight's run also outperformed the morning baseline on DOB coverage
+(96% vs 90%) because the dual-marker filter now captures the "2.4
+Date of Birth" row reliably on the MEMBER DETAILS page.
 
 #### Still pending follow-ups (as of 2026-04-19)
 
