@@ -1556,7 +1556,7 @@ def list_failed_docs(job_id: UUID, db: Session = Depends(get_db)):
         meta = d.metadata_json or {}
         ext_status = meta.get("extraction_status", "unknown")
         seg = meta.get("segregation", {}) if isinstance(meta.get("segregation"), dict) else {}
-        has_pii = seg.get("contains_pii") in (True, "true", "yes")
+        has_pii = bool(seg.get("pii_detected", seg.get("contains_pii")))
         subj_count = subj_by_doc.get(d.file_name, 0)
 
         is_failed = (

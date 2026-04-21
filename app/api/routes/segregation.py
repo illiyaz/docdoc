@@ -270,7 +270,7 @@ def list_flat(
     for d in docs:
         meta = d.metadata_json or {}
         seg = meta.get("segregation", {}) if isinstance(meta.get("segregation"), dict) else {}
-        has_pii = seg.get("contains_pii") in (True, "true", "yes")
+        has_pii = seg.get("pii_detected", seg.get("contains_pii")) in (True, "true", "yes")
         if has_pii:
             pii_count += 1
         doc_type = seg.get("document_type") or d.doc_type or "unknown"
