@@ -447,20 +447,42 @@ def _vision_recover(
 
     recovered: list[PIIRecord] = []
 
-    # Targeted pages: union of pages where any missing name appeared.
+    # Targeted pages: stratified by missing-name so every name gets
+    # at least one sample when the budget allows (task #22 — stratified
+    # N-sample redesign). Earlier logic sorted the union by page number,
+    # which let a single name hog the first N pages and starve the rest.
     targeted: set[int] = set()
+    per_name: dict[str, list[int]] = {}
     for name in missing_names:
-        for pg in name_pages_map.get(name, []):
-            if pg >= onset:
-                targeted.add(pg)
+        pages_for_name = sorted({p for p in name_pages_map.get(name, []) if p >= onset})
+        if pages_for_name:
+            per_name[name] = pages_for_name
+            targeted.update(pages_for_name)
 
     pages_to_try: list[int]
-    if targeted:
-        pages_to_try = sorted(targeted)[:scan_max_pages]
+    if per_name:
+        # Round-robin across missing names until we fill the budget.
+        stratified: list[int] = []
+        seen: set[int] = set()
+        name_queues = {n: list(pgs) for n, pgs in per_name.items()}
+        while len(stratified) < scan_max_pages and any(name_queues.values()):
+            for name in list(name_queues.keys()):
+                if len(stratified) >= scan_max_pages:
+                    break
+                queue = name_queues[name]
+                while queue:
+                    pg = queue.pop(0)
+                    if pg not in seen:
+                        stratified.append(pg)
+                        seen.add(pg)
+                        break
+                if not queue:
+                    del name_queues[name]
+        pages_to_try = stratified
         logger.info(
-            "Vision recovery: targeting %d pages containing missing names "
+            "Vision recovery: stratified %d pages across %d missing names "
             "(of %d candidate pages) in %s",
-            len(pages_to_try), len(targeted), doc.file_name,
+            len(pages_to_try), len(per_name), len(targeted), doc.file_name,
         )
     else:
         # Fallback — no text-layer hits. Use the legacy sequential scan.
