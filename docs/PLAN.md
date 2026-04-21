@@ -1183,6 +1183,27 @@ Deferred (too big for autonomous sprint, will tackle with user):
 - #22 Stratified N-sample redesign of roster + segregation sampling
 - #24 Segregation tab — project-wide flat table
 
+#### Quality sweep — 9 fixes landed 2026-04-19 late (post-Batch-C run)
+
+Bundle addressing pitfalls surfaced across Batch A/B/C/D runs plus the
+long-deferred Step 39 items. Uvicorn should be restarted before the
+next benchmark run to pick up the new endpoints.
+
+| # | Commit | Fix |
+|---|---|---|
+| #32 | d57b852 | `/api/jobs/run/stream` duplicate-insert race — endpoint creates the IngestionRun first, the background `_pipeline_generator` now reuses that row instead of re-inserting. Unblocks the 2026-04-19 daemon IntegrityError seen on full-pipeline submissions. |
+| #35 + #36 | d57b852 | `canonical_address` sanitizer in `app/rra/deduplicator.py` — `_sanitize_address` strips null-token placeholders, cleans `null null null` artifacts from raw strings, drops dicts with no zip / no street+city / no digits-in-raw. Fixes CMG address-line `null null null ... 94103` noise. |
+| #37 | d57b852 | `_normalize_masked_ssn` + tightened `_is_placeholder_ssn` — canonicalizes partial-mask SSNs (`xxx-xx-1234` → `XXX-XX-1234`, `***-**-1234` → `XXX-XX-1234`). Fully-masked values (`XXXXX`, `XXX-XX-XXXX`) rejected. |
+| #38 | d57b852 | CSV obfuscated-header inference — when `field_1, field_2, ...` headers fail keyword mapping, `_infer_columns_from_values` scans sample rows and assigns columns by value pattern (SSN, email, phone, DOB, zip, name-like). Batch B `X_hidden_columns.csv`: 0 subjects → full row-per-subject extraction. |
+| #39 | — (validated) | Mailpit smoke test — sent through `smtplib.SMTP("localhost", 3853)`, landed in mailpit UI. Confirms the `EmailSender` SMTP loop end-to-end. |
+| #21 | 9280414 | `GET /api/jobs/compare?a=&b=` + `GET /api/jobs/{id}/failed-docs` — backend primitives for the re-run-failed + job-comparison UI. Reads from existing `ingestion_run_id` / `metadata_json`, no schema change. |
+| #24 | d53c433 | `GET /api/projects/{id}/segregation/flat` — project-wide table of every file × every job, with document_type, contains_pii, field_count, country_hint, confidence, and a summary block. |
+| #22 | 0c0f344 | Stratified vision recovery — `_vision_recover` now round-robins missing-name roster so each name gets one page before any name gets two. Prevents a single high-density name from hogging the `scan_max_pages` budget. |
+
+Still pending:
+- #40 STRETCH — hard-doc stress test (benchmark moonshot) — folders staged in `docs/testingsamples/`, orchestrator scripts ready at `/tmp/serial_orchestrator.sh`. Needs uvicorn restart + user presence to monitor multi-hour run.
+- Frontend wiring for the new `/compare`, `/failed-docs`, and `/segregation/flat` endpoints — backend ready, UI to follow.
+
 #### Still pending follow-ups (as of 2026-04-19)
 
 | Priority | Item | Why | Size |
