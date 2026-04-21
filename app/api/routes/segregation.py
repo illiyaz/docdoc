@@ -229,6 +229,82 @@ def run_segregation(
 # GET /projects/{project_id}/segregation/groups
 # ---------------------------------------------------------------------------
 
+@router.get("/flat", summary="Project-wide flat segregation view across all jobs")
+def list_flat(
+    project_id: str,
+    db: Session = Depends(get_db),
+):
+    """Return one row per file across every job in the project.
+
+    Used by the Segregation tab to show a project-wide table without
+    the auditor needing to drill into each job. Pulls directly from
+    Document.metadata_json.segregation so it reflects live data.
+    """
+    try:
+        proj_uuid = UUID(project_id)
+    except ValueError:
+        raise HTTPException(400, "Invalid project_id")
+
+    from sqlalchemy import select as _select
+    runs = db.execute(
+        _select(IngestionRun)
+        .where(IngestionRun.project_id == proj_uuid)
+        .order_by(IngestionRun.created_at.desc())
+    ).scalars().all()
+
+    run_by_id = {r.id: r for r in runs}
+    run_ids = list(run_by_id.keys())
+    if not run_ids:
+        return {"project_id": project_id, "rows": [], "summary": {
+            "total_files": 0, "pii_files": 0, "non_pii_files": 0,
+            "jobs": 0, "unique_doc_types": 0,
+        }}
+
+    docs = db.execute(
+        _select(Document).where(Document.ingestion_run_id.in_(run_ids))
+    ).scalars().all()
+
+    rows: list[dict] = []
+    pii_count = 0
+    doc_types: set[str] = set()
+    for d in docs:
+        meta = d.metadata_json or {}
+        seg = meta.get("segregation", {}) if isinstance(meta.get("segregation"), dict) else {}
+        has_pii = seg.get("contains_pii") in (True, "true", "yes")
+        if has_pii:
+            pii_count += 1
+        doc_type = seg.get("document_type") or d.doc_type or "unknown"
+        doc_types.add(doc_type)
+        run = run_by_id.get(d.ingestion_run_id)
+        rows.append({
+            "job_id": str(d.ingestion_run_id),
+            "job_status": run.status if run else None,
+            "job_created_at": run.created_at.isoformat() if (run and run.created_at) else None,
+            "doc_id": str(d.id),
+            "file_name": d.file_name,
+            "file_type": d.file_type,
+            "size_bytes": d.size_bytes,
+            "document_type": doc_type,
+            "contains_pii": has_pii,
+            "field_count": len(seg.get("field_inventory", []) or []),
+            "country_hint": seg.get("country_hint"),
+            "confidence": seg.get("confidence"),
+            "extraction_status": meta.get("extraction_status", "unknown"),
+        })
+
+    return {
+        "project_id": project_id,
+        "rows": rows,
+        "summary": {
+            "total_files": len(rows),
+            "pii_files": pii_count,
+            "non_pii_files": len(rows) - pii_count,
+            "jobs": len(run_ids),
+            "unique_doc_types": len(doc_types),
+        },
+    }
+
+
 @router.get("/groups")
 def list_groups(
     project_id: str,
