@@ -529,22 +529,30 @@ def _pipeline_generator(
         except (ValueError, AttributeError):
             pass
 
-    run = IngestionRun(
-        id=job_uuid,
-        project_id=project_uuid,
-        source_path=source_directory,
-        config_hash="",
-        code_version="0.1.0",
-        initiated_by="api",
-        status="running",
-        started_at=datetime.now(timezone.utc),
-        config_snapshot={
-            "protocol_id": body.protocol_id,
-            "protocol_config_id": body.protocol_config_id,
-        },
-    )
-    db.add(run)
-    db.flush()
+    existing = db.get(IngestionRun, job_uuid)
+    if existing is not None:
+        run = existing
+        run.status = "running"
+        if run.started_at is None:
+            run.started_at = datetime.now(timezone.utc)
+        db.flush()
+    else:
+        run = IngestionRun(
+            id=job_uuid,
+            project_id=project_uuid,
+            source_path=source_directory,
+            config_hash="",
+            code_version="0.1.0",
+            initiated_by="api",
+            status="running",
+            started_at=datetime.now(timezone.utc),
+            config_snapshot={
+                "protocol_id": body.protocol_id,
+                "protocol_config_id": body.protocol_config_id,
+            },
+        )
+        db.add(run)
+        db.flush()
 
     try:
         # --- Stage 1: Discovery ---

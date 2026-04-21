@@ -93,6 +93,86 @@ def _build_column_map(headers: list[str]) -> dict[str, int]:
     return mapping
 
 
+# Value-based column inference for obfuscated headers (field_1, field_2, ...).
+# Each entry: (pii_field, regex, min_match_ratio).
+_VALUE_PATTERNS: tuple[tuple[str, re.Pattern[str], float], ...] = (
+    ("ssn", re.compile(r"^\s*\d{3}-?\d{2}-?\d{4}\s*$"), 0.6),
+    ("email", re.compile(r"^[\w.+-]+@[\w-]+\.[\w.-]+$"), 0.6),
+    ("phone", re.compile(r"^[\s()+\-]*\d[\d\s()\-]{7,}\d\s*$"), 0.6),
+    ("dob", re.compile(r"^\s*\d{1,4}[-/]\d{1,2}[-/]\d{1,4}\s*$"), 0.6),
+    ("zip", re.compile(r"^\s*\d{5}(?:-\d{4})?\s*$"), 0.6),
+)
+
+# Name inference: two or more capitalized tokens, no digits, reasonable length.
+_NAME_LIKE = re.compile(r"^[A-Z][A-Za-z'\-]{1,}(?:\s+[A-Z][A-Za-z'.\-]{1,}){1,3}$")
+
+
+def _infer_columns_from_values(
+    headers: list[str],
+    data_rows: list[list[str]],
+    already_mapped: dict[str, int],
+    sample_size: int = 25,
+) -> dict[str, int]:
+    """Score each column against value patterns; assign unused columns.
+
+    Returns updates to merge into the header-based mapping. Columns already
+    taken by the header pass are skipped. Name inference runs last so it
+    only claims columns not claimed by stricter patterns.
+    """
+    if not data_rows:
+        return {}
+
+    num_cols = len(headers)
+    taken_cols = set(already_mapped.values())
+    taken_fields = set(already_mapped.keys())
+    updates: dict[str, int] = {}
+
+    samples: list[list[str]] = [[] for _ in range(num_cols)]
+    for row in data_rows[:sample_size]:
+        for c in range(num_cols):
+            if c < len(row):
+                val = (row[c] or "").strip()
+                if val:
+                    samples[c].append(val)
+
+    # Strict value-based patterns (SSN, email, phone, DOB, zip).
+    for field, pattern, min_ratio in _VALUE_PATTERNS:
+        if field in taken_fields:
+            continue
+        best_col = -1
+        best_ratio = 0.0
+        for c in range(num_cols):
+            if c in taken_cols or not samples[c]:
+                continue
+            hits = sum(1 for v in samples[c] if pattern.match(v))
+            ratio = hits / len(samples[c])
+            if ratio >= min_ratio and ratio > best_ratio:
+                best_ratio = ratio
+                best_col = c
+        if best_col >= 0:
+            updates[field] = best_col
+            taken_cols.add(best_col)
+            taken_fields.add(field)
+
+    # Name inference: only if no name column has been assigned yet.
+    has_name = any(k in taken_fields for k in ("full_name", "first_name", "last_name"))
+    if not has_name:
+        best_col = -1
+        best_ratio = 0.0
+        for c in range(num_cols):
+            if c in taken_cols or not samples[c]:
+                continue
+            hits = sum(1 for v in samples[c] if _NAME_LIKE.match(v))
+            ratio = hits / len(samples[c])
+            if ratio >= 0.5 and ratio > best_ratio:
+                best_ratio = ratio
+                best_col = c
+        if best_col >= 0:
+            updates["full_name"] = best_col
+
+    return updates
+
+
 def _assemble_name(row: list[str], cols: dict[str, int]) -> str | None:
     """Return the subject's name, preferring full_name over first+last."""
     if "full_name" in cols and row[cols["full_name"]].strip():
@@ -159,6 +239,23 @@ def extract_from_csv(
     # Need at least a name column and one other PII column to call this a win.
     has_name = "full_name" in cols or ("first_name" in cols and "last_name" in cols) or "first_name" in cols
     has_other = any(k in cols for k in ("ssn", "dob", "email", "phone", "address", "street", "zip"))
+
+    # Obfuscated-header fallback: infer columns from sample values.
+    # Task #38 — when headers are field_1/field_2/... the name-based map
+    # comes back empty. Scan a few rows to identify PII columns by their
+    # value patterns (SSN, email, phone, DOB, zip, name-like tokens).
+    if not (has_name and has_other):
+        inferred = _infer_columns_from_values(headers, rows[1:], cols)
+        if inferred:
+            cols = {**cols, **inferred}
+            has_name = "full_name" in cols or ("first_name" in cols and "last_name" in cols) or "first_name" in cols
+            has_other = any(k in cols for k in ("ssn", "dob", "email", "phone", "address", "street", "zip"))
+            if has_name and has_other:
+                logger.info(
+                    "CSV extractor: %s — obfuscated headers, inferred columns "
+                    "from values: %s", path.name, sorted(inferred.keys()),
+                )
+
     if not (has_name and has_other):
         logger.info(
             "CSV extractor: header of %s does not yield recognisable PII columns "

@@ -73,9 +73,94 @@ def _best_value(values: list[str | None]) -> str | None:
     return candidates[0]
 
 
+_NULL_ADDRESS_TOKENS = frozenset({
+    "null", "none", "nan", "n/a", "na", "nil", "-", "--", "undefined",
+    "(none)", "(null)", "not available", "not provided",
+})
+
+
+def _clean_address_token(value: str | None) -> str | None:
+    """Return None if *value* is a null-ish placeholder; else stripped value."""
+    if value is None:
+        return None
+    s = str(value).strip()
+    if not s:
+        return None
+    if s.lower() in _NULL_ADDRESS_TOKENS:
+        return None
+    return s
+
+
+def _clean_raw_address_string(raw: str) -> str:
+    """Strip 'null null null' / standalone null tokens from address string.
+
+    Handles the CMG-style dict rendering where missing street/city/state are
+    stringified as "null". Collapses repeated whitespace and trailing commas.
+    """
+    import re as _re
+    # Remove standalone null-ish tokens (word-bounded, case-insensitive)
+    cleaned = _re.sub(
+        r"\b(?:null|none|nan|n/a|na|nil|undefined)\b",
+        "",
+        raw,
+        flags=_re.IGNORECASE,
+    )
+    # Collapse ", ," and runs of commas/whitespace
+    cleaned = _re.sub(r"(?:\s*,\s*){2,}", ", ", cleaned)
+    cleaned = _re.sub(r"\s+", " ", cleaned).strip()
+    cleaned = cleaned.strip(",;- ").strip()
+    return cleaned
+
+
+def _address_is_junk(addr: dict) -> bool:
+    """Return True when an address dict has no meaningful content.
+
+    Junk = no street/city/state/zip/raw after null-token cleanup.
+    """
+    if not addr:
+        return True
+    street = _clean_address_token(addr.get("street"))
+    city = _clean_address_token(addr.get("city"))
+    state = _clean_address_token(addr.get("state"))
+    zp = _clean_address_token(addr.get("zip"))
+    raw = _clean_address_token(addr.get("raw"))
+    if raw:
+        raw = _clean_raw_address_string(raw) or None
+    # Need at least zip OR (street AND city) OR a non-trivial raw string
+    if zp:
+        return False
+    if street and city:
+        return False
+    if raw and len(raw) >= 8 and any(ch.isdigit() for ch in raw):
+        return False
+    return True
+
+
+def _sanitize_address(addr: dict | None) -> dict | None:
+    """Null out placeholder tokens, strip 'null' from raw; drop if junk."""
+    if not addr or not isinstance(addr, dict):
+        return None
+    cleaned = dict(addr)
+    for key in ("street", "city", "state", "zip", "country"):
+        if key in cleaned:
+            cleaned[key] = _clean_address_token(cleaned.get(key))
+    raw = cleaned.get("raw")
+    if isinstance(raw, str):
+        stripped = _clean_raw_address_string(raw)
+        cleaned["raw"] = stripped or None
+    if _address_is_junk(cleaned):
+        return None
+    return cleaned
+
+
 def _best_address(addresses: list[dict | None]) -> dict | None:
-    """Pick canonical address: most frequent postal code wins."""
-    valid = [a for a in addresses if a]
+    """Pick canonical address: most frequent postal code wins.
+
+    Junk addresses (all-null tokens, empty dicts) are filtered upfront and
+    null-token artifacts ('null null null') are stripped from raw strings.
+    """
+    valid = [_sanitize_address(a) for a in addresses]
+    valid = [a for a in valid if a]
     if not valid:
         return None
 

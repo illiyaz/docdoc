@@ -682,10 +682,30 @@ def _is_placeholder_ssn(value: str) -> bool:
         return True
     # Reject values that don't look remotely like a gov ID: no digits at all,
     # or <4 digits total. Real SSNs / NI / PAN / Aadhaar etc. all have ≥4 digits.
+    # Fully-masked values ("XXXXX", "XXXX-XX", "XXX-XX-XXXX") have zero digits
+    # and are rejected here. Partial masks ("XXX-XX-1234") have ≥4 visible
+    # digits and are kept — they're valuable breach markers.
     digits_only = re.sub(r"\D", "", stripped)
     if len(digits_only) < 4:
         return True
     return False
+
+
+def _normalize_masked_ssn(value: str | None) -> str | None:
+    """Canonicalize partial-masked SSN strings (e.g. ``xxx-xx-1234``).
+
+    Uppercases mask characters (``x``/``*``/``#`` → ``X``), preserves visible
+    digits and separators. Returns None when the caller should drop the value
+    (via :func:`_is_placeholder_ssn`).
+    """
+    if not value or not isinstance(value, str):
+        return None
+    stripped = value.strip()
+    if not stripped or _is_placeholder_ssn(stripped):
+        return None
+    # Normalize mask chars to uppercase X for display consistency.
+    normalized = re.sub(r"[xX*#]", "X", stripped)
+    return normalized
 
 
 def _is_placeholder_address(value: str) -> bool:
@@ -881,7 +901,9 @@ def _parse_batch_response(
 
         ssn = entry.get("ssn")
         if ssn and isinstance(ssn, str) and len(ssn) >= 4 and not _is_placeholder_ssn(ssn):
-            entity_types.append("US_SSN")
+            ssn = _normalize_masked_ssn(ssn) or None
+            if ssn:
+                entity_types.append("US_SSN")
         else:
             ssn = None
 
