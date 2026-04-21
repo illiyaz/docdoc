@@ -259,6 +259,83 @@ def list_recent_jobs(
     return [_ingestion_run_summary(run, db) for run in runs]
 
 
+def _job_stats(run: IngestionRun, db: Session) -> dict:
+    """Return a normalized stats bundle for one job (used by compare)."""
+    subjects = db.execute(
+        select(NotificationSubject).where(NotificationSubject.ingestion_run_id == run.id)
+    ).scalars().all()
+    docs = db.execute(
+        select(Document).where(Document.ingestion_run_id == run.id)
+    ).scalars().all()
+
+    gov_id = sum(1 for s in subjects if s.canonical_government_id)
+    dob = sum(1 for s in subjects if s.canonical_dob)
+    addr = sum(1 for s in subjects if s.canonical_address)
+    email = sum(1 for s in subjects if s.canonical_email)
+    phone = sum(1 for s in subjects if s.canonical_phone)
+    total = len(subjects) or 1  # avoid div-by-zero in pct calc
+
+    doc_stats: list[dict] = []
+    for d in docs:
+        doc_subj = [s for s in subjects if s.source_document_name == d.file_name]
+        doc_stats.append({
+            "id": str(d.id),
+            "file_name": d.file_name,
+            "subject_count": len(doc_subj),
+            "status": (d.metadata_json or {}).get("extraction_status", "unknown"),
+        })
+
+    return {
+        "job_id": str(run.id),
+        "status": run.status,
+        "created_at": run.created_at.isoformat() if run.created_at else None,
+        "subject_count": len(subjects),
+        "doc_count": len(docs),
+        "coverage": {
+            "gov_id_pct": round(gov_id * 100 / total, 1),
+            "dob_pct": round(dob * 100 / total, 1),
+            "address_pct": round(addr * 100 / total, 1),
+            "email_pct": round(email * 100 / total, 1),
+            "phone_pct": round(phone * 100 / total, 1),
+        },
+        "counts": {"gov_id": gov_id, "dob": dob, "address": addr, "email": email, "phone": phone},
+        "docs": doc_stats,
+    }
+
+
+@router.get("/compare", summary="Compare two jobs side-by-side (stats + per-doc delta)")
+def compare_jobs(
+    a: UUID = Query(..., description="Baseline job id"),
+    b: UUID = Query(..., description="Candidate job id"),
+    db: Session = Depends(get_db),
+):
+    """Return side-by-side stats for two ingestion runs.
+
+    Response shape:
+      { "a": {...stats...}, "b": {...stats...}, "delta": {
+          "subject_count": +N, "gov_id_pct": +X.X, ...
+      } }
+    """
+    run_a = db.get(IngestionRun, a)
+    run_b = db.get(IngestionRun, b)
+    if run_a is None:
+        raise HTTPException(status_code=404, detail=f"Job {a} not found")
+    if run_b is None:
+        raise HTTPException(status_code=404, detail=f"Job {b} not found")
+
+    stats_a = _job_stats(run_a, db)
+    stats_b = _job_stats(run_b, db)
+
+    delta = {
+        "subject_count": stats_b["subject_count"] - stats_a["subject_count"],
+        "doc_count": stats_b["doc_count"] - stats_a["doc_count"],
+    }
+    for key in ("gov_id_pct", "dob_pct", "address_pct", "email_pct", "phone_pct"):
+        delta[key] = round(stats_b["coverage"][key] - stats_a["coverage"][key], 1)
+
+    return {"a": stats_a, "b": stats_b, "delta": delta}
+
+
 @router.post("/upload", summary="Upload files for a new job")
 async def upload_files(files: list[UploadFile] = File(...)):
     """Save uploaded files to a temp directory and return an upload_id.
@@ -1445,6 +1522,59 @@ def get_job(job_id: str, db: Session = Depends(get_db)):
         "subject_count": len(nl.subject_ids) if nl.subject_ids else 0,
         "created_at": nl.created_at.isoformat() if nl.created_at else None,
     }
+
+
+@router.get("/{job_id}/failed-docs", summary="List docs from a job that produced no subjects or failed")
+def list_failed_docs(job_id: UUID, db: Session = Depends(get_db)):
+    """Return docs from *job_id* that need a rerun.
+
+    A doc is "failed" if:
+      - Its `metadata_json.extraction_status` is "failed" or missing after a
+        completed run, OR
+      - It produced zero NotificationSubjects despite segregation flagging PII
+
+    Used by the "Re-run failed" UI action (Step 39 #5).
+    """
+    run = db.get(IngestionRun, job_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+
+    docs = db.execute(
+        select(Document).where(Document.ingestion_run_id == job_id)
+    ).scalars().all()
+
+    subjects = db.execute(
+        select(NotificationSubject).where(NotificationSubject.ingestion_run_id == job_id)
+    ).scalars().all()
+    subj_by_doc: dict[str, int] = {}
+    for s in subjects:
+        key = s.source_document_name or ""
+        subj_by_doc[key] = subj_by_doc.get(key, 0) + 1
+
+    failed: list[dict] = []
+    for d in docs:
+        meta = d.metadata_json or {}
+        ext_status = meta.get("extraction_status", "unknown")
+        seg = meta.get("segregation", {}) if isinstance(meta.get("segregation"), dict) else {}
+        has_pii = seg.get("contains_pii") in (True, "true", "yes")
+        subj_count = subj_by_doc.get(d.file_name, 0)
+
+        is_failed = (
+            ext_status == "failed"
+            or (run.status == "completed" and has_pii and subj_count == 0)
+        )
+        if not is_failed:
+            continue
+        failed.append({
+            "id": str(d.id),
+            "file_name": d.file_name,
+            "source_path": d.source_path,
+            "file_type": d.file_type,
+            "subject_count": subj_count,
+            "extraction_status": ext_status,
+            "segregation_has_pii": has_pii,
+        })
+    return {"job_id": str(job_id), "failed_count": len(failed), "docs": failed}
 
 
 @router.get("/{job_id}/results", summary="Get job extraction results (masked)")
