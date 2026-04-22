@@ -4302,93 +4302,12 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
             except Exception:
                 logger.warning("Post-extraction gap analysis failed", exc_info=True)
 
-        # --- Stage 1.4: LLM Record Validation ---
-        # Validates extracted records using LLM context awareness.  Purges
-        # garbage (form codes, legal entities, empty names) so those pages
-        # appear as gaps and trigger vision fallback naturally.
-        if all_records and settings.llm_assist_enabled:
-            try:
-                from app.pipeline.record_validator import validate_records as _validate_records
-
-                _update_extraction_progress(
-                    db, run, stage="record_validation",
-                    message="Validating extracted records...",
-                    completed_doc_ids=completed_doc_ids,
-                    total_docs=len(approved_docs), current_doc=len(approved_docs),
-                    records_found=len(all_records),
-                    detail={"status": "running"},
-                )
-
-                # Group records by document for per-doc validation
-                from collections import defaultdict as _rv_dd
-                _rv_by_doc: dict[str, list] = _rv_dd(list)
-                for _rv_r in all_records:
-                    _rv_by_doc[_rv_r.source_document_id].append(_rv_r)
-
-                _total_purged = 0
-                _validated_records: list = []
-                for _rv_doc_key, _rv_doc_records in _rv_by_doc.items():
-                    # Find the document for type info
-                    _rv_doc = next(
-                        (d for d in approved_docs
-                         if str(d.id) == _rv_doc_key or d.source_path == _rv_doc_key),
-                        None,
-                    )
-                    _rv_doc_type = "unknown"
-                    _rv_doc_name = _rv_doc_key
-                    _rv_expected_fields: list[str] = []
-                    _rv_field_labels: list[str] = []
-                    if _rv_doc:
-                        _rv_seg = (dict(_rv_doc.metadata_json or {})).get("segregation", {})
-                        if isinstance(_rv_seg, dict):
-                            _rv_doc_type = _rv_seg.get("document_type", "unknown")
-                            _rv_expected_fields = [
-                                t for t in (_rv_seg.get("field_inventory") or [])
-                                if isinstance(t, str) and t
-                            ]
-                            _rv_field_labels = [
-                                f.get("name") for f in (_rv_seg.get("fields") or [])
-                                if isinstance(f, dict) and f.get("name")
-                            ]
-                        _rv_doc_name = _rv_doc.file_name or _rv_doc_key
-
-                    try:
-                        from app.llm.client import OllamaClient as _RVOllama
-                        _rv_client = _RVOllama(db_session=db, timeout_s=300)
-                        _rv_valid, _rv_purged, _rv_stats = _validate_records(
-                            records=_rv_doc_records,
-                            document_type=_rv_doc_type,
-                            document_name=_rv_doc_name,
-                            ollama_client=_rv_client,
-                            doc_id=str(_rv_doc.id) if _rv_doc else None,
-                            expected_fields=_rv_expected_fields or None,
-                            field_labels=_rv_field_labels or None,
-                        )
-                        _validated_records.extend(_rv_valid)
-                        _total_purged += len(_rv_purged)
-                    except Exception:
-                        logger.debug("Record validation failed for %s", _rv_doc_name, exc_info=True)
-                        _validated_records.extend(_rv_doc_records)
-
-                if _total_purged > 0:
-                    logger.info(
-                        "Record validation: purged %d/%d garbage records across %d docs",
-                        _total_purged, len(all_records), len(_rv_by_doc),
-                    )
-                    all_records = _validated_records
-
-                _update_extraction_progress(
-                    db, run, stage="record_validation",
-                    message=f"Validated {len(all_records)} records ({_total_purged} purged)",
-                    completed_doc_ids=completed_doc_ids,
-                    total_docs=len(approved_docs), current_doc=len(approved_docs),
-                    records_found=len(all_records),
-                    detail={"purged": _total_purged, "status": "complete"},
-                )
-            except ImportError:
-                logger.info("Record validator not available — skipping")
-            except Exception:
-                logger.warning("Record validation failed — keeping all records", exc_info=True)
+        # NOTE: Record Validation moved to Stage 1.55 (after completeness
+        # recovery + gap-fill) per BIG_FIXES.md task A1 — running the
+        # strictest filter at the FRONT of the recovery chain created a
+        # one-way gate: 5 real CMG members got purged before gap-fill /
+        # completeness could recover them. Validator now runs on the
+        # full merged output.
 
         # --- Stage 1.45: Completeness-driven vision recovery ---
         # If unique subjects found << expected, get a name roster from summary
@@ -4658,6 +4577,96 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
             logger.info("Gap detector/filler not available — skipping")
         except Exception:
             logger.warning("Gap detection + fill failed", exc_info=True)
+
+        # --- Stage 1.55: LLM Record Validation (FINAL filter) ---
+        # Runs AFTER gap-fill + completeness recovery so every discovery
+        # path gets to contribute before the strictest purity check.
+        # Purges garbage (form codes, legal entities, parsing artifacts)
+        # but is adaptive: when segregation's field contract is available,
+        # partial-but-consistent records (name+gov_id+DOB, missing address)
+        # are VALID because the contract said those fields existed for
+        # this doc.
+        if all_records and settings.llm_assist_enabled:
+            try:
+                from app.pipeline.record_validator import validate_records as _validate_records
+
+                _update_extraction_progress(
+                    db, run, stage="record_validation",
+                    message="Validating extracted records...",
+                    completed_doc_ids=completed_doc_ids,
+                    total_docs=len(approved_docs), current_doc=len(approved_docs),
+                    records_found=len(all_records),
+                    detail={"status": "running"},
+                )
+
+                from collections import defaultdict as _rv_dd
+                _rv_by_doc: dict[str, list] = _rv_dd(list)
+                for _rv_r in all_records:
+                    _rv_by_doc[_rv_r.source_document_id].append(_rv_r)
+
+                _total_purged = 0
+                _validated_records: list = []
+                for _rv_doc_key, _rv_doc_records in _rv_by_doc.items():
+                    _rv_doc = next(
+                        (d for d in approved_docs
+                         if str(d.id) == _rv_doc_key or d.source_path == _rv_doc_key),
+                        None,
+                    )
+                    _rv_doc_type = "unknown"
+                    _rv_doc_name = _rv_doc_key
+                    _rv_expected_fields: list[str] = []
+                    _rv_field_labels: list[str] = []
+                    if _rv_doc:
+                        _rv_seg = (dict(_rv_doc.metadata_json or {})).get("segregation", {})
+                        if isinstance(_rv_seg, dict):
+                            _rv_doc_type = _rv_seg.get("document_type", "unknown")
+                            _rv_expected_fields = [
+                                t for t in (_rv_seg.get("field_inventory") or [])
+                                if isinstance(t, str) and t
+                            ]
+                            _rv_field_labels = [
+                                f.get("name") for f in (_rv_seg.get("fields") or [])
+                                if isinstance(f, dict) and f.get("name")
+                            ]
+                        _rv_doc_name = _rv_doc.file_name or _rv_doc_key
+
+                    try:
+                        from app.llm.client import OllamaClient as _RVOllama
+                        _rv_client = _RVOllama(db_session=db, timeout_s=300)
+                        _rv_valid, _rv_purged, _rv_stats = _validate_records(
+                            records=_rv_doc_records,
+                            document_type=_rv_doc_type,
+                            document_name=_rv_doc_name,
+                            ollama_client=_rv_client,
+                            doc_id=str(_rv_doc.id) if _rv_doc else None,
+                            expected_fields=_rv_expected_fields or None,
+                            field_labels=_rv_field_labels or None,
+                        )
+                        _validated_records.extend(_rv_valid)
+                        _total_purged += len(_rv_purged)
+                    except Exception:
+                        logger.debug("Record validation failed for %s", _rv_doc_name, exc_info=True)
+                        _validated_records.extend(_rv_doc_records)
+
+                if _total_purged > 0:
+                    logger.info(
+                        "Record validation (final): purged %d/%d garbage records across %d docs",
+                        _total_purged, len(all_records), len(_rv_by_doc),
+                    )
+                    all_records = _validated_records
+
+                _update_extraction_progress(
+                    db, run, stage="record_validation",
+                    message=f"Validated {len(all_records)} records ({_total_purged} purged)",
+                    completed_doc_ids=completed_doc_ids,
+                    total_docs=len(approved_docs), current_doc=len(approved_docs),
+                    records_found=len(all_records),
+                    detail={"purged": _total_purged, "status": "complete"},
+                )
+            except ImportError:
+                logger.info("Record validator not available — skipping")
+            except Exception:
+                logger.warning("Record validation failed — keeping all records", exc_info=True)
 
         # --- Stage 2: Entity Resolution ---
         _update_extraction_progress(

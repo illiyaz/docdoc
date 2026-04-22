@@ -153,6 +153,34 @@ def _sanitize_address(addr: dict | None) -> dict | None:
     return cleaned
 
 
+def _gov_id_match_key(gov_id: str | None) -> str:
+    """Return a mask-variant-insensitive key for a government ID.
+
+    Same person on two pages may have their SSN written as ``XXX-XX-2682``
+    on one and ``XXXXX2682`` on another. This key strips mask characters
+    and punctuation so both normalize to ``2682`` (or the full trailing
+    alphanumeric run for strict formats like UK_NINO ``YB146386C``).
+
+    Returns empty string for values too short / placeholder / unusable.
+    """
+    if not gov_id:
+        return ""
+    import re as _re
+    s = str(gov_id).strip().upper()
+    if not s:
+        return ""
+    # Strip mask chars + whitespace + punctuation
+    stripped = _re.sub(r"[X*#\s\-\._]", "", s)
+    if not stripped or len(stripped) < 4:
+        return ""
+    # Pure-digit → last 4 (US SSN / NL BSN / IL ID / most 9-digit formats).
+    if stripped.isdigit():
+        return stripped[-4:]
+    # Alphanumeric → use full normalized string (UK_NINO, IN_PAN, etc.
+    # where every character is load-bearing).
+    return stripped
+
+
 def _best_address(addresses: list[dict | None]) -> dict | None:
     """Pick canonical address: most frequent postal code wins.
 
@@ -277,25 +305,38 @@ class Deduplicator:
         """
         from sqlalchemy import text as sa_text
 
-        # Find duplicates: same canonical_name, same project
-        dupes = self.db.execute(sa_text("""
-            SELECT canonical_name, array_agg(subject_id ORDER BY subject_id) as ids
+        # Find duplicates: same canonical_name AND matching gov-ID key
+        # (mask-variant aware). Candidates come out of SQL; Python
+        # partitions them into buckets using _gov_id_match_key so a
+        # family of distinct people sharing a surname but with different
+        # gov IDs stay separate (BIG_FIXES #B2).
+        rows = self.db.execute(sa_text("""
+            SELECT canonical_name,
+                   subject_id,
+                   canonical_government_id
             FROM notification_subjects
             WHERE project_id = :pid AND canonical_name IS NOT NULL
-            GROUP BY canonical_name
-            HAVING count(*) > 1
+            ORDER BY canonical_name, subject_id
         """), {"pid": str(project_id)}).fetchall()
 
+        # Group by (canonical_name, gov_id_match_key). Records with a
+        # gov_id go into their own bucket; records with no gov_id share
+        # one bucket per name so they still merge together.
+        from collections import defaultdict as _dd
+        buckets: dict[tuple[str, str], list] = _dd(list)
+        for name, subj_id, gov_id in rows:
+            key = (name, _gov_id_match_key(gov_id))
+            buckets[key].append(subj_id)
+
+        dupes = [(key, ids) for key, ids in buckets.items() if len(ids) > 1]
         if not dupes:
             return 0
 
         total_deleted = 0
-        for row in dupes:
-            name, ids = row
-            keep_id = ids[0]  # keep first
+        for (name, _key), ids in dupes:
+            keep_id = ids[0]
             delete_ids = ids[1:]
 
-            # Merge page ranges from duplicates into the keeper
             for del_id in delete_ids:
                 dup = self.db.get(NotificationSubject, del_id)
                 keeper = self.db.get(NotificationSubject, keep_id)
@@ -522,7 +563,17 @@ class Deduplicator:
         )
 
     def _find_existing(self, ns: NotificationSubject) -> NotificationSubject | None:
-        """Look up by canonical_email, canonical_phone, or name+gov_id."""
+        """Look up by canonical_email, canonical_phone, or name+gov_id.
+
+        Guards against two previously-seen bugs (BIG_FIXES #B1, #B2):
+
+        B1 — mask-format variants: ``XXXXX2682`` and ``XXX-XX-2682`` are
+        the same SSN, so match uses :func:`_gov_id_match_key` (last-4
+        digits for numeric IDs, uppercase alphanumeric for strict IDs).
+        B2 — surname collapse: only merge on name-alone when neither
+        record has a gov ID. If both have gov IDs and they differ, these
+        are distinct people (e.g. 3 Bhudia siblings with distinct NIs).
+        """
         if ns.canonical_email:
             hit = (
                 self.db.query(NotificationSubject)
@@ -541,27 +592,34 @@ class Deduplicator:
             if hit is not None:
                 return hit
 
-        # Match by name + government ID type (same person, different pages)
-        if ns.canonical_name and ns.government_id_type and ns.project_id:
-            hit = (
+        # Match by name + same gov-ID value (mask-variant aware).
+        # Query by name/type then filter by normalized-gov-id in Python —
+        # the normalization isn't expressible as a pure SQL predicate.
+        ns_key = _gov_id_match_key(ns.canonical_government_id)
+        if ns.canonical_name and ns.project_id and ns_key:
+            candidates = (
                 self.db.query(NotificationSubject)
                 .filter(
                     NotificationSubject.canonical_name == ns.canonical_name,
-                    NotificationSubject.government_id_type == ns.government_id_type,
                     NotificationSubject.project_id == ns.project_id,
                 )
-                .first()
+                .all()
             )
-            if hit is not None:
-                return hit
+            for cand in candidates:
+                cand_key = _gov_id_match_key(cand.canonical_government_id)
+                if cand_key and cand_key == ns_key:
+                    return cand
 
-        # Match by name only within same project (no gov ID but same person)
-        if ns.canonical_name and ns.project_id:
+        # Match by name only — but ONLY when neither side has a gov ID.
+        # Prevents surname-collapse between distinct people sharing a
+        # surname where each has a different gov ID.
+        if ns.canonical_name and ns.project_id and not ns.canonical_government_id:
             hit = (
                 self.db.query(NotificationSubject)
                 .filter(
                     NotificationSubject.canonical_name == ns.canonical_name,
                     NotificationSubject.project_id == ns.project_id,
+                    NotificationSubject.canonical_government_id.is_(None),
                 )
                 .first()
             )

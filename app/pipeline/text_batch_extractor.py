@@ -90,6 +90,15 @@ def extract_with_markers(
         sum(len(t) for t in page_texts.values()) // max(len(page_texts), 1),
     )
 
+    # Compute boilerplate (lines repeated across most pages) once per doc
+    # so address validation can reject page-header / footer strings.
+    _boilerplate = _compute_boilerplate_lines(page_texts)
+    if _boilerplate:
+        logger.info(
+            "Marker filter: %d boilerplate line(s) detected (page-header filter active)",
+            len(_boilerplate),
+        )
+
     # Batch snippets (can do 10 per call since they're tiny)
     sorted_pages = sorted(snippets.keys())
     all_records: list[PIIRecord] = []
@@ -184,7 +193,7 @@ def extract_with_markers(
             _marker_consec_fail = 0
 
             batch_page_texts = {pg: page_texts.get(pg, "") for pg in batch_pages}
-            records = _parse_batch_response(response, doc_id, batch_pages, batch_page_texts, country_hint=country_hint)
+            records = _parse_batch_response(response, doc_id, batch_pages, batch_page_texts, country_hint=country_hint, boilerplate=_boilerplate)
             all_records.extend(records)
 
         except Exception:
@@ -210,7 +219,7 @@ def extract_with_markers(
                     calls_made += 1
                     _marker_consec_fail = 0  # model alive
                     retry_page_texts = {retry_pg: page_texts.get(retry_pg, "")}
-                    retry_records = _parse_batch_response(retry_resp, doc_id, [retry_pg], retry_page_texts, country_hint=country_hint)
+                    retry_records = _parse_batch_response(retry_resp, doc_id, [retry_pg], retry_page_texts, country_hint=country_hint, boilerplate=_boilerplate)
                     all_records.extend(retry_records)
                 except Exception:
                     _marker_consec_fail += 1
@@ -276,6 +285,16 @@ def extract_text_batch(
     if not content_pages:
         return []
 
+    # Boilerplate detection (BIG_FIXES #B3) — lines repeated across >30%
+    # of pages are page-header / footer strings. Threaded into
+    # _parse_batch_response so addresses matching these get dropped.
+    _boilerplate = _compute_boilerplate_lines(page_texts)
+    if _boilerplate:
+        logger.info(
+            "Text batch: %d boilerplate line(s) detected (page-header filter active)",
+            len(_boilerplate),
+        )
+
     all_records: list[PIIRecord] = []
     calls_made = 0
     consecutive_failures = 0       # circuit breaker — model health signal
@@ -338,7 +357,7 @@ def extract_text_batch(
             consecutive_failures = 0  # reset on success
 
             batch_page_texts = {pg: page_texts.get(pg, "") for pg in batch_pages}
-            records = _parse_batch_response(response, doc_id, batch_pages, batch_page_texts, country_hint=country_hint)
+            records = _parse_batch_response(response, doc_id, batch_pages, batch_page_texts, country_hint=country_hint, boilerplate=_boilerplate)
             all_records.extend(records)
 
             # --- Post-batch quality gate (runs once after first successful batch) ---
@@ -417,6 +436,7 @@ def extract_text_batch(
                     retry_records = _parse_batch_response(
                         retry_response, doc_id, [retry_pg], retry_page_texts,
                         country_hint=country_hint,
+                        boilerplate=_boilerplate,
                     )
                     all_records.extend(retry_records)
                 except Exception:
@@ -741,17 +761,99 @@ def _is_placeholder_name(value: str) -> bool:
     return False
 
 
+def _compute_boilerplate_lines(
+    page_texts: dict[int, str],
+    threshold_ratio: float = 0.30,
+    min_length: int = 6,
+) -> frozenset[str]:
+    """Return strings that appear on ≥ ``threshold_ratio`` of pages.
+
+    Used to filter page-header / footer strings that the LLM may capture
+    as values. Example: AWIR-482 has ``"77 450-MENDONCA"`` as a
+    distribution code printed on every page — without this filter the
+    LLM extracted it as Stacey Albright's address (BIG_FIXES #B3).
+
+    Two strategies:
+      1. Line-exact: whole lines repeated across pages (invariant
+         footers, company-name headers).
+      2. Token-substring: 4+ character tokens appearing on most pages
+         inside line fragments (catches "77 450-MENDONCA" where
+         the surrounding " 02/15/2017 PAGE 27" changes per page).
+
+    Returns a lowercased set usable by :func:`_is_boilerplate_address`.
+    """
+    if not page_texts or len(page_texts) < 3:
+        return frozenset()
+    from collections import Counter as _Counter
+    import re as _re
+
+    n_pages = len(page_texts)
+    threshold = max(2, int(n_pages * threshold_ratio))
+
+    # Pass 1: exact-line repetition.
+    line_counts: _Counter = _Counter()
+    for text in page_texts.values():
+        page_lines = {ln.strip().lower() for ln in text.split("\n") if ln.strip()}
+        for ln in page_lines:
+            if len(ln) >= min_length:
+                line_counts[ln] += 1
+    repeating_lines = {ln for ln, c in line_counts.items() if c >= threshold}
+
+    # Pass 2: token-substring repetition (catches headers with varying
+    # page-number / date suffixes). Use two token patterns:
+    #  (a) Single alphanumeric runs of length >= 6 — catches "MENDONCA",
+    #      "MIDDLEFIELD", company / division codes used in footers.
+    #  (b) Multi-token groups of up to 3 adjacent runs — catches phrases
+    #      like "77 450-MENDONCA 02/15/2017".
+    single_pat = _re.compile(r"\b[\w/\-]{6,}\b")
+    multi_pat = _re.compile(r"\b[\w/\-]{4,}(?:\s+[\w/\-]{2,}){1,3}\b")
+    token_counts: _Counter = _Counter()
+    for text in page_texts.values():
+        page_tokens = {m.group(0).strip().lower() for m in single_pat.finditer(text)}
+        page_tokens |= {m.group(0).strip().lower() for m in multi_pat.finditer(text)}
+        for tok in page_tokens:
+            if len(tok) >= min_length:
+                token_counts[tok] += 1
+    repeating_tokens = {tok for tok, c in token_counts.items() if c >= threshold}
+
+    return frozenset(repeating_lines | repeating_tokens)
+
+
+def _is_boilerplate_address(value: str, boilerplate: frozenset[str]) -> bool:
+    """True if *value* matches a known boilerplate line or token."""
+    if not boilerplate or not value:
+        return False
+    v = value.strip().lower()
+    if not v:
+        return False
+    if v in boilerplate:
+        return True
+    # Also reject if the value is a substring of, or contains, any
+    # boilerplate line — addresses extracted from a footer like
+    # "77 450-MENDONCA  02/15/2017  PAGE  27" would otherwise slip
+    # through because the page number changes per page.
+    for bp in boilerplate:
+        if len(bp) < 4:
+            continue
+        if bp in v or v in bp:
+            return True
+    return False
+
+
 def _parse_batch_response(
     response: str,
     doc_id: str,
     batch_pages: list[int],
     page_texts: dict[int, str] | None = None,
     country_hint: str | None = None,
+    boilerplate: frozenset[str] | None = None,
 ) -> list[PIIRecord]:
     """Parse LLM JSON response into PIIRecord objects.
 
     When *page_texts* is provided, validates extracted values exist
     on the claimed page — prevents cross-page contamination in batches.
+    When *boilerplate* is provided, address values matching page-header/
+    footer strings are dropped (BIG_FIXES #B3).
     """
     records: list[PIIRecord] = []
 
@@ -857,6 +959,11 @@ def _parse_batch_response(
             # other validation.
             if _is_placeholder_address(addr_clean):
                 logger.debug("Dropping placeholder address: %r", addr_clean[:50])
+            elif boilerplate and _is_boilerplate_address(addr_clean, boilerplate):
+                logger.debug(
+                    "Dropping boilerplate address (page-header repeated): %r",
+                    addr_clean[:50],
+                )
             else:
                 # Must contain a number (street addresses start with numbers)
                 has_number = any(c.isdigit() for c in addr_clean[:10])
