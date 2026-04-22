@@ -193,15 +193,48 @@ def validate_records(
 
     # Split records into valid and garbage.
     # Safety override: auto-reinstate when the LLM flags a record as
-    # GARBAGE but the record has a real name + at least 2 anchor fields
-    # populated. The LLM is non-deterministic; between identical runs it
-    # has purged real members (e.g. CMG I Andrews, V Bhanderi, C D Bhatt
-    # all had name+NI+DOB+address but still got flagged in one run).
-    # This override is adaptive — it applies to any doc type because it
-    # counts anchors, not hardcoded field names.
+    # GARBAGE but the record has a real name + enough anchor fields
+    # populated (relative to the document's contract). The LLM is
+    # non-deterministic; between identical runs it has purged real
+    # members that had complete data. This override is adaptive —
+    # threshold scales with contract size so thin-schema docs (contact
+    # list: PERSON + PHONE) don't get over-protected to zero and rich-
+    # schema docs (pension: PERSON + NI + DOB + addr) still apply a
+    # meaningful floor.
     valid = []
     purged = []
     reinstated = 0
+
+    # Map contract field types to anchor categories this validator
+    # recognises. Names are not anchors (they're the subject itself).
+    _CONTRACT_ANCHOR_TYPES = {
+        "US_SSN", "UK_NINO", "NI_NUMBER", "AADHAAR", "PAN", "IN_PAN",
+        "NATIONAL_ID", "GOV_ID", "OTHER_ID", "TAX_ID", "GOVERNMENT_ID",
+        "US_DRIVER_LICENSE", "DRIVER_LICENSE", "US_PASSPORT", "PASSPORT",
+        "STUDENT_ID", "EMPLOYEE_ID", "EMPLOYER_ID", "MEDICAL_RECORD",
+        "MRN", "INSURANCE_ID", "ACCOUNT_NUMBER", "MEMBER_ID",
+        "DATE_OF_BIRTH",
+        "LOCATION", "ADDRESS",
+        "EMAIL_ADDRESS", "EMAIL",
+        "PHONE_NUMBER", "PHONE_US", "PHONE_INTL",
+        "CREDIT_CARD", "BANK_ACCOUNT", "US_BANK_NUMBER",
+    }
+
+    # Count how many anchor fields the contract expects for this doc.
+    contract_anchor_count = 0
+    if expected_fields:
+        contract_anchor_count = sum(
+            1 for f in expected_fields
+            if f and f.upper() in _CONTRACT_ANCHOR_TYPES
+        )
+    # Threshold: at least half of contract's expected anchors, but
+    # always ≥1 (so a single-anchor contract still protects real
+    # records). When no contract is available, fall back to ≥2 for
+    # conservative behaviour.
+    if contract_anchor_count > 0:
+        required_anchors = max(1, (contract_anchor_count + 1) // 2)
+    else:
+        required_anchors = 2
 
     def _is_real_name(n):
         if not n or len(n.strip()) < 3:
@@ -227,7 +260,9 @@ def validate_records(
     for i, r in enumerate(records):
         idx = i + 1  # 1-indexed
         verdict = verdicts.get(idx, "VALID")  # default to VALID if not mentioned
-        if verdict == "GARBAGE" and _is_real_name(r.raw_name) and _anchor_count(r) >= 2:
+        if (verdict == "GARBAGE"
+                and _is_real_name(r.raw_name)
+                and _anchor_count(r) >= required_anchors):
             verdict = "VALID"
             reinstated += 1
         if verdict == "GARBAGE":
