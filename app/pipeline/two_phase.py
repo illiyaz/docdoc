@@ -4472,6 +4472,23 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                     except Exception:
                         pass
 
+                # E4 (BIG_FIXES): structural sanity check. Pass the
+                # PDF-structure estimate into the detector so it can log
+                # extracted-vs-expected delta per doc. Uses the same
+                # _estimate_subjects_from_pdf_structure that completeness
+                # uses (A2) — unique markers + unique gov-ID patterns.
+                _structural = 0
+                try:
+                    from app.pipeline.completeness_checker import (
+                        _estimate_subjects_from_pdf_structure as _est_fn,
+                    )
+                    _seg_for_est = gdoc_meta.get("segregation", {}) if isinstance(
+                        gdoc_meta.get("segregation"), dict
+                    ) else {}
+                    _structural = _est_fn(gdoc, _seg_for_est, onset or 0)
+                except Exception:
+                    pass
+
                 doc_gaps = _gap_detector.detect(
                     records=doc_records_for_gap,
                     field_inventory=field_inv,
@@ -4480,6 +4497,7 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                     document_id=str(gdoc.id),
                     document_name=gdoc.file_name or gdoc.source_path,
                     content_pages=_content_pages,
+                    structural_estimate=_structural or None,
                 )
                 all_detected_gaps.extend(doc_gaps)
 
@@ -4550,6 +4568,35 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                             if isinstance(f, dict) and f.get("name")
                         ]
 
+                    # E5 (BIG_FIXES): build name→pages map so gap_filler's
+                    # vision fallback can inject roster names into prompts
+                    # for stubborn pages. Completeness_checker only builds
+                    # this map when it triggers recovery (<85%); for high-
+                    # completeness docs the map was discarded. We rebuild
+                    # it here if unfilled expected-PII pages exist.
+                    _gf_name_map: dict = {}
+                    _has_stubborn = any(
+                        g.expected_field and g.fill_result != "filled"
+                        for g in doc_gaps
+                    )
+                    if _has_stubborn and ollama_client:
+                        try:
+                            from app.pipeline.completeness_checker import (
+                                _get_name_roster as _gnr,
+                                _build_name_pages_map as _bnpm,
+                            )
+                            _onset = _fill_doc.content_onset_page or _fill_doc.sample_onset_page or 0
+                            _roster = _gnr(_fill_doc, ollama_client, doc_id, _onset)
+                            if _roster:
+                                _gf_name_map = _bnpm(_fill_doc, _roster)
+                                logger.info(
+                                    "[E5] Built roster for %s: %d names across %d pages",
+                                    _fill_doc.file_name, len(_roster),
+                                    sum(1 for v in _gf_name_map.values() if v),
+                                )
+                        except Exception:
+                            logger.debug("E5 roster build failed", exc_info=True)
+
                     filler = GapFiller(
                         doc_path=_fill_doc.source_path,
                         document_id=doc_id,
@@ -4560,6 +4607,7 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                         expected_fields=_gf_expected or None,
                         field_labels=_gf_labels or None,
                         document_type=_gf_doctype,
+                        name_pages_map=_gf_name_map or None,
                     )
                     try:
                         doc_filled = filler.fill(doc_gaps)

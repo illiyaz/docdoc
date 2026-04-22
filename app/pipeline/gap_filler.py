@@ -85,6 +85,7 @@ class GapFiller:
         expected_fields: list[str] | None = None,
         field_labels: list[str] | None = None,
         document_type: str | None = None,
+        name_pages_map: dict[str, list[int]] | None = None,
     ):
         self.doc_path = doc_path
         self.document_id = document_id
@@ -102,6 +103,13 @@ class GapFiller:
         self.expected_fields = expected_fields or []
         self.field_labels = field_labels or []
         self.document_type = document_type or "document"
+
+        # E5 (BIG_FIXES): name→pages map from completeness_checker. Used
+        # by the vision fallback prompt to tell the LLM which names the
+        # roster says are on a specific page ("this page may contain
+        # 'Ms S Bamert' — find her gov ID + DOB + address"). Empty dict
+        # when no roster was built; E5 becomes a no-op in that case.
+        self.name_pages_map: dict[str, list[int]] = name_pages_map or {}
 
         # Budget tracking
         self._llm_calls_used = 0
@@ -175,6 +183,47 @@ class GapFiller:
             if _fill_rate < 0.5:
                 _new_fills = self._self_correct(gaps_by_page, filled_pages, results)
                 filled_pages.update(_new_fills)
+
+        # E2 (BIG_FIXES): per-page vision fallback for stubborn text misses.
+        # When overall fill rate is healthy (self-correct didn't fire) but
+        # individual pages still stayed empty despite the contract saying
+        # they should have PII, try vision on just those pages. Catches
+        # the LLM-quirk case: Bamert (p55) + Bloom (p100) on CMG where text
+        # LLM returns [] on specific pages the filter captured cleanly.
+        if (
+            self.ollama_client
+            and self.vision_model
+            and self._llm_calls_used < self.max_llm_total
+        ):
+            # Stubborn pages: unfilled AND the gap expected a real field
+            # (meaning the segregation/detector thought there was PII).
+            stubborn_pages = [
+                pg for pg, page_gaps in gaps_by_page.items()
+                if pg not in filled_pages
+                and any(g.expected_field for g in page_gaps)
+            ]
+            # Cap at 10 to respect budget (aligns with vision_fallback's
+            # own 15-page internal cap).
+            stubborn_pages = stubborn_pages[:10]
+            if stubborn_pages:
+                _e5_hint = f" (E5 roster map: {len(self.name_pages_map)} names)" if self.name_pages_map else " (no E5 roster)"
+                logger.info(
+                    "[E2] Per-page vision fallback: %d stubborn page(s) with expected PII "
+                    "but no text fill — trying vision%s",
+                    len(stubborn_pages), _e5_hint,
+                )
+                _e2_pre_fills = len(filled_pages)
+                try:
+                    vision_fills = self._try_vision_fallback(
+                        stubborn_pages, gaps_by_page, results,
+                    )
+                    filled_pages.update(vision_fills)
+                except Exception:
+                    logger.debug("Per-page vision fallback failed", exc_info=True)
+                logger.info(
+                    "[E2] Per-page vision fallback: recovered %d of %d stubborn pages",
+                    len(filled_pages) - _e2_pre_fills, len(stubborn_pages),
+                )
 
         # Remaining unfilled gaps → mark as unfilled
         for gap in fillable_gaps:
@@ -609,13 +658,35 @@ class GapFiller:
                 page_idx = page_num - 1  # 1-indexed → 0-indexed
                 image_b64 = render_page_to_image(self.doc_path, page_idx, dpi=150)
 
+                # E5 (BIG_FIXES): roster-targeted prompt. If the
+                # completeness roster has a name on this page, tell the
+                # LLM who to look for. Falls back to generic prompt when
+                # no roster is available (E5 becomes a no-op).
+                roster_names_on_page = sorted({
+                    name for name, pages in self.name_pages_map.items()
+                    if page_num - 1 in pages or page_num in pages  # handle 0- vs 1-indexed stores
+                })
+                if roster_names_on_page:
+                    names_hint = ", ".join(f"'{n}'" for n in roster_names_on_page[:3])
+                    hint_line = (
+                        f"This page is known to contain information about "
+                        f"{names_hint}. Extract their gov ID, DOB, and address.\n"
+                    )
+                    logger.info(
+                        "[E5] Vision page %d: injecting roster name(s) %s",
+                        page_num, roster_names_on_page[:3],
+                    )
+                else:
+                    hint_line = ""
+
                 prompt = (
+                    f"{hint_line}"
                     "Extract ALL personal information from this document page.\n"
-                    "Look for: names, Social Security Numbers (SSN/TIN), "
+                    "Look for: names, Social Security Numbers (SSN/TIN/NI), "
                     "addresses, dates of birth, phone numbers, account numbers.\n\n"
                     "Return a JSON array:\n"
                     f'[{{"page": {page_num}, "name": "Full Name", '
-                    f'"ssn": "123-45-6789", "address": "Street, City ST ZIP", '
+                    f'"gov_id": "ID number", "address": "Street, City ST ZIP", '
                     f'"dob": "01/15/1980", "phone": "555-123-4567"}}]\n\n'
                     "If no personal data is visible, return an empty array: []\n"
                     "Return ONLY JSON."
@@ -656,6 +727,20 @@ class GapFiller:
                 for rec in records:
                     person = rec.get("name", "")
                     if person and len(person) > 2 and page_num in gaps_by_page:
+                        # Build fill_data so A3 can synthesize new subjects
+                        # from vision-recovered records. Without this, a
+                        # vision-fill would mark the gap "filled" but the
+                        # person never reaches notification_subjects.
+                        raw_fill: dict = {}
+                        for k in ("name", "ssn", "gov_id", "dob", "address"):
+                            v = rec.get(k)
+                            if v and str(v).strip() and str(v).lower() not in ("null", ""):
+                                # Normalize key: ssn → gov_id for consistency
+                                key = "gov_id" if k == "ssn" else k
+                                raw_fill[key] = str(v).strip()
+                        if "name" not in raw_fill and person:
+                            raw_fill["name"] = str(person).strip()
+
                         new_fills.add(page_num)
                         for gap in gaps_by_page[page_num]:
                             value = person
@@ -673,6 +758,7 @@ class GapFiller:
                                     filled_value_masked=_mask_value(
                                         str(value), gap.expected_field or "PERSON"
                                     ),
+                                    fill_data=raw_fill,
                                 ))
 
             except Exception:

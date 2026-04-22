@@ -82,6 +82,7 @@ class GapDetector:
         document_name: str,
         pages_per_instance: int = 1,
         content_pages: set[int] | None = None,
+        structural_estimate: int | None = None,
     ) -> list[ExtractionGap]:
         """Run all gap detection checks.
 
@@ -124,6 +125,30 @@ class GapDetector:
             records, document_id, document_name,
         )
         gaps.extend(trunc_gaps)
+
+        # E4 (BIG_FIXES): structural sanity check. If the PDF-structure
+        # estimator says this doc has ~N members and we extracted M, log
+        # the delta prominently. Auditors + downstream observability
+        # get a visible "we may be missing K subjects" signal without
+        # parsing the full gap list.
+        unique_subjects = len({
+            (r.get("raw_name") or r.get("normalized_value") or "").strip().lower()
+            for r in records
+            if r.get("raw_name") or r.get("normalized_value")
+        })
+        if structural_estimate and structural_estimate > 0:
+            delta = structural_estimate - unique_subjects
+            logger.info(
+                "[E4] Structural vs extracted for %s: %d subjects extracted, "
+                "~%d expected from PDF structure, delta=%+d",
+                document_name, unique_subjects, structural_estimate, -delta,
+            )
+            if delta > 0:
+                logger.warning(
+                    "[E4] %s may have %d missing subject(s) — "
+                    "gap-fill + vision fallback should close this",
+                    document_name, delta,
+                )
 
         logger.info(
             "Gap detection for %s: %d gaps found (%d page, %d field, %d truncation)",
