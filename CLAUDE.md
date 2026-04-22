@@ -189,6 +189,7 @@ Detailed in [docs/SCHEMA.md](docs/SCHEMA.md). Summary:
 - No making LLM mandatory for correctness
 - No runtime network dependencies
 - No scope creep beyond active phase
+- No LLM-sourced factual claims in diagnostic / forensic / audit tools — counts, recall %, which pages failed, etc. must come from deterministic code (regex, SQL, log parse, PDF scan). LLM narrative is allowed as a summary-only afterword, labelled `[HYPOTHESIS]`, never as ground truth.
 
 ---
 
