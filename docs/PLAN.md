@@ -4,6 +4,8 @@ For completed steps, see [PLAN_COMPLETED.md](PLAN_COMPLETED.md).
 For project overview and conventions, see [../CLAUDE.md](../CLAUDE.md).
 For detailed per-step implementation notes, see [CLAUDE_HISTORY.md](CLAUDE_HISTORY.md).
 
+**⚠ 2026-04-22: Quality audit surfaced an 85% recall (not the reported 98%) on Batch D. See [BIG_FIXES.md](BIG_FIXES.md) for the 10-item attack plan (tasks #41-50).**
+
 ---
 
 ## Progress Summary
@@ -1234,6 +1236,59 @@ CMG subjects carry `UK_NINO` gov ID, DOB, and address.
 Tonight's run also outperformed the morning baseline on DOB coverage
 (96% vs 90%) because the dual-marker filter now captures the "2.4
 Date of Birth" row reliably on the MEMBER DETAILS page.
+
+#### 2026-04-22 — Independent verification + 10-fix attack plan
+
+After the autonomous run was called A+ based on 47 subjects matching
+the morning baseline, a manual verification against PDF ground truth
+(`python fitz` + regex scan for unique NI/SSN patterns) showed:
+
+| Doc | Ground truth | Extracted | Recall | Precision |
+|---|---|---|---|---|
+| AWIR-482 (US) | 20 real SSNs | 21 rows (20 unique + 1 dup) | **100%** | 95% |
+| CMG pension (UK) | 34 real NIs | 26 subjects | **76%** | 100% |
+| **Weighted** | 54 | 46 unique | **85%** | 98% |
+
+**Why we didn't see this:** the completeness_checker metric (79%
+complete) was self-referential — it measured against its own LLM
+roster, which was built from the already-purged extraction output.
+No layer independently counted unique IDs from the PDF.
+
+**Root cause of the 8 CMG misses:**
+- 5 real members were purged by `record_validator` because they had
+  name + NI + DOB but no address (their MEMBER DETAILS page was
+  skipped — now fixed dual-marker filter in e71bc22 landed too late
+  to help their address row specifically).
+- 2 members (Bamert p55, Bloom p100) were never extracted — Strategy
+  A had a coverage hole on those specific pages despite standard markers.
+- 1 member (V Bhudia) had full data but got dedup-merged into D or R
+  Bhudia (surname collapse).
+
+**Architectural insight (saved as feedback memory):** the validator
+is a one-way gate at the FRONT of the recovery chain. Gap-fill,
+completeness-check, and vision-recovery all trust its output as
+ground truth. Purges become permanent. The strictest filter should
+run LAST, not first.
+
+**10-fix attack plan** — see [BIG_FIXES.md](BIG_FIXES.md) and tasks
+#41-50. Groups:
+- **A (critical, architectural):** move validator to end; independent
+  PDF-structure baseline for completeness; gap-filler that creates
+  new records, not just fills fields.
+- **B (precision):** dedup mask-variant key; surname-collapse
+  prevention; page-header pattern detection in address filter.
+- **C (coverage gaps):** diagnose Bamert/Bloom silent misses; DOB
+  mixed-locale normalizer.
+- **D (infra):** investigate `notification_subjects` table-clear
+  between runs; frontend UI for the new API endpoints.
+
+Success criteria: ≥95% weighted recall on Batch D, with independent
+PDF verification agreeing with pipeline-reported numbers.
+
+Already shipped (c4a51e5): adaptive record_validator now receives the
+segregation field_inventory as a contract, so partial-but-consistent
+records (name+NI+DOB, missing address) aren't purged on pension docs.
+Not validated with a run yet — expected +5 CMG subjects.
 
 #### Still pending follow-ups (as of 2026-04-19)
 

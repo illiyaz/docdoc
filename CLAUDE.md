@@ -3,6 +3,7 @@
 Single source of truth for how this codebase is built and maintained. All contributors (human and AI) must follow these rules without exception.
 
 See [docs/PLAN.md](docs/PLAN.md) for active implementation steps (Phase 5: Steps 30d-30e, Phase 6-8: Steps 25-35).
+See [docs/BIG_FIXES.md](docs/BIG_FIXES.md) — **active quality attack list (tasks #41-50, opened 2026-04-22 after independent verification found 85% recall on Batch D, not the reported A+)**.
 See [docs/PLAN_COMPLETED.md](docs/PLAN_COMPLETED.md) for completed steps (Phases 1-4, Steps 1-20).
 See [docs/SCHEMA.md](docs/SCHEMA.md) for detailed technical architecture.
 See [docs/CLAUDE_HISTORY.md](docs/CLAUDE_HISTORY.md) for detailed per-step implementation notes, bugfix narratives, and sub-run details.
