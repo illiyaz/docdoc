@@ -230,6 +230,24 @@ def extract_with_markers(
         len(all_records), len(snippets), calls_made,
     )
 
+    # BIG_FIXES #C1 diagnostic — pages that had a marker hit but
+    # produced zero records. These are silent Strategy A misses; gap-fill
+    # should now recover them (#A3) but logging helps spot new blind
+    # spots.
+    record_pages = {r.page_range for r in all_records if r.page_range}
+    missed_pages = [
+        pg + 1 for pg in sorted(snippets.keys())
+        if str(pg + 1) not in record_pages and f"{pg + 1}" not in record_pages
+    ]
+    if missed_pages:
+        logger.info(
+            "Marker extraction: %d pages had snippets but no record output "
+            "— will depend on gap-fill to recover: %s%s",
+            len(missed_pages),
+            missed_pages[:10],
+            " ..." if len(missed_pages) > 10 else "",
+        )
+
     return all_records
 
 

@@ -449,10 +449,12 @@ class Deduplicator:
                         government_id_type = "GOVERNMENT_ID"
                 break
 
-        # canonical_dob: best DOB from records, normalized to ISO 8601
-        dobs = [r.raw_dob for r in records if r.raw_dob]
-        # Normalize all DOBs first, then pick best from normalized values
-        normalized_dobs = [normalize_dob(d) for d in dobs]
+        # canonical_dob: best DOB from records, normalized to ISO 8601.
+        # Pass each record's country hint so DD/MM vs MM/DD disambiguation
+        # respects the document's locale (BIG_FIXES #C2).
+        dob_pairs = [(r.raw_dob, getattr(r, "country", None)) for r in records if r.raw_dob]
+        dobs = [d for d, _ in dob_pairs]
+        normalized_dobs = [normalize_dob(d, country=c) for d, c in dob_pairs]
         normalized_dobs = [d for d in normalized_dobs if d]  # drop None
         if normalized_dobs:
             canonical_dob = _best_value(normalized_dobs)

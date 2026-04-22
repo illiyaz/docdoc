@@ -65,15 +65,38 @@ def _valid_date(year: int, month: int, day: int) -> date | None:
         return None
 
 
-def normalize_dob(raw: str) -> str | None:
+# Countries that use DD/MM format (day-first). US/Canada/most-of-Asia
+# default to MM/DD; UK/EU/India/Australia/NZ/most-of-Africa use DD/MM.
+_DAY_FIRST_COUNTRIES: frozenset[str] = frozenset({
+    "GB", "UK", "IE", "FR", "DE", "IT", "ES", "PT", "NL", "BE", "CH",
+    "AT", "DK", "SE", "NO", "FI", "PL", "CZ", "HU", "GR", "RO",
+    "IN", "PK", "BD", "LK", "NP",
+    "AU", "NZ",
+    "ZA", "KE", "NG",
+    "BR", "AR", "CL", "CO", "PE",
+})
+
+
+def normalize_dob(raw: str, country: str | None = None) -> str | None:
     """Normalize a raw DOB string to ISO 8601 (YYYY-MM-DD).
 
     Returns None if the value cannot be parsed as a plausible date of birth
     (must be between 1900 and today).
+
+    Parameters
+    ----------
+    raw:
+        The raw DOB string.
+    country:
+        ISO-3166-1 alpha-2 country code from the record's segregation
+        hint. Used to disambiguate ``01/03/1960`` style dates — the same
+        string is January 3rd in US docs and March 1st in UK/EU/IN docs.
+        Defaults to US when absent (matches old behavior).
     """
     if not raw:
         return None
     s = raw.strip()
+    day_first = (country or "").upper() in _DAY_FIRST_COUNTRIES
 
     result: date | None = None
 
@@ -114,8 +137,12 @@ def normalize_dob(raw: str) -> str | None:
             elif b > 12 and a <= 12:
                 result = _valid_date(year, a, b)
             else:
-                # Ambiguous — assume US format MM/DD/YYYY
-                result = _valid_date(year, a, b)
+                # Ambiguous — use country hint. UK/EU/IN etc. = DD/MM;
+                # US and everyone else defaults to MM/DD (old behavior).
+                if day_first:
+                    result = _valid_date(year, b, a)
+                else:
+                    result = _valid_date(year, a, b)
 
     if result is None:
         return None
