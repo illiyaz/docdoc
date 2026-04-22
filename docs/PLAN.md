@@ -80,6 +80,12 @@ After taxonomy sweep tells us which of these actually matter:
 Ship one at a time with PDF-truth verification between each (per
 `no_regression_discipline` feedback memory).
 
+### 4a. H1 — Min-PII allowlist sync'd with gov_id_classifier ✅ shipped `8a1830a`
+Single source of truth: classifier owns gov-IDs (55 canonical + 17 aliases
+= 72), deduplicator adds industry-specific (55 medical/edu/HR/etc.). Old
+filter had ~30 types; new filter has 127. Closes the 18-zero-subject bug
+from taxonomy sweep 2026-04-22. Full design in BIG_FIXES.md Group H.
+
 ### 4b. G1 — Per-job diagnostic script (code-first, LLM narrative optional)
 Pure Python forensics tool (`scripts/diagnose_job.py`) for prod issue
 triage. Deterministic checks (no hallucination): PDF-structure ground

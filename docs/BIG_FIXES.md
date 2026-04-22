@@ -180,6 +180,60 @@ After each fix, re-run Batch D and independently verify against PDF ground truth
 
 ---
 
+## Group H — Filter alignment across geographies + industries (2026-04-22)
+
+### H1 — Minimum-PII threshold sync'd with gov_id_classifier (task #59, shipped `8a1830a`)
+
+**Why:** Taxonomy sweep surfaced 18 of 42 PII docs producing 0 subjects.
+Root cause: `_CORROBORATING_PII_TYPES` in deduplicator was a static
+frozenset (~30 types) missing:
+- Gov-ID types the `gov_id_classifier` already knew (50+ countries)
+- Legacy aliases (`NI_NUMBER` for UK_NINO, `AADHAAR` for IN_AADHAAR,
+  `PAN_CARD` for IN_PAN, etc.)
+- Industry-specific identifiers (MEDICAL_RECORD, STUDENT_ID,
+  BADGE_ID, POLICY_NUMBER, CASE_NUMBER, etc.)
+
+Concrete misses: EHR patient list (20 patients), badge access log
+(83 entries), report cards (4 students), payroll register (30
+employees) — all extracted correctly, all dropped by the filter.
+
+**Architecture (single source of truth for gov IDs):**
+
+```
+gov_id_classifier.py  ──  owns gov-ID knowledge
+  _PATTERNS                    55 canonical types
+  ALIAS_TO_CANONICAL           17 legacy aliases
+  SUPPORTED_TYPES              canonical only
+  EXPANDED_KNOWN_TYPES         canonical + aliases (72)
+  is_known_gov_id_label()      shared helper
+          │
+          │ imports EXPANDED_KNOWN_TYPES
+          ▼
+deduplicator.py       ──  owns industry ID knowledge
+  _NON_GOV_CORROBORATING       55 non-gov identifiers
+    (medical MRN/NPI, education student_id, HR badge_id/employee_id,
+     insurance policy_number, legal case_number, finance account_number,
+     biometric, telecom device_id, SaaS customer_id, etc.)
+  _CORROBORATING_PII_TYPES = gov | industry = 127 total
+  + per-group contract override from PIIRecord.field_contract
+```
+
+**Sync rules going forward:**
+- New country's gov ID → add pattern to `_PATTERNS` → flows to dedup filter automatically
+- New legacy alias → add to `ALIAS_TO_CANONICAL` → flows automatically
+- New industry-specific ID (not gov-issued) → add to `_NON_GOV_CORROBORATING` in deduplicator
+- Truly novel doc-specific ID → segregation detects it → per-group contract override passes it (no code change)
+
+**Classifier additions:**
+- `US_DRIVER_LICENSE` pattern (permissive — 50 state formats)
+- `US_PASSPORT` pattern
+
+**Verification:** 15-label sync check passed across US / UK / India / Brazil / Italy / Netherlands / Canada + healthcare / education / HR / insurance.
+
+**Expected impact:** the 18 zero-subject docs should produce real subjects on re-run. EHR → 20, badge log → 50+, payroll → 30, report card → 4, etc.
+
+---
+
 ## Group G — Observability (2026-04-22)
 
 ### G1 — Per-job diagnostic script (task #58)
