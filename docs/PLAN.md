@@ -13,9 +13,26 @@ For detailed per-step implementation notes, see [CLAUDE_HISTORY.md](CLAUDE_HISTO
 The sequence below reflects the priority ordering after tonight's quality sprint.
 It's intentionally ordered "what we can safely deploy" not "what's easiest".
 
-### 1. Taxonomy sweep — breadth validation (NEXT)
-Run all 44 docs in `docs/testingsamples/` with the Group A/B/C/D fixes +
-anchor-count safety net (tasks #41-49 + `c7682d6`). Batch D is 2 files,
+### 1. E1 + E3 — free-quality gap-fill improvements (NEXT, pre-taxonomy)
+Two of the five Group E fixes are universal and low-risk:
+- **E1** (task #51): pass gap's `expected_field` + doc field contract
+  into the gap_filler prompt. Same adaptive pattern as the record
+  validator's field contract. Helps gap-fill on ANY doc type.
+- **E3** (task #53): lower self-correct trigger from 30% → 50% fill
+  rate + feed diagnosis output back into retry prompt as a hint.
+  Trivial code change, universal benefit.
+
+These ship BEFORE taxonomy so the sweep benefits from them. Budgeted
+20-30 min plus one mini verify run on Batch D to confirm no regression.
+
+**E2 / E4 / E5 stay deferred** — they genuinely benefit from the
+taxonomy data (E2's vision fallback cost depends on doc type, E4's
+threshold needs real noise distribution, E5 only helps on roster-
+bearing docs). Ship in step #4 after taxonomy.
+
+### 2. Taxonomy sweep — breadth validation
+Run all 44 docs in `docs/testingsamples/` with Group A/B/C/D fixes +
+anchor-count safety net (`c7682d6`) + E1/E3. Batch D is 2 files,
 2 doc types. The real stress test is 23 doc-type categories (medical,
 school FERPA, HR, W2/1099/tax, scanned images, form PDFs, CSVs, Excel,
 MSGs, HEICs).
@@ -24,28 +41,32 @@ Every fix we shipped was tuned against pensions. Open questions:
 - Do they hold on school records where there's no gov_id?
 - On medical where MRN replaces SSN?
 - On scanned docs where text extraction gives nothing?
-- Do E-group priorities (gap-fill improvements) matter per doc-type?
+- Which of E2/E4/E5 actually moves the needle?
 
-**Output:** honest per-doc-type recall numbers + list of regressions.
-~5-6 hours end-to-end. This is the most informative run we could do.
+**Output:** honest per-doc-type recall numbers + list of regressions +
+data-driven priority on E2/E4/E5. ~5-6 hours end-to-end. This is the
+most informative run we could do.
 
-### 2. Frontend D2 — UI for /compare, /failed-docs, /segregation-flat
+### 3. Frontend D2 — UI for /compare, /failed-docs, /segregation-flat
 Backend shipped tonight (`9280414`, `d53c433`) + TypeScript client
 (`cc29e4d`). Three new UI pages remain. Without this, the quality
 work is dead data — auditors can't use the tool.
 
 **Requires:** you online for visual feedback on layouts. 2-3 hour session.
 
-### 3. Group E — gap-fill improvements (tasks #51-55)
-Deferred until after taxonomy sweep so priorities are data-driven:
-- E1 field-contract prompts mattered on X docs
-- E2 vision fallback recovered Y scanned pages
-- E5 roster-targeting saved Z members
+### 4. E2 / E4 / E5 — data-driven gap-fill improvements
+After taxonomy sweep tells us which of these actually matter:
+- **E2** (task #52): per-page vision fallback when text LLM returns
+  empty on expected-PII pages
+- **E4** (task #54): gap detector cross-checks against PDF-structure
+  expected count (reduce false-positive gaps)
+- **E5** (task #55): roster→pages map reused by gap_filler for
+  targeted re-extraction of named misses
 
 Ship one at a time with PDF-truth verification between each (per
 `no_regression_discipline` feedback memory).
 
-### 4. Phase 6 — Security + Governance
+### 5. Phase 6 — Security + Governance
 Real deployment blocker. Without auth + RBAC + audit log, the tool
 can't be given to anyone else — a breach-notification platform that
 any intern can query is itself a PII leak.
@@ -56,7 +77,7 @@ any intern can query is itself a PII leak.
 
 ~1 week focused work. Schema-heavy but well-defined.
 
-### 5. Phase 7 — Workflow completeness
+### 6. Phase 7 — Workflow completeness
 Transforms "extraction works" into "an end-to-end notification
 workflow completes":
 - Evidence package export (for legal / regulatory submissions)
@@ -64,11 +85,11 @@ workflow completes":
 - Manual merge / split for auditor corrections
 - Notification send with delivery tracking + bounces
 
-### 6. Phase 8 — Production hardening
+### 7. Phase 8 — Production hardening
 GPU deploy (M4 → A100), 3000-page stress tests, Grafana dashboards,
 Prometheus metrics, infra compose. Scale + ops, not features.
 
-### 7. Correction-memory loop
+### 8. Correction-memory loop
 Auditor corrections already persist to JSONL. Close the loop: feed
 them as few-shot examples into future LLM prompts. A user running
 100 docs makes the 101st better.
