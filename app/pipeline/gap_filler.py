@@ -237,14 +237,19 @@ class GapFiller:
                         missing_fields.update(["PERSON", "LOCATION"])
 
             fields_str = ", ".join(sorted(missing_fields)) or "PERSON, LOCATION"
+            # Ask for everything useful so gap-fill can synthesize records
+            # for people who didn't make it through the main paths
+            # (BIG_FIXES #A3). Keys kept lowercase for stable JSON output.
             prompt = (
                 f"Extract personal information from these {len(batch_pages)} pages.\n"
                 f"For EACH page, extract the PRIMARY SUBJECT only (not teachers, "
                 f"doctors, providers, or institutional staff).\n"
-                f"Fields to extract: {fields_str}\n"
+                f"Fields hint (prioritize these): {fields_str}\n"
                 f"Return a JSON array with one object per page:\n"
-                f'[{{"page": 5, "PERSON": "name", "LOCATION": "address"}}, ...]\n'
-                f"If a page has no extractable data, omit it from the array.\n\n"
+                f'[{{"page": 5, "name": "Full Name", "gov_id": "ID number if any", '
+                f'"dob": "date of birth", "address": "full mailing address"}}, ...]\n'
+                f"Use null for any field not present. "
+                f"If a page has no extractable person, omit it from the array.\n\n"
                 f"{batch_text}"
             )
 
@@ -272,9 +277,26 @@ class GapFiller:
                 for rec in records:
                     page_num = rec.get("page")
                     if page_num and page_num in gaps_by_page:
-                        person = rec.get("PERSON", "")
-                        location = rec.get("LOCATION", "")
-                        if person or location:
+                        # Accept both old (PERSON/LOCATION) and new
+                        # (name/gov_id/dob/address) keys so a mid-deploy
+                        # prompt-format change doesn't drop fills.
+                        person = rec.get("name") or rec.get("PERSON", "") or ""
+                        location = rec.get("address") or rec.get("LOCATION", "") or ""
+                        gov_id = rec.get("gov_id") or rec.get("US_SSN") or ""
+                        dob = rec.get("dob") or rec.get("DATE_OF_BIRTH") or ""
+                        # Structured fill_data keeps raw values for
+                        # downstream record synthesis (BIG_FIXES #A3).
+                        raw_fill: dict = {}
+                        if person and person not in (None, "null", ""):
+                            raw_fill["name"] = str(person).strip()
+                        if location and location not in (None, "null", ""):
+                            raw_fill["address"] = str(location).strip()
+                        if gov_id and gov_id not in (None, "null", ""):
+                            raw_fill["gov_id"] = str(gov_id).strip()
+                        if dob and dob not in (None, "null", ""):
+                            raw_fill["dob"] = str(dob).strip()
+
+                        if raw_fill:
                             filled_pages.add(page_num)
                             for gap in gaps_by_page[page_num]:
                                 value = ""
@@ -285,16 +307,20 @@ class GapFiller:
                                 elif gap.gap_type == "empty_page" and person:
                                     value = person
 
-                                if value:
-                                    results.append(replace(
-                                        gap,
-                                        fill_attempted=True,
-                                        fill_method="text_batch",
-                                        fill_result="filled",
-                                        filled_value_masked=_mask_value(value, gap.expected_field or "PERSON"),
-                                    ))
-                                else:
-                                    results.append(replace(gap, fill_attempted=True, fill_result="unfilled"))
+                                results.append(replace(
+                                    gap,
+                                    fill_attempted=True,
+                                    fill_method="text_batch",
+                                    fill_result="filled",
+                                    filled_value_masked=_mask_value(
+                                        value or raw_fill.get("name", ""),
+                                        gap.expected_field or "PERSON",
+                                    ),
+                                    fill_data=raw_fill,
+                                ))
+                        else:
+                            for gap in gaps_by_page[page_num]:
+                                results.append(replace(gap, fill_attempted=True, fill_result="unfilled"))
 
             except Exception:
                 logger.warning("Gap fill batch failed for pages %s", batch_pages, exc_info=True)

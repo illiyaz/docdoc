@@ -94,8 +94,22 @@ def check_completeness_and_recover(
     else:
         found = len(unique_names_only)
 
-    # Estimate expected subjects: at least 1 per 3 pages after onset
-    expected = max(3, pages_after_onset // 3)
+    # PDF-structure-derived expected count (BIG_FIXES #A2).
+    # Old heuristic (pages_after_onset // 3) was a density guess. Now we
+    # also scan the PDF for independent structural signals: repeating
+    # section markers (from segregation) and unique gov-ID patterns per
+    # page. If the structural estimate is higher, we use it — this
+    # prevents the self-referential "we extracted 79% of our roster so
+    # we're fine" trap where the roster itself came from the already-
+    # purged extraction.
+    heuristic_expected = max(3, pages_after_onset // 3)
+    structural_expected = _estimate_subjects_from_pdf_structure(doc, seg, onset)
+    expected = max(heuristic_expected, structural_expected)
+    if structural_expected > heuristic_expected:
+        logger.info(
+            "Completeness: PDF structure suggests ~%d members (heuristic said %d) — using %d",
+            structural_expected, heuristic_expected, expected,
+        )
 
     # Speed optimization (task #26): skip the completeness vision trigger
     # for documents that are inherently single-subject.
@@ -152,7 +166,16 @@ def check_completeness_and_recover(
         completeness * 100, pages_after_onset, onset, expects_gov_id,
     )
 
-    if completeness >= 0.5:
+    # Threshold raised from 0.5 → 0.85 as part of BIG_FIXES #A2. At 50%
+    # a document missing a quarter of its subjects would silently pass
+    # (CMG: 26/33 = 79% passed the old gate but PDF had 34 real
+    # members, 24% miss). 0.85 is aggressive but acceptable because:
+    #   - structural_expected grounds it in PDF reality, not LLM-roster;
+    #   - recovery is bounded by COMPLETENESS_VISION_MAX_PAGES (~15
+    #     vision calls), so false triggers have a cost ceiling;
+    #   - the alternative (missing real people) is a breach-notification
+    #     failure, which is worse than some extra vision work.
+    if completeness >= 0.85:
         return records  # Good enough — don't trigger vision
 
     # --- Completeness is low — try to recover via vision ---
@@ -378,6 +401,107 @@ def _get_name_roster(doc, ollama_client, doc_id: str, onset: int) -> list[str]:
         len(roster), doc.file_name, len(batches),
     )
     return roster
+
+
+def _estimate_subjects_from_pdf_structure(doc, seg: dict, onset: int) -> int:
+    """Count member-page signals directly from the PDF (BIG_FIXES #A2).
+
+    Independent of the extraction output — this is the "ground truth
+    estimator" that tells completeness_checker how many people the
+    document probably contains.
+
+    Signals used (in priority order):
+      1. Repeating section marker from segregation (``name_after_label``
+         / ``name_before_label``). If segregation says each member has
+         a "SUMMARY OF DETAILS" header, count pages containing it.
+      2. Unique gov-ID pattern count across the PDF. One NI / SSN =
+         one person, regardless of extraction success.
+
+    Returns 0 when nothing's signal-worthy — caller falls back to the
+    page-density heuristic.
+    """
+    try:
+        import fitz
+        import re as _re
+    except ImportError:
+        return 0
+
+    source_path = getattr(doc, "source_path", None)
+    if not source_path:
+        return 0
+
+    # Signal 1: marker repetition
+    markers = seg.get("markers") or {}
+    marker_strs: list[str] = []
+    for key in ("name_after_label", "name_before_label"):
+        val = markers.get(key)
+        if isinstance(val, str) and len(val) >= 6:
+            marker_strs.append(val.lower().strip())
+
+    # Signal 2: gov-ID pattern
+    # Covers US_SSN last-4 style (XXXXXnnnn / XXX-XX-nnnn), UK_NINO
+    # (2 letters + 6 digits + 1 letter), generic 9-digit pure numeric.
+    id_pats = [
+        _re.compile(r"\bX{3,}[- ]?X{0,2}[- ]?\d{4}\b"),     # US masked SSN
+        _re.compile(r"\b\d{3}-\d{2}-\d{4}\b"),              # US raw SSN
+        _re.compile(r"\b[A-Z]{2}\d{6}[A-Z]\b"),             # UK NI number
+    ]
+
+    try:
+        pdf = fitz.open(source_path)
+    except Exception:
+        return 0
+
+    marker_pages = 0
+    unique_ids: set[str] = set()
+    try:
+        for pg in range(pdf.page_count):
+            if pg < onset:
+                continue
+            text = pdf[pg].get_text() or ""
+            if not text:
+                continue
+            # Marker pages
+            text_lower = text.lower()
+            if any(m in text_lower for m in marker_strs):
+                marker_pages += 1
+            # Gov IDs
+            for pat in id_pats:
+                for m in pat.finditer(text):
+                    unique_ids.add(m.group(0))
+            pdf._forget_page(pg)
+    finally:
+        pdf.close()
+
+    # Normalize US SSNs: 'XXXXX2682', 'XXX-XX-2682', '123-45-6789' all
+    # map to last-4 or whole-digit key so variants don't inflate count.
+    normalized_ids: set[str] = set()
+    for raw in unique_ids:
+        digits = _re.sub(r"\D", "", raw)
+        if len(digits) >= 4:
+            # Use last 4 for masked/real SSN convergence
+            if "X" in raw.upper() or "x" in raw:
+                normalized_ids.add(digits[-4:])
+            else:
+                normalized_ids.add(digits)
+        elif _re.fullmatch(r"[A-Z]{2}\d{6}[A-Z]", raw):
+            normalized_ids.add(raw)
+
+    # Filter obvious fakes ('0000', all-same-digit)
+    normalized_ids.discard("0000")
+    normalized_ids = {x for x in normalized_ids if not (x.isdigit() and len(set(x)) == 1)}
+
+    # Pick the strongest signal
+    id_estimate = len(normalized_ids)
+    marker_estimate = marker_pages
+    estimate = max(id_estimate, marker_estimate)
+
+    if estimate:
+        logger.debug(
+            "PDF structure estimate for %s: markers=%d ids=%d → %d",
+            getattr(doc, "file_name", "?"), marker_estimate, id_estimate, estimate,
+        )
+    return estimate
 
 
 def _name_variants(name: str) -> list[str]:

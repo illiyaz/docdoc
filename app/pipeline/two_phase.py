@@ -4549,6 +4549,74 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
 
                 all_detected_gaps = filled_gaps
 
+            # BIG_FIXES #A3: synthesize new PIIRecords from filled gaps
+            # that contain a {name + gov_id / name + address} tuple not
+            # already present in all_records. Old gap_filler only added
+            # display strings to gaps — the raw extracted values never
+            # became subjects. Now we check each filled gap's fill_data
+            # against existing records and append new ones.
+            try:
+                from app.rra.entity_resolver import PIIRecord as _GFRecord
+                from uuid import uuid4 as _gf_uuid
+                existing_keys: set[tuple[str, str]] = set()
+                for _r in all_records:
+                    _key = (
+                        (_r.raw_name or "").strip().lower(),
+                        (_r.raw_government_id or "").strip().upper(),
+                    )
+                    existing_keys.add(_key)
+
+                _synthesized = 0
+                for _gap in all_detected_gaps:
+                    if _gap.fill_result != "filled" or not _gap.fill_data:
+                        continue
+                    _fd = _gap.fill_data
+                    _name = (_fd.get("name") or "").strip()
+                    if not _name or len(_name) < 3:
+                        continue
+                    _gov_id = (_fd.get("gov_id") or "").strip()
+                    _addr = (_fd.get("address") or "").strip()
+                    _dob = (_fd.get("dob") or "").strip()
+                    # Skip pure-name fills — the main paths already
+                    # covered those and adding them re-introduces noise.
+                    # A gap-fill earns a new subject only when it
+                    # contributes a unique gov_id OR address anchor.
+                    if not (_gov_id or _addr):
+                        continue
+                    _key = (_name.lower(), _gov_id.upper())
+                    if _key in existing_keys:
+                        continue
+                    existing_keys.add(_key)
+
+                    # Build a minimal PIIRecord and append
+                    _rec = _GFRecord(
+                        record_id=str(_gf_uuid()),
+                        entity_type="PERSON",
+                        normalized_value=_name,
+                        raw_name=_name,
+                        raw_government_id=_gov_id or None,
+                        raw_address={"raw": _addr} if _addr else None,
+                        raw_dob=_dob or None,
+                        source_document_id=_gap.document_id,
+                        page_range=str(_gap.page_num),
+                        entity_types_found=tuple(
+                            ["PERSON"]
+                            + (["GOVERNMENT_ID"] if _gov_id else [])
+                            + (["LOCATION"] if _addr else [])
+                            + (["DATE_OF_BIRTH"] if _dob else [])
+                        ),
+                        entity_role="primary_subject",
+                    )
+                    all_records.append(_rec)
+                    _synthesized += 1
+                if _synthesized:
+                    logger.info(
+                        "Gap fill synthesized %d new records from previously-missed pages",
+                        _synthesized,
+                    )
+            except Exception:
+                logger.warning("Gap-fill record synthesis failed", exc_info=True)
+
             # Persist to disk for QA screen
             _gap_project_id = str(run.project_id) if run.project_id else "default"
             _gap_job_id = str(run.id) if run.id else "unknown"

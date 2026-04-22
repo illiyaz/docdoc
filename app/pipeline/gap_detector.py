@@ -41,6 +41,12 @@ class ExtractionGap:
     fill_result: str = "pending"            # "pending" | "filled" | "unfilled" | "not_applicable"
     filled_value_masked: Optional[str] = None  # masked version of filled value (for display)
     filled_by: str = "system"               # "system" | "manual"
+    # Raw fill data — structured values extracted by gap filler. Used by
+    # two_phase.py to synthesize new PIIRecords when the gap represents
+    # a person who didn't make it through the main extraction paths
+    # (BIG_FIXES #A3). Keys follow the LLM prompt output:
+    # {"name": "...", "gov_id": "...", "dob": "...", "address": "..."}.
+    fill_data: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return asdict(self)
