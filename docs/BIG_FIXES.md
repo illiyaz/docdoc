@@ -177,3 +177,76 @@ After each fix, re-run Batch D and independently verify against PDF ground truth
 - No regression on existing Batch D recall (must stay ≥95% after Group A/B/C shipped)
 - No regression on Batch A/C completeness (small docs, not dependent on gap-fill)
 - Vision calls per doc stay within `COMPLETENESS_VISION_MAX_PAGES` budget (no runaway)
+
+---
+
+## Group G — Observability (2026-04-22)
+
+### G1 — Per-job diagnostic script (task #58)
+
+**Why:** production issue triage needs fast, deterministic answers. The
+pipeline generates rich logs + metadata but no tool consolidates them.
+Pure-LLM diagnostics hallucinate on numeric facts (how many subjects
+are missing, which pages failed). Code-first stays honest.
+
+**Location:** `scripts/diagnose_job.py <job_id>`
+
+**Deterministic checks (code-only, no LLM for factual claims):**
+
+1. **Per-doc structural ground truth vs extracted.** Open the PDF, regex-
+   scan for unique gov-ID patterns (US_SSN, UK_NINO, Aadhaar, PAN, etc.),
+   compare against unique canonical_government_id values in
+   notification_subjects for that doc. Report recall %.
+
+2. **Page coverage map.** Which pages produced records, which didn't.
+   Cross-reference with segregation markers — flag pages that had
+   markers but no record output as silent misses.
+
+3. **Segregation sanity check.** For every doc with `pii_detected=False`,
+   regex-scan the PDF text for obvious PII patterns (SSN, NI, DOB,
+   phone, email). Flag probable false negatives (e.g.
+   `I_ssn_card_copy.pdf` tonight).
+
+4. **Validator reinstatement stats.** Parse logs for
+   `N LLM-purges reinstated by anchor-count safety net` per doc.
+   Surface docs with high reinstatement counts (proxy for LLM
+   non-determinism intensity).
+
+5. **Gap-fill breakdown.** From logs: text fills vs vision fills,
+   `[E2]` stubborn-page recoveries, `[E5]` roster-name injections,
+   unfilled pages. Flag docs with no gap-fill attempt when gaps exist.
+
+6. **Dedup collapse ratio.** For each doc, `raw_records → subjects`
+   ratio. High ratios (>3:1) might mean over-aggressive merging;
+   ratios near 1:1 mean dedup barely fired.
+
+7. **Contract vs extracted fill rates.** For each expected field type
+   in segregation's field_inventory, what % of subjects for that doc
+   have it populated. Highlights doc types where a field consistently
+   fails (e.g. DOB empty 80% of the time on W2s).
+
+8. **E4 delta summary.** From logs: `[E4] delta=±N` per doc. Aggregate
+   across the run — total expected vs total extracted.
+
+**Optional LLM narrative section (clearly separated from facts):**
+After the deterministic report, prompt an LLM with the numeric
+findings and ask for likely root-cause hypotheses. LLM outputs are
+flagged `[HYPOTHESIS]` so auditors know they're not facts.
+
+**Output formats:**
+- Markdown report (auditor-readable)
+- JSON (machine-readable, for piping into dashboards or tests)
+
+**Usage:**
+```
+python scripts/diagnose_job.py <job_id>              # full report
+python scripts/diagnose_job.py <job_id> --doc NAME   # single-doc
+python scripts/diagnose_job.py <job_id> --json       # JSON output
+python scripts/diagnose_job.py <job_id> --no-llm     # facts only
+```
+
+**Why code-first matters:**
+LLMs hallucinate numeric claims ("this doc has 34 NI numbers"). A
+regex scan doesn't. For prod triage the first answer must be
+factually correct even if blunt. LLM narrative comes at the end as
+a human-readable summary, never as the ground truth.
