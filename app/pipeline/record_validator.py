@@ -118,11 +118,22 @@ def validate_records(
             contract_lines.append(f"  Labels seen on the page: {', '.join(field_labels[:10])}")
         contract_section = "\n".join(contract_lines) + "\n\n"
         contract_rule = (
-            "- PARTIAL but CONSISTENT records are VALID. A record missing one "
-            "or two contract fields is not garbage — breach notifications must "
-            "reach any real person identified, even with incomplete data. Only "
-            "flag GARBAGE when the record is clearly not a real person (legal "
-            "entity, form code, boilerplate, obvious parsing artifact).\n"
+            "- A record with the MAJORITY of contract fields populated "
+            "(e.g. name + at least one of: gov_id, DOB, address, email, phone) "
+            "is VALID by definition. This person was identified by the "
+            "extractor AND their data matches the document's contract — that's "
+            "as solid as breach-notification evidence gets. Do NOT flag such "
+            "records as garbage even if the name looks unusual, the address is "
+            "in a different country, or the format differs from your training "
+            "distribution.\n"
+            "- PARTIAL records (name + one anchor only) are VALID. Breach "
+            "notifications must reach any real person identified, even with "
+            "incomplete data.\n"
+            "- GARBAGE is for records that have a MISSING or MALFORMED name "
+            "(e.g. 'FORFEITURE', 'TOTAL', just a page number), OR a name that "
+            "is clearly an institution (trust, LLC, corporation, 'Pension "
+            "Scheme'), OR data that doesn't correspond to a real individual "
+            "person at all.\n"
         )
     else:
         contract_section = ""
@@ -180,12 +191,45 @@ def validate_records(
         )
         return records, [], {"parse_error": True}
 
-    # Split records into valid and garbage
+    # Split records into valid and garbage.
+    # Safety override: auto-reinstate when the LLM flags a record as
+    # GARBAGE but the record has a real name + at least 2 anchor fields
+    # populated. The LLM is non-deterministic; between identical runs it
+    # has purged real members (e.g. CMG I Andrews, V Bhanderi, C D Bhatt
+    # all had name+NI+DOB+address but still got flagged in one run).
+    # This override is adaptive — it applies to any doc type because it
+    # counts anchors, not hardcoded field names.
     valid = []
     purged = []
+    reinstated = 0
+
+    def _is_real_name(n):
+        if not n or len(n.strip()) < 3:
+            return False
+        # Obvious non-person tokens (form codes, totals, boilerplate)
+        bad = {"forfeiture", "total", "subtotal", "summary", "grand total",
+               "trust", "llc", "corp", "corporation", "inc", "ltd", "plc",
+               "scheme", "fund", "partnership"}
+        tokens = n.lower().split()
+        if all(t in bad for t in tokens):
+            return False
+        return True
+
+    def _anchor_count(r):
+        n = 0
+        if r.raw_government_id: n += 1
+        if r.raw_dob: n += 1
+        if r.raw_address: n += 1
+        if r.raw_email: n += 1
+        if r.raw_phone: n += 1
+        return n
+
     for i, r in enumerate(records):
         idx = i + 1  # 1-indexed
         verdict = verdicts.get(idx, "VALID")  # default to VALID if not mentioned
+        if verdict == "GARBAGE" and _is_real_name(r.raw_name) and _anchor_count(r) >= 2:
+            verdict = "VALID"
+            reinstated += 1
         if verdict == "GARBAGE":
             purged.append(r)
         else:
@@ -199,10 +243,12 @@ def validate_records(
     }
 
     logger.info(
-        "Record validation for %s: %d/%d valid, %d purged (%.1f%% garbage)",
+        "Record validation for %s: %d/%d valid, %d purged (%.1f%% garbage)%s",
         document_name, len(valid), len(records), len(purged), stats["purge_rate"],
+        f", {reinstated} LLM-purges reinstated by anchor-count safety net" if reinstated else "",
     )
 
+    stats["reinstated"] = reinstated
     return valid, purged, stats
 
 
