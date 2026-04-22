@@ -80,6 +80,18 @@ After taxonomy sweep tells us which of these actually matter:
 Ship one at a time with PDF-truth verification between each (per
 `no_regression_discipline` feedback memory).
 
+### 4b. G1 — Per-job diagnostic script (code-first, LLM narrative optional)
+Pure Python forensics tool (`scripts/diagnose_job.py`) for prod issue
+triage. Deterministic checks (no hallucination): PDF-structure ground
+truth vs extracted, page coverage, segregation sanity, validator
+reinstatements, gap-fill breakdown, dedup collapse ratio, contract fill
+rates, E4 deltas. Optional LLM narrative at the end labeled
+`[HYPOTHESIS]`, never as facts. Full spec in BIG_FIXES.md Group G.
+
+**When:** after taxonomy sweep completes + before Phase 6. The
+taxonomy run's red flags will be the first real-world test of this
+script.
+
 ### 5. Phase 6 — Security + Governance
 Real deployment blocker. Without auth + RBAC + audit log, the tool
 can't be given to anyone else — a breach-notification platform that
