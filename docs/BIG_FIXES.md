@@ -110,3 +110,70 @@ Re-run Batch D after Group A + B lands. Expected:
 - CMG: 31-34 of 34 members → **91-100% recall**
 - Weighted: **≥95% recall**
 - Independent verification (PDF ground truth) must agree with pipeline's reported numbers — no more self-referential completeness claims
+
+---
+
+## Group E — Gap-fill improvements (2026-04-22)
+
+Tonight's verify run surfaced that gap_filler's fill rate is ~32% (11 filled / 23 unfilled on CMG's post-extraction gaps). Each unfilled gap is a page where we lost a likely member. These five changes should push fill rate to ≥70%.
+
+**No-regression principles that apply to every Group E change:**
+
+1. **Additive, not replacing.** Each new path runs as a fallback when the current path returns empty. Never replace an already-working extraction.
+2. **Gated on segregation signals.** Vision fallback only fires when segregation says the page *should* have PII — otherwise we'd waste vision calls on truly empty pages. Prompt changes preserve old prompt as a fallback when contract is missing.
+3. **Budgeted.** Every new LLM / vision call counts against the same `max_llm_total` budget the gap filler already respects. No sprint can make a 100-page doc run for 3 hours.
+4. **Measurable.** Each fix logs a new line (e.g. `Gap fill: vision fallback filled N pages`) so we can A/B the impact on the next run.
+5. **Reversible.** Each fix is behind a setting flag if feasible (e.g. `GAP_FILL_VISION_FALLBACK_ENABLED=true` default true) so we can disable instantly if something regresses.
+
+### E1 — Field-contract-aware gap-fill prompt (task #51)
+**Change:** pass segregation's `field_inventory` + the gap's `expected_field` into the prompt. Current prompt says "find primary subject" generically; new prompt says "This page is expected to contain [UK_NINO, DATE_OF_BIRTH, PERSON, LOCATION]. Find them."
+
+**Regression guard:** if `field_inventory` is None (no segregation data), fall back to old generic prompt. Never replaces the prompt, only augments it.
+
+**Expected impact:** biggest single lift — LLM stops returning empty arrays when it doesn't know what to look for.
+
+### E2 — Per-page vision fallback on empty text-LLM results (task #52)
+**Change:** when `_fill_batched_text()` returns empty for a page AND that page has <30 chars of text extractable AND gap has an `expected_field` → render page at 300 DPI, send to 90B vision model with geo-neutral prompt (reuse `completeness_checker._vision_recover` logic).
+
+**Regression guard:** Max 15 vision calls per doc (same bucket as completeness). Only fires when text is truly empty (not when text is present but LLM returns empty — that's E1's territory). Page has to be on segregation's expected-PII list.
+
+**Expected impact:** catches form-PDF gaps (values in AcroForm, not text stream) that currently stay unfilled forever.
+
+### E3 — Self-correct loop: lower threshold + feed diagnosis forward (task #53)
+**Change:** raise self-correct trigger from `fill_rate < 0.30` to `fill_rate < 0.50`. Also: the diagnosis LLM's output ("these pages missed because X") gets passed as a context hint into the retry prompt instead of discarded.
+
+**Regression guard:** self-correct already has its own budget counter. Threshold bump just makes it fire more often on borderline runs — it can't run more than once per doc.
+
+**Expected impact:** runs at ~32% fill rate (like tonight) now trigger a diagnose-and-retry pass. Diagnosis-as-hint gives the retry prompt specific targeting instead of rerunning the same broken prompt.
+
+### E4 — Gap detector cross-checks against PDF-structure-expected count (task #54)
+**Change:** gap_detector stops flagging pages as "empty_page" gaps if the PDF structure (markers, gov-ID density from A2's estimator) shows those pages are boilerplate/continuation. Reduces false-positive unfilled count.
+
+**Regression guard:** only DOWN-grades gap severity (from "empty_page" to "structural_continuation"). Never suppresses a real gap on a page that contains a member marker.
+
+**Expected impact:** the "23 unfilled" metric gets more honest. If 8 of them are boilerplate continuation pages, the real fill rate is 11/(11+15) = 42%, not 32%.
+
+### E5 — Roster→pages map reused by gap_filler (task #55)
+**Change:** completeness_checker's `_build_name_pages_map` (with variants fix from e71bc22) tells us which page contains which named person. Gap filler ignores this. Change: when a gap page contains a roster name not yet in output, inject "this page contains 'Ms S Bamert' — find her gov ID + DOB" into the prompt.
+
+**Regression guard:** if no roster exists (small docs, no completeness run), skip enhancement — behave as before.
+
+**Expected impact:** targeted re-extraction for specifically-missed people. The Bamert/Bloom class of bugs disappears because we're now asking the LLM by name.
+
+### Execution order for Group E
+
+**After** tonight's verify run lands (so we see the honest baseline + what's still broken):
+
+1. **E1** first — biggest win, smallest code change. Re-run Batch D, measure.
+2. **E2** next — catches the form-PDF class of misses E1 can't touch.
+3. **E3 + E4** together — both are tuning, both small.
+4. **E5** last — depends on completeness roster being built; adds targeting but won't help if E1+E2 already got the same pages.
+
+After each fix, re-run Batch D and independently verify against PDF ground truth before moving to the next. **No batched shipping of E1-E5 as a bundle** — we caught a regression that way last time. One fix, one verification.
+
+### Group E success criteria
+
+- Gap fill rate ≥ 70% (tonight baseline: 32%)
+- No regression on existing Batch D recall (must stay ≥95% after Group A/B/C shipped)
+- No regression on Batch A/C completeness (small docs, not dependent on gap-fill)
+- Vision calls per doc stay within `COMPLETENESS_VISION_MAX_PAGES` budget (no runaway)
