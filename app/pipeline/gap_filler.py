@@ -82,6 +82,9 @@ class GapFiller:
         max_llm_per_gap: int = DEFAULT_MAX_LLM_CALLS_PER_GAP,
         max_llm_total: int = DEFAULT_MAX_LLM_CALLS_TOTAL,
         dpi: int = 200,
+        expected_fields: list[str] | None = None,
+        field_labels: list[str] | None = None,
+        document_type: str | None = None,
     ):
         self.doc_path = doc_path
         self.document_id = document_id
@@ -92,6 +95,13 @@ class GapFiller:
         self.max_llm_per_gap = max_llm_per_gap
         self.max_llm_total = max_llm_total
         self.dpi = dpi
+        # E1 (BIG_FIXES): field contract from segregation. Threaded into
+        # the gap-fill prompt so the LLM knows exactly what fields this
+        # doc is supposed to have. Adaptive — works on any doc type
+        # because it's driven by segregation output.
+        self.expected_fields = expected_fields or []
+        self.field_labels = field_labels or []
+        self.document_type = document_type or "document"
 
         # Budget tracking
         self._llm_calls_used = 0
@@ -158,7 +168,11 @@ class GapFiller:
         ):
             _filled_so_far = sum(1 for r in results if r.fill_result == "filled")
             _fill_rate = _filled_so_far / max(len(fillable_gaps), 1)
-            if _fill_rate < 0.3:  # less than 30% filled — something is wrong
+            # E3 (BIG_FIXES): raised threshold 0.30 → 0.50. Verify #1
+            # ran at 32% fill rate (just above old 30% gate) and missed
+            # the self-correct loop entirely. 50% covers those borderline
+            # cases without firing on truly-healthy runs.
+            if _fill_rate < 0.5:
                 _new_fills = self._self_correct(gaps_by_page, filled_pages, results)
                 filled_pages.update(_new_fills)
 
@@ -237,10 +251,32 @@ class GapFiller:
                         missing_fields.update(["PERSON", "LOCATION"])
 
             fields_str = ", ".join(sorted(missing_fields)) or "PERSON, LOCATION"
+            # E1 (BIG_FIXES): field-contract-aware prompt. When segregation
+            # supplied a contract, tell the LLM exactly what this doc is
+            # supposed to contain + which labels appear on the page.
+            # Otherwise fall back to the generic prompt.
+            contract_section = ""
+            if self.expected_fields or self.field_labels:
+                contract_lines = [
+                    f"This document is a {self.document_type}.",
+                ]
+                if self.expected_fields:
+                    contract_lines.append(
+                        f"Each person record in this doc is expected to contain: "
+                        f"{', '.join(self.expected_fields)}"
+                    )
+                if self.field_labels:
+                    contract_lines.append(
+                        f"Field labels that appear on pages: "
+                        f"{', '.join(self.field_labels[:8])}"
+                    )
+                contract_section = "\n".join(contract_lines) + "\n\n"
+
             # Ask for everything useful so gap-fill can synthesize records
             # for people who didn't make it through the main paths
             # (BIG_FIXES #A3). Keys kept lowercase for stable JSON output.
             prompt = (
+                f"{contract_section}"
                 f"Extract personal information from these {len(batch_pages)} pages.\n"
                 f"For EACH page, extract the PRIMARY SUBJECT only (not teachers, "
                 f"doctors, providers, or institutional staff).\n"

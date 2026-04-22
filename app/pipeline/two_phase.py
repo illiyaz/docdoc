@@ -4532,6 +4532,24 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                     except Exception:
                         pass
 
+                    # E1 (BIG_FIXES): plumb segregation's field contract
+                    # into the gap filler so the prompt can tell the LLM
+                    # what THIS doc is supposed to contain.
+                    _gf_seg = (dict(_fill_doc.metadata_json or {})).get("segregation", {})
+                    _gf_expected: list[str] = []
+                    _gf_labels: list[str] = []
+                    _gf_doctype = "document"
+                    if isinstance(_gf_seg, dict):
+                        _gf_doctype = _gf_seg.get("document_type") or "document"
+                        _gf_expected = [
+                            t for t in (_gf_seg.get("field_inventory") or [])
+                            if isinstance(t, str) and t
+                        ]
+                        _gf_labels = [
+                            f.get("name") for f in (_gf_seg.get("fields") or [])
+                            if isinstance(f, dict) and f.get("name")
+                        ]
+
                     filler = GapFiller(
                         doc_path=_fill_doc.source_path,
                         document_id=doc_id,
@@ -4539,6 +4557,9 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                         ollama_client=ollama_client,
                         vision_model=_gap_vision_model,
                         max_llm_total=_gap_budget,
+                        expected_fields=_gf_expected or None,
+                        field_labels=_gf_labels or None,
+                        document_type=_gf_doctype,
                     )
                     try:
                         doc_filled = filler.fill(doc_gaps)
