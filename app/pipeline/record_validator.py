@@ -29,6 +29,8 @@ def validate_records(
     document_name: str,
     ollama_client,
     doc_id: str | None = None,
+    expected_fields: list[str] | None = None,
+    field_labels: list[str] | None = None,
 ) -> tuple[list, list, dict]:
     """Validate extracted records using LLM context awareness.
 
@@ -44,6 +46,18 @@ def validate_records(
         OllamaClient instance.
     doc_id:
         Document UUID for audit logging.
+    expected_fields:
+        Canonical field types from segregation's ``field_inventory`` (e.g.
+        ``["PERSON", "DATE_OF_BIRTH", "UK_NINO", "LOCATION"]``). Tells the
+        validator what this specific document is *supposed* to contain,
+        so partial-but-consistent records (name+NI+DOB without address
+        on a pension doc) aren't purged as garbage. Without this, the
+        validator falls back to generic heuristics.
+    field_labels:
+        Human-readable labels from segregation (e.g. ``["Member's Name",
+        "Date of Birth", "National Insurance Number", "Last known
+        address"]``). Helps the LLM judge which missing fields are
+        tolerable absences vs red flags for this doc type.
 
     Returns
     -------
@@ -88,9 +102,38 @@ def validate_records(
 
     records_text = "\n".join(record_lines)
 
+    # Build the field-contract section from segregation output. If the
+    # caller didn't provide one, fall back to generic phrasing. The
+    # contract tells the LLM what fields THIS document is supposed to
+    # have — so a pension record missing address is 3-of-4 and still
+    # valid, not "garbage"; a medical record missing gov_id but having
+    # MRN is also valid; an HR record missing SSN but having employee_id
+    # is valid. The validator adapts to the doc type instead of
+    # hard-coding which fields are mandatory.
+    if expected_fields or field_labels:
+        contract_lines = ["Field contract (from document segregation):"]
+        if expected_fields:
+            contract_lines.append(f"  Expected field types: {', '.join(expected_fields)}")
+        if field_labels:
+            contract_lines.append(f"  Labels seen on the page: {', '.join(field_labels[:10])}")
+        contract_section = "\n".join(contract_lines) + "\n\n"
+        contract_rule = (
+            "- PARTIAL but CONSISTENT records are VALID. A record missing one "
+            "or two contract fields is not garbage — breach notifications must "
+            "reach any real person identified, even with incomplete data. Only "
+            "flag GARBAGE when the record is clearly not a real person (legal "
+            "entity, form code, boilerplate, obvious parsing artifact).\n"
+        )
+    else:
+        contract_section = ""
+        contract_rule = (
+            "- When unsure, lean toward VALID (let the auditor decide).\n"
+        )
+
     prompt = (
         f"You are validating extracted records from a {document_type} document "
         f"named '{document_name}'.\n\n"
+        f"{contract_section}"
         f"For each record below, determine if it represents a REAL INDIVIDUAL PERSON "
         f"or if it's GARBAGE (parsing artifact, form code, legal entity, institutional "
         f"name, or other non-person data).\n\n"
@@ -107,7 +150,7 @@ def validate_records(
         f"Rules:\n"
         f"- VALID = this is a real individual person whose data was breached\n"
         f"- GARBAGE = not a real person, or data is clearly wrong/garbled\n"
-        f"- When unsure, lean toward VALID (let the auditor decide)\n"
+        f"{contract_rule}"
         f"- Return ONLY JSON array\n"
     )
 

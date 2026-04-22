@@ -4336,9 +4336,20 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                     )
                     _rv_doc_type = "unknown"
                     _rv_doc_name = _rv_doc_key
+                    _rv_expected_fields: list[str] = []
+                    _rv_field_labels: list[str] = []
                     if _rv_doc:
                         _rv_seg = (dict(_rv_doc.metadata_json or {})).get("segregation", {})
-                        _rv_doc_type = _rv_seg.get("document_type", "unknown") if isinstance(_rv_seg, dict) else "unknown"
+                        if isinstance(_rv_seg, dict):
+                            _rv_doc_type = _rv_seg.get("document_type", "unknown")
+                            _rv_expected_fields = [
+                                t for t in (_rv_seg.get("field_inventory") or [])
+                                if isinstance(t, str) and t
+                            ]
+                            _rv_field_labels = [
+                                f.get("name") for f in (_rv_seg.get("fields") or [])
+                                if isinstance(f, dict) and f.get("name")
+                            ]
                         _rv_doc_name = _rv_doc.file_name or _rv_doc_key
 
                     try:
@@ -4350,6 +4361,8 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                             document_name=_rv_doc_name,
                             ollama_client=_rv_client,
                             doc_id=str(_rv_doc.id) if _rv_doc else None,
+                            expected_fields=_rv_expected_fields or None,
+                            field_labels=_rv_field_labels or None,
                         )
                         _validated_records.extend(_rv_valid)
                         _total_purged += len(_rv_purged)
