@@ -27,23 +27,60 @@ from app.rra.entity_resolver import PIIRecord, ResolvedGroup
 logger = logging.getLogger(__name__)
 
 # Minimum PII threshold: a notification subject must have at least a name
-# PLUS one of these corroborating PII types.  Name-only records are noise
+# PLUS one of these corroborating PII types. Name-only records are noise
 # and should not generate notification subjects.
-_CORROBORATING_PII_TYPES = frozenset({
-    "US_SSN", "CREDIT_CARD", "BANK_ACCOUNT", "US_BANK_NUMBER",
-    "US_BANK_ROUTING",
-    "US_DRIVER_LICENSE", "US_PASSPORT", "NI_NUMBER", "AADHAAR",
-    "PAN_CARD", "TAX_ID", "NATIONAL_INSURANCE_UK", "UK_NINO",
-    "NATIONAL_ID", "DATE_OF_BIRTH", "DATE_OF_BIRTH_MDY",
-    "DATE_OF_BIRTH_DMY", "EMAIL_ADDRESS", "EMAIL",
+#
+# Source of truth: gov_id_classifier.SUPPORTED_TYPES owns the set of
+# government ID types (50+ across 35+ countries). This file adds non-
+# gov-ID corroborating types (DOB, email, phone, address) and industry-
+# specific identifiers (medical, education, HR, insurance, legal) that
+# the classifier doesn't track.
+#
+# The two sources stay in sync because _CORROBORATING_PII_TYPES is
+# built at import time from the classifier + local additions. Add a
+# new country's gov ID to gov_id_classifier and it flows here
+# automatically. Non-gov-ID corroborating fields stay local to this
+# module.
+from app.pii.gov_id_classifier import EXPANDED_KNOWN_TYPES as _GOV_ID_TYPES
+
+# Non-gov-ID corroborating fields — aliases and industry-specific IDs.
+# These aren't government-issued but uniquely identify a person in
+# their context (patient in EHR, employee in HR, student in academic,
+# policyholder in insurance, etc.).
+_NON_GOV_CORROBORATING = frozenset({
+    # Direct contact / demographic
+    "DATE_OF_BIRTH", "DATE_OF_BIRTH_MDY", "DATE_OF_BIRTH_DMY",
+    "EMAIL_ADDRESS", "EMAIL",
     "PHONE_NUMBER", "PHONE_US", "PHONE_INTL",
-    "LOCATION", "ADDRESS", "PHI_MRN", "PHI_NPI",
-    "MEDICAL_LICENSE", "BIOMETRIC",
-    # Account/membership IDs — common in CSV/XLSX payroll and HR data.
-    # These are meaningful identifiers that corroborate a person exists.
-    "ACCOUNT_NUMBER", "MEMBER_ID", "EMPLOYEE_ID",
-    "IBAN_CODE", "NPI_NUMBER",
+    "LOCATION", "ADDRESS",
+    # Biometric
+    "BIOMETRIC",
+    # Healthcare identifiers (distinct from gov IDs)
+    "PHI_MRN", "MEDICAL_RECORD", "MRN",      # different labels same concept
+    "PHI_NPI", "NPI_NUMBER", "MEDICAL_LICENSE",
+    "PATIENT_ID", "PROVIDER_ID", "INSURANCE_ID", "PAYER_ID",
+    "MEDICARE_NUMBER", "MEDICAID_NUMBER",
+    # Employment / HR
+    "EMPLOYEE_ID", "EMPLOYER_ID", "BADGE_ID", "ACCESS_CARD",
+    "KEY_FOB_ID", "STAFF_ID",
+    # Education (FERPA)
+    "STUDENT_ID", "ENROLLMENT_ID", "STUDENT_EMAIL",
+    # Insurance
+    "POLICY_NUMBER", "POLICYHOLDER_ID", "CLAIM_NUMBER",
+    "GROUP_NUMBER", "SUBSCRIBER_ID",
+    # Legal
+    "CASE_NUMBER", "DOCKET_NUMBER", "COURT_CASE",
+    # Finance (beyond gov-issued tax IDs)
+    "CREDIT_CARD", "BANK_ACCOUNT", "US_BANK_NUMBER", "US_BANK_ROUTING",
+    "ACCOUNT_NUMBER", "ACCOUNT_REFERENCE", "IBAN_CODE",
+    "MEMBER_ID", "LOAN_ID", "MORTGAGE_ID",
+    # Telecom / SaaS
+    "CUSTOMER_ID", "SUBSCRIPTION_ID", "USER_ID",
+    # Government / civic (beyond gov IDs)
+    "VOTER_ID", "SSA_CLAIM_NUMBER",
 })
+
+_CORROBORATING_PII_TYPES = _GOV_ID_TYPES | _NON_GOV_CORROBORATING
 
 # Entity types that are NOT meaningful on their own — they need either a name
 # or at least one PII type from _CORROBORATING_PII_TYPES to form a valid subject.
@@ -233,12 +270,32 @@ class Deduplicator:
         skipped_thin = 0
 
         for group in groups:
-            # Minimum-PII threshold: skip groups that have only a name and
-            # no corroborating PII (SSN, DOB, email, phone, address, etc.).
-            # These are noise — headers, labels, or orphan PERSON detections.
+            # Minimum-PII threshold (BIG_FIXES #H1): skip groups that have
+            # only a name and no corroborating PII. "Corroborating" is the
+            # union of:
+            #   - standard contact fields (DOB, email, phone, address)
+            #   - all known gov-ID types (from gov_id_classifier)
+            #   - industry-specific IDs (MRN, student_id, badge_id, etc.)
+            #   - anything the doc's own segregation contract declared
+            #     as an expected field (so new doc types self-configure)
             has_corroboration = False
             has_name = False
             all_entity_types: set[str] = set()
+
+            # Per-group doc contract: the union of field_inventory types
+            # across every record in the group. Adaptive — a doc type we
+            # haven't seen before (new geography, new industry) still
+            # passes the filter as long as segregation classified its
+            # fields as expected PII.
+            contract_types: set[str] = set()
+            for r in group.records:
+                fc = getattr(r, "field_contract", None)
+                if fc:
+                    contract_types.update(t.upper() for t in fc if t)
+
+            # Merge the static allowlist with this group's contract.
+            effective_corroborating = _CORROBORATING_PII_TYPES | contract_types
+
             for r in group.records:
                 if r.raw_name:
                     has_name = True
@@ -248,7 +305,7 @@ class Deduplicator:
                 if r.entity_types_found:
                     all_entity_types.update(et.upper() for et in r.entity_types_found)
                     for et in r.entity_types_found:
-                        if et.upper() in _CORROBORATING_PII_TYPES:
+                        if et.upper() in effective_corroborating:
                             has_corroboration = True
 
             if not has_corroboration:

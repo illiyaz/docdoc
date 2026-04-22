@@ -113,6 +113,17 @@ _PATTERNS: tuple[GovIdPattern, ...] = (
     # lives in app/pii/pattern_validator.py.
     GovIdPattern("US_SSN", "US",
                  re.compile(r"^\d{3}-?\d{2}-?\d{4}$"), False),
+    # US Driver's License: highly variable per state. Common shapes:
+    #   1-2 letters + 6-8 digits (CA, NY, FL, etc.)
+    #   8-9 digits only (PA, OH, etc.)
+    #   Alphanumeric mixed (MA, IL)
+    # Keep permissive — ~50 state formats won't fit one regex cleanly.
+    # Validation of the DL value itself is downstream.
+    GovIdPattern("US_DRIVER_LICENSE", "US",
+                 re.compile(r"^[A-Z]{0,2}\d{5,9}[A-Z0-9]?$"), False),
+    # US Passport: 1 letter + 8 digits OR 9 digits only.
+    GovIdPattern("US_PASSPORT", "US",
+                 re.compile(r"^[A-Z]?\d{8,9}$"), False),
     # Canadian SIN: 3-3-3 digits.
     GovIdPattern("CA_SIN", "CA",
                  re.compile(r"^\d{3}[-\s]?\d{3}[-\s]?\d{3}$"), False),
@@ -236,6 +247,61 @@ _PATTERNS: tuple[GovIdPattern, ...] = (
 
 # Canonical set of all type labels produced by this module.
 SUPPORTED_TYPES: frozenset[str] = frozenset(p.type_name for p in _PATTERNS) | {GENERIC_TYPE}
+
+
+# Legacy / alternative labels that other code emits for the same concept.
+# Maps each alias → canonical type name. Used by other modules to
+# recognize their own labels against this classifier's canonical set.
+#
+# How it stays in sync: when a new country/gov-ID is added above, its
+# common aliases get added here. Consumers (dedup filter, record
+# validator, etc.) import EXPANDED_KNOWN_TYPES which unions the
+# canonical set + all aliases — so emitting either the canonical
+# ("UK_NINO") or the alias ("NI_NUMBER") still counts as recognized.
+ALIAS_TO_CANONICAL: dict[str, str] = {
+    # UK
+    "NI_NUMBER": "UK_NINO",
+    "NATIONAL_INSURANCE_UK": "UK_NINO",
+    "UK_NHS_NUMBER": "UK_NHS",
+    # India
+    "AADHAAR": "IN_AADHAAR",
+    "AADHAR": "IN_AADHAAR",
+    "PAN_CARD": "IN_PAN",
+    "PAN": "IN_PAN",
+    "GSTIN": "IN_GSTIN",
+    # US
+    "DRIVER_LICENSE": "US_DRIVER_LICENSE",
+    "DRIVERS_LICENSE": "US_DRIVER_LICENSE",
+    "PASSPORT": "US_PASSPORT",           # default assumption; country_hint overrides
+    "PASSPORT_ICAO": "US_PASSPORT",
+    # Other generic labels that consumers emit
+    "NATIONAL_ID": GENERIC_TYPE,          # doesn't disambiguate country
+    "TAX_ID": GENERIC_TYPE,
+    "OTHER_ID": GENERIC_TYPE,
+    "GOV_ID": GENERIC_TYPE,
+    "GOVERNMENT_ID": GENERIC_TYPE,
+    "IDENTIFICATION": GENERIC_TYPE,
+}
+
+
+# Expanded set including aliases — use this when checking whether a
+# label (from anywhere in the codebase) represents a known government
+# ID or its alias. Strict canonical-only checks should still use
+# SUPPORTED_TYPES.
+EXPANDED_KNOWN_TYPES: frozenset[str] = SUPPORTED_TYPES | frozenset(ALIAS_TO_CANONICAL.keys())
+
+
+def is_known_gov_id_label(label: str | None) -> bool:
+    """True when *label* is a canonical gov-ID type or a known alias.
+
+    Used by other modules (deduplicator, record_validator, gap_filler)
+    to check whether an entity_type label represents a government ID,
+    without each module maintaining its own allowlist.
+    """
+    if not label:
+        return False
+    normalized = label.strip().upper()
+    return normalized in EXPANDED_KNOWN_TYPES
 
 
 def _normalize(value: str) -> str:
