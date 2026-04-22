@@ -8,6 +8,80 @@ For detailed per-step implementation notes, see [CLAUDE_HISTORY.md](CLAUDE_HISTO
 
 ---
 
+## Roadmap — What's Next (2026-04-22, post Batch D verify)
+
+The sequence below reflects the priority ordering after tonight's quality sprint.
+It's intentionally ordered "what we can safely deploy" not "what's easiest".
+
+### 1. Taxonomy sweep — breadth validation (NEXT)
+Run all 44 docs in `docs/testingsamples/` with the Group A/B/C/D fixes +
+anchor-count safety net (tasks #41-49 + `c7682d6`). Batch D is 2 files,
+2 doc types. The real stress test is 23 doc-type categories (medical,
+school FERPA, HR, W2/1099/tax, scanned images, form PDFs, CSVs, Excel,
+MSGs, HEICs).
+
+Every fix we shipped was tuned against pensions. Open questions:
+- Do they hold on school records where there's no gov_id?
+- On medical where MRN replaces SSN?
+- On scanned docs where text extraction gives nothing?
+- Do E-group priorities (gap-fill improvements) matter per doc-type?
+
+**Output:** honest per-doc-type recall numbers + list of regressions.
+~5-6 hours end-to-end. This is the most informative run we could do.
+
+### 2. Frontend D2 — UI for /compare, /failed-docs, /segregation-flat
+Backend shipped tonight (`9280414`, `d53c433`) + TypeScript client
+(`cc29e4d`). Three new UI pages remain. Without this, the quality
+work is dead data — auditors can't use the tool.
+
+**Requires:** you online for visual feedback on layouts. 2-3 hour session.
+
+### 3. Group E — gap-fill improvements (tasks #51-55)
+Deferred until after taxonomy sweep so priorities are data-driven:
+- E1 field-contract prompts mattered on X docs
+- E2 vision fallback recovered Y scanned pages
+- E5 roster-targeting saved Z members
+
+Ship one at a time with PDF-truth verification between each (per
+`no_regression_discipline` feedback memory).
+
+### 4. Phase 6 — Security + Governance
+Real deployment blocker. Without auth + RBAC + audit log, the tool
+can't be given to anyone else — a breach-notification platform that
+any intern can query is itself a PII leak.
+- JWT authentication
+- 4-role RBAC (REVIEWER, LEGAL_REVIEWER, APPROVER, QC_SAMPLER)
+- Access-scoped queries (users see only their project data)
+- Audit log of all access + extraction + approval events
+
+~1 week focused work. Schema-heavy but well-defined.
+
+### 5. Phase 7 — Workflow completeness
+Transforms "extraction works" into "an end-to-end notification
+workflow completes":
+- Evidence package export (for legal / regulatory submissions)
+- Re-extraction UI (per-doc, per-job, from failed-docs list)
+- Manual merge / split for auditor corrections
+- Notification send with delivery tracking + bounces
+
+### 6. Phase 8 — Production hardening
+GPU deploy (M4 → A100), 3000-page stress tests, Grafana dashboards,
+Prometheus metrics, infra compose. Scale + ops, not features.
+
+### 7. Correction-memory loop
+Auditor corrections already persist to JSONL. Close the loop: feed
+them as few-shot examples into future LLM prompts. A user running
+100 docs makes the 101st better.
+
+---
+
+**Deliberate non-goals right now:**
+- More Batch D tuning. We've proven the approach. Diminishing returns.
+- New doc-type support before taxonomy sweep. Don't optimize unseen.
+- Auth-less UI polish. Security first once quality stabilizes.
+
+---
+
 ## Progress Summary
 
 | Phase | Status | Tests |
