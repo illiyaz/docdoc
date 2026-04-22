@@ -117,44 +117,27 @@ def extract_with_markers(
             batch_text += f"\n--- PAGE {pg + 1} ---\n{snippets[pg]}\n"
 
         try:
-            # Build field-aware prompt using segregation inventory
+            # Build field-aware prompt using segregation inventory.
+            # I1 (BIG_FIXES): the JSON output key is ALWAYS "gov_id"
+            # regardless of doc type. The prompt describes what KIND of
+            # gov ID to find based on segregation's field_inventory —
+            # SSN for US docs, NI number for UK, MRN for medical, etc.
+            # Previously the prompt used "ssn" as the output key which
+            # confused the LLM on non-SSN docs (MRNs, UK NI, student
+            # IDs) — 24+ MRNs missed on taxonomy sweep.
             _fi = field_inventory or []
-            _extra_fields = ""
-            _extra_json = ""
-            _extra_rules = ""
-            # Include OTHER_ID and NATIONAL_ID so non-US docs (UK NI number,
-            # India PAN/Aadhaar, BR CPF, etc.) trigger the gov-ID branch.
-            # Segregation emits OTHER_ID for IDs that don't cleanly map to
-            # the US enum.
-            if any(t in _fi for t in (
-                "US_SSN", "GOV_ID", "IDENTIFICATION", "OTHER_ID",
-                "NATIONAL_ID", "TAX_ID",
-                # Broadened 2026-04-21: Batch A lost TX87860944 because
-                # segregation labeled it US_DRIVER_LICENSE and this gate
-                # didn't activate. Add every gov-ID-ish segregation field
-                # type. Net effect: Strategy A prompt will ALWAYS ask the
-                # LLM for a gov ID when segregation indicated one exists.
-                "US_DRIVER_LICENSE", "DRIVER_LICENSE",
-                "US_PASSPORT", "PASSPORT", "PASSPORT_ICAO",
-                "UK_NINO", "NATIONAL_INSURANCE_UK", "NI_NUMBER",
-                "AADHAAR", "IN_AADHAAR", "PAN", "IN_PAN", "PAN_CARD",
-                "STUDENT_ID", "EMPLOYEE_ID", "EMPLOYER_ID",
-                "MEDICAL_RECORD", "MRN", "MEDICARE",
-                "INSURANCE_ID",
-            )):
-                _extra_fields += ", SSN/Tax ID"
-                _extra_json += ', "ssn": "123-45-6789"'
-                _extra_rules += "- ssn: Social Security Number, Tax ID, National ID, or similar government identifier.\n"
-            if any(t in _fi for t in ("DATE_OF_BIRTH",)):
+            _extra_fields, _extra_json, _extra_rules = _build_gov_id_prompt_fragment(_fi)
+            _fi_set = {t.upper() for t in _fi}
+            if any(t in _fi_set for t in ("DATE_OF_BIRTH",)):
                 _extra_fields += ", date of birth"
                 _extra_json += ', "dob": "01/15/1980"'
-            if any(t in _fi for t in ("PHONE_NUMBER",)):
+            if any(t in _fi_set for t in ("PHONE_NUMBER",)):
                 _extra_fields += ", phone number"
                 _extra_json += ', "phone": "555-123-4567"'
-            if any(t in _fi for t in ("EMAIL_ADDRESS",)):
+            if any(t in _fi_set for t in ("EMAIL_ADDRESS",)):
                 _extra_fields += ", email"
                 _extra_json += ', "email": "a@b.com"'
-            if any(t in _fi for t in ("FINANCIAL", "US_BANK_NUMBER", "CREDIT_CARD")):
+            if any(t in _fi_set for t in ("FINANCIAL", "US_BANK_NUMBER", "CREDIT_CARD")):
                 _extra_fields += ", account numbers"
                 _extra_json += ', "account": "1234567890"'
 
@@ -623,7 +606,10 @@ def _build_batch_prompt(
         f'"address": "123 Main St, Springfield, IL 62701", '
         f'"phone": "555-123-4567", '
         f'"dob": "01/15/2005", '
-        f'"ssn": "123-45-6789", '
+        # I1: generic "gov_id" key holds SSN, MRN, NI, PAN, student_id,
+        # employee_id, passport, DL, etc. — whatever the doc's contract
+        # declared. Example value shows SSN format but the key accepts any.
+        f'"gov_id": "123-45-6789", '
         f'"email": "john@example.com"}}\n'
         f"]\n\n"
         f"CRITICAL RULES:\n"
@@ -764,6 +750,87 @@ def _is_placeholder_phone(value: str) -> bool:
     if _is_generic_placeholder(value):
         return True
     return value.strip() in _FAKE_PHONE_STRINGS
+
+
+def _build_gov_id_prompt_fragment(
+    field_inventory: list[str] | None,
+) -> tuple[str, str, str]:
+    """Return (fields_str, json_str, rules_str) tailored to the doc's contract.
+
+    I1 (BIG_FIXES): the output JSON key is ALWAYS ``gov_id`` regardless
+    of doc type. The prompt describes WHAT KIND of gov ID based on
+    segregation's field_inventory — different example values and
+    descriptions for SSN docs vs UK NI docs vs MRN docs. Previously
+    the prompt used ``"ssn"`` as the output key which confused the LLM
+    on non-SSN docs.
+
+    Returns empty strings when no gov-ID is expected — caller's prompt
+    won't include a gov-ID section at all.
+    """
+    if not field_inventory:
+        return "", "", ""
+    fi = {t.upper() for t in field_inventory if t}
+    # Group by ID class — pick the dominant one for examples.
+    us_ssn = fi & {"US_SSN", "SSN"}
+    uk_ni = fi & {"UK_NINO", "NATIONAL_INSURANCE_UK", "NI_NUMBER", "UK_NHS"}
+    in_ids = fi & {"IN_PAN", "IN_AADHAAR", "PAN", "PAN_CARD", "AADHAAR", "IN_GSTIN"}
+    medical = fi & {"MEDICAL_RECORD", "MRN", "PHI_MRN", "PATIENT_ID",
+                     "MEDICARE", "MEDICAID_NUMBER", "INSURANCE_ID"}
+    student = fi & {"STUDENT_ID", "ENROLLMENT_ID"}
+    employee = fi & {"EMPLOYEE_ID", "BADGE_ID", "EMPLOYER_ID", "ACCESS_CARD"}
+    us_other = fi & {"US_DRIVER_LICENSE", "DRIVER_LICENSE",
+                      "US_PASSPORT", "PASSPORT"}
+    policy = fi & {"POLICY_NUMBER", "POLICYHOLDER_ID", "CLAIM_NUMBER"}
+    generic = fi & {"GOV_ID", "OTHER_ID", "IDENTIFICATION",
+                     "NATIONAL_ID", "TAX_ID", "GOVERNMENT_ID"}
+
+    # Pick example value based on dominant gov-ID type — helps LLM know
+    # what format to return.
+    example = "123-45-6789"  # default (US SSN format)
+    description = "SSN / Tax ID / National ID / government identifier"
+    label = "SSN / Tax ID"
+    if medical and not us_ssn and not uk_ni and not in_ids:
+        example = "MRN12345678"
+        description = "Medical Record Number (MRN), Patient ID, Medicare/Medicaid number, or insurance ID"
+        label = "MRN / Patient ID"
+    elif student:
+        example = "STU0012345"
+        description = "Student ID or Enrollment ID"
+        label = "Student ID"
+    elif employee and not us_ssn:
+        example = "EMP1234567"
+        description = "Employee ID, Badge ID, or similar workforce identifier"
+        label = "Employee/Badge ID"
+    elif uk_ni and not us_ssn:
+        example = "YB123456C"
+        description = "UK National Insurance Number or NHS Number"
+        label = "NI number"
+    elif in_ids and not us_ssn:
+        example = "ABCPD1234E"
+        description = "Indian PAN / Aadhaar / GSTIN"
+        label = "PAN/Aadhaar"
+    elif us_other:
+        example = "A12345678"
+        description = "US Driver's License or Passport number"
+        label = "DL/Passport"
+    elif policy:
+        example = "POL-00123456"
+        description = "Insurance policy number, claim number, or policyholder ID"
+        label = "policy number"
+
+    if not (us_ssn or uk_ni or in_ids or medical or student or employee
+            or us_other or policy or generic):
+        return "", "", ""
+
+    fields_str = f", {label}"
+    # Note: output key is "gov_id" — generic, not "ssn".
+    json_str = f', "gov_id": "{example}"'
+    rules_str = (
+        f"- gov_id: {description}.\n"
+        f"  Return the EXACT value as it appears on the page, including any\n"
+        f"  masking (e.g. XXX-XX-1234). Use the \"gov_id\" JSON key.\n"
+    )
+    return fields_str, json_str, rules_str
 
 
 def _is_placeholder_name(value: str) -> bool:
@@ -1024,7 +1091,10 @@ def _parse_batch_response(
         else:
             dob = None
 
-        ssn = entry.get("ssn")
+        # I1 (BIG_FIXES): accept both "gov_id" (new) and "ssn" (legacy)
+        # keys. Prompts now ask for "gov_id" as the generic identifier
+        # but older logged prompts + fallback paths still produce "ssn".
+        ssn = entry.get("gov_id") or entry.get("ssn")
         if ssn and isinstance(ssn, str) and len(ssn) >= 4 and not _is_placeholder_ssn(ssn):
             ssn = _normalize_masked_ssn(ssn) or None
             if ssn:

@@ -180,6 +180,60 @@ After each fix, re-run Batch D and independently verify against PDF ground truth
 
 ---
 
+## Group I — Extraction prompts adapt to doc contract (2026-04-23)
+
+### I1 — Generic gov_id output key, contract-aware descriptions (task #60, shipped next)
+
+**Why:** Audit after taxonomy sweep found 27 gov IDs in source PDFs
+that extraction missed — 20 MRNs in J_ehr_patient_list.pdf, 4 MRNs in
+E_discharge_summary.pdf, 1 SSN in K_collection_notice.pdf, 2 SSNs in
+T_inconsistent_redaction.pdf (got 1 of 2), 1 SSN in T_foia_style.
+
+Root cause: Strategy A/B/gap-fill prompts used `"ssn"` as the output
+JSON key with `"123-45-6789"` as the example. When segregation flagged
+MEDICAL_RECORD or STUDENT_ID or UK_NINO, the LLM saw:
+  - prompt: "extract the ssn field with SSN format"
+  - input: a medical record with `"MRN: 1234567"`
+  - LLM: confused, returned nothing or wrong value
+
+**Fix:** single output key `"gov_id"` across all prompts, with
+contract-aware description + example:
+
+  Contract says MEDICAL_RECORD → prompt says "Medical Record Number
+    (MRN), Patient ID, Medicare/Medicaid number, or insurance ID",
+    example "MRN12345678"
+  Contract says STUDENT_ID → prompt says "Student ID or Enrollment
+    ID", example "STU0012345"
+  Contract says UK_NINO → prompt says "UK National Insurance Number
+    or NHS Number", example "YB123456C"
+  Contract says IN_PAN/AADHAAR → prompt says "Indian PAN / Aadhaar /
+    GSTIN", example "ABCPD1234E"
+  Contract says US_DRIVER_LICENSE/PASSPORT → example "A12345678"
+  Contract says POLICY_NUMBER → prompt says "Insurance policy number,
+    claim number, or policyholder ID"
+  Contract says EMPLOYEE_ID/BADGE_ID → "Employee/Badge ID",
+    example "EMP1234567"
+  Contract says US_SSN or generic GOV_ID/TAX_ID → example
+    "123-45-6789" (SSN format, default)
+
+Implementation: new helper `_build_gov_id_prompt_fragment(field_inventory)`
+in `app/pipeline/text_batch_extractor.py` — dispatches to the right
+example based on segregation contract. Strategy A calls it. Strategy B
+prompt updated to use `"gov_id"` key. Gap filler's self-correct prompt
+updated similarly. Parser accepts both `gov_id` (new) and `ssn`
+(legacy) keys for backward compatibility.
+
+**Expected impact:** next taxonomy run should recover the 24 missing
+MRNs + 3 SSNs = 27 gov IDs that were in the PDFs but the LLM failed
+to extract.
+
+**Validation:** 10-contract helper test passes — SSN / NI / MRN /
+student_id / badge / PAN / DL / policy_number / empty / no-gov-id
+all map to appropriate example values. Same pipeline, adaptive
+prompts.
+
+---
+
 ## Group H — Filter alignment across geographies + industries (2026-04-22)
 
 ### H1 — Minimum-PII threshold sync'd with gov_id_classifier (task #59, shipped `8a1830a`)

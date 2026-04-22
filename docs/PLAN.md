@@ -80,6 +80,14 @@ After taxonomy sweep tells us which of these actually matter:
 Ship one at a time with PDF-truth verification between each (per
 `no_regression_discipline` feedback memory).
 
+### 4a. I1 — Extraction prompts use generic gov_id key (task #60, shipping now)
+Audit after taxonomy sweep found 27 gov IDs in PDFs that extraction
+missed — mostly MRNs on medical docs because prompts asked for "ssn"
+with "123-45-6789" example. Fix: all extraction prompts now use
+generic `"gov_id"` key; description + example adapt per segregation
+contract (MRN / NI / PAN / student_id / etc.). Parser accepts both
+`gov_id` (new) and `ssn` (legacy). Full design in BIG_FIXES.md Group I.
+
 ### 4a. H1 — Min-PII allowlist sync'd with gov_id_classifier ✅ shipped `8a1830a`
 Single source of truth: classifier owns gov-IDs (55 canonical + 17 aliases
 = 72), deduplicator adds industry-specific (55 medical/edu/HR/etc.). Old

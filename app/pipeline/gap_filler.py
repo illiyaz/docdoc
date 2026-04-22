@@ -536,7 +536,9 @@ class GapFiller:
                     f"Based on the above analysis, extract ALL personal records.\n"
                     f"Return a JSON array with one object per person:\n"
                     f'[{{"page": 5, "name": "Full Name", "address": "Street, City ST ZIP", '
-                    f'"ssn": "123-45-6789", "dob": "01/15/1980", "phone": "555-123-4567"}}]\n'
+                    # I1: use generic "gov_id" key (not "ssn") — covers
+                    # MRN, student_id, NI, PAN, DL, passport, etc.
+                    f'"gov_id": "123-45-6789", "dob": "01/15/1980", "phone": "555-123-4567"}}]\n'
                     f"Use null for fields not found. If a page has no personal data, omit it.\n\n"
                     f"{batch_text}"
                 )
@@ -583,9 +585,10 @@ class GapFiller:
                             if gap.page_num not in already_filled:
                                 value = person
                                 if gap.expected_field and gap.expected_field != "PERSON":
+                                    # I1: accept gov_id / ssn / mrn / field_name / address
                                     value = rec.get(
                                         gap.expected_field.lower().replace("us_", ""),
-                                        rec.get("ssn", rec.get("address", person))
+                                        rec.get("gov_id", rec.get("ssn", rec.get("address", person)))
                                     )
                                 if value:
                                     results.append(replace(
@@ -745,9 +748,10 @@ class GapFiller:
                         for gap in gaps_by_page[page_num]:
                             value = person
                             if gap.expected_field and gap.expected_field != "PERSON":
+                                # I1: accept gov_id / ssn / address fallback
                                 value = rec.get(
                                     gap.expected_field.lower().replace("us_", ""),
-                                    rec.get("ssn", rec.get("address", person))
+                                    rec.get("gov_id", rec.get("ssn", rec.get("address", person)))
                                 )
                             if value:
                                 results.append(replace(
