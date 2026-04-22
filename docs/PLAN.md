@@ -47,12 +47,26 @@ Every fix we shipped was tuned against pensions. Open questions:
 data-driven priority on E2/E4/E5. ~5-6 hours end-to-end. This is the
 most informative run we could do.
 
-### 3. Frontend D2 — UI for /compare, /failed-docs, /segregation-flat
-Backend shipped tonight (`9280414`, `d53c433`) + TypeScript client
-(`cc29e4d`). Three new UI pages remain. Without this, the quality
-work is dead data — auditors can't use the tool.
+### 3. Frontend UX redesign — D2 + F1 + F2 (guided auditor journey)
+User feedback 2026-04-22: "UI is not very friendly or intuitive."
+Backend-heavy work has accumulated; UI hasn't kept pace. This step
+bundles three related tasks into one UX session:
 
-**Requires:** you online for visual feedback on layouts. 2-3 hour session.
+- **D2** (task #50): UI for /compare, /failed-docs, /segregation-flat
+  (backend + client already shipped)
+- **F1** (task #56): Suspected Missing Subjects panel. The backend
+  already knows N expected vs M extracted (from A2 structural
+  estimator), the completeness roster names not in output, and C1
+  silent-miss pages. None of this surfaces to the auditor. Surface it
+  with actions: manual-add, dismiss, trigger-vision-fallback.
+- **F2** (task #57): Guided workflow redesign. Today's UI is a stack
+  of tabs; auditors need a linear story: upload → segregate → analyze
+  → extract → QA → notify. Clear current-step indicator, clear next
+  action, progress narrative ("52 people identified, 2 may be missing,
+  100% precision on gov IDs").
+
+**Requires:** you online for visual feedback. 4-6 hour session.
+Without this bundle, the backend quality work is invisible to users.
 
 ### 4. E2 / E4 / E5 — data-driven gap-fill improvements
 After taxonomy sweep tells us which of these actually matter:
