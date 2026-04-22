@@ -175,6 +175,7 @@ Detailed in [docs/SCHEMA.md](docs/SCHEMA.md). Summary:
 - Never broaden scope beyond current prompt
 - Run before marking done: `python -m py_compile <files> && pytest tests/test_schema.py tests/test_repositories.py tests/test_safety.py`
 - Summarize: files modified + what tests verify
+- **Docs update by default (2026-04-22):** every code change cycle includes a documentation pass BEFORE moving to the next task. New fix shipped → BIG_FIXES.md section + PLAN.md roadmap entry. Deleted/refactored code → remove doc references. New architectural rule → CLAUDE.md § 8 (or a new numbered section). Never leave a session with code shipped and docs out of date. Commit docs separately from code when possible for audit clarity.
 
 ---
 
