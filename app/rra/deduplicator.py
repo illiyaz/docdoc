@@ -211,8 +211,14 @@ def _best_address(addresses: list[dict | None]) -> dict | None:
 class Deduplicator:
     """Build ``NotificationSubject`` rows from resolved groups and persist."""
 
-    def __init__(self, db_session: Session) -> None:
+    def __init__(self, db_session: Session, project_id=None) -> None:
         self.db = db_session
+        # project_id is plumbed in so in-memory _find_existing + SQL
+        # dedup can actually run — previously the caller set project_id
+        # AFTER build_subjects() returned, leaving every dedup check
+        # short-circuited (ns.project_id was None). This caused same-
+        # person duplicates like Katelyn Cook × 3 in the verify run.
+        self.project_id = project_id
 
     def build_subjects(
         self,
@@ -545,6 +551,7 @@ class Deduplicator:
 
         return NotificationSubject(
             subject_id=uuid4(),
+            project_id=self.project_id,  # plumbed in so dedup can fire
             canonical_name=canonical_name,
             canonical_email=canonical_email,
             canonical_address=canonical_address,

@@ -4557,12 +4557,17 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
             # against existing records and append new ones.
             try:
                 from app.rra.entity_resolver import PIIRecord as _GFRecord
+                from app.rra.deduplicator import _gov_id_match_key as _gf_key
                 from uuid import uuid4 as _gf_uuid
+                # Use mask-variant-insensitive key so 'XXXXX6742' and
+                # 'XXX-XX-6742' collapse — without this A3 produced
+                # duplicate rows (Katelyn Cook × 3, J T Browne × 3 in
+                # verify run).
                 existing_keys: set[tuple[str, str]] = set()
                 for _r in all_records:
                     _key = (
                         (_r.raw_name or "").strip().lower(),
-                        (_r.raw_government_id or "").strip().upper(),
+                        _gf_key(_r.raw_government_id),
                     )
                     existing_keys.add(_key)
 
@@ -4583,7 +4588,7 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                     # contributes a unique gov_id OR address anchor.
                     if not (_gov_id or _addr):
                         continue
-                    _key = (_name.lower(), _gov_id.upper())
+                    _key = (_name.lower(), _gf_key(_gov_id))
                     if _key in existing_keys:
                         continue
                     existing_keys.add(_key)
@@ -4768,17 +4773,28 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
             detail={"status": "running"},
         )
 
-        if run.project_id is not None:
+        # Clear notification subjects for THIS run only, not the whole
+        # project (same blast-radius bug as #D1 on the purge endpoint).
+        # Re-running a job shouldn't nuke subjects from every other run
+        # in the project.
+        if run.id is not None:
             old_count = db.query(NotificationSubject).filter(
-                NotificationSubject.project_id == run.project_id,
+                NotificationSubject.ingestion_run_id == run.id,
             ).delete()
             db.commit()
             if old_count:
-                logger.info("Cleared %d old notification subjects for project %s", old_count, run.project_id)
+                logger.info(
+                    "Cleared %d old notification subjects for run %s (this job only)",
+                    old_count, run.id,
+                )
 
         from app.rra.deduplicator import Deduplicator
 
-        dedup = Deduplicator(db)
+        # Pass project_id up front so Deduplicator's in-memory
+        # _find_existing and _sql_dedup actually fire (they were
+        # short-circuiting because project_id got set AFTER build_subjects
+        # returned).
+        dedup = Deduplicator(db, project_id=run.project_id)
         subjects = dedup.build_subjects(groups)
 
         for subj in subjects:
