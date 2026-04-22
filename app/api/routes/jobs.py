@@ -1722,15 +1722,40 @@ def purge_job_data(job_id: UUID, db: Session = Depends(get_db)):
         )
         ext_deleted = result.rowcount
 
-    # 2. Delete notification subjects for this project
+    # 2. Delete notification subjects for THIS job only (BIG_FIXES #D1).
+    # Older code deleted by project_id, which nuked every subject in
+    # the project whenever one job was purged — explains why the
+    # notification_subjects table kept going empty between runs.
+    # ingestion_run_id was added in migration 0014; older subjects
+    # with NULL ingestion_run_id fall back to the doc-based match
+    # (subject.source_document_name ∈ doc_ids_in_this_run).
     ns_deleted = 0
-    if run.project_id:
-        result = db.execute(
-            delete(NotificationSubject).where(
-                NotificationSubject.project_id == run.project_id
-            )
+    result = db.execute(
+        delete(NotificationSubject).where(
+            NotificationSubject.ingestion_run_id == job_id
         )
-        ns_deleted = result.rowcount
+    )
+    ns_deleted = result.rowcount
+
+    # Legacy orphans: subjects from pre-migration-0014 runs have
+    # ingestion_run_id=NULL. Match them via source_document_name
+    # against this run's docs — still scoped to this job, not the
+    # whole project.
+    if doc_ids:
+        doc_names = [
+            d.file_name for d in db.execute(
+                select(Document).where(Document.ingestion_run_id == job_id)
+            ).scalars().all()
+        ]
+        if doc_names:
+            result = db.execute(
+                delete(NotificationSubject).where(
+                    NotificationSubject.ingestion_run_id.is_(None),
+                    NotificationSubject.source_document_name.in_(doc_names),
+                    NotificationSubject.project_id == run.project_id,
+                )
+            )
+            ns_deleted += result.rowcount
 
     # 3. Clear extracted_records from document metadata (heavy JSON)
     docs_cleared = 0
