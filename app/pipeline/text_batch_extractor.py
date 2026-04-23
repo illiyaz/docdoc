@@ -786,8 +786,17 @@ def _build_gov_id_prompt_fragment(
 
     # Pick example value based on dominant gov-ID type — helps LLM know
     # what format to return.
-    example = "123-45-6789"  # default (US SSN format)
-    description = "SSN / Tax ID / National ID / government identifier"
+    # I3 (BIG_FIXES): default SSN description now explicitly accepts
+    # last-4 format ("SSN (Last 4): 3274" pattern common in payroll
+    # registers, pay stubs, invoices). Without this, the LLM skipped
+    # 4-digit values because they didn't match "123-45-6789" format.
+    example = "123-45-6789"
+    description = (
+        "SSN / Tax ID / National ID / government identifier. "
+        "Accepts full format (123-45-6789), masked (XXX-XX-1234), or "
+        "LAST 4 DIGITS ONLY when the column header says 'SSN (Last 4)' "
+        "or 'SSN Last4' or similar — e.g. '3274' in a payroll register"
+    )
     label = "SSN / Tax ID"
     if medical and not us_ssn and not uk_ni and not in_ids:
         example = "MRN12345678"

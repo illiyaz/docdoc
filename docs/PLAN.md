@@ -80,6 +80,14 @@ After taxonomy sweep tells us which of these actually matter:
 Ship one at a time with PDF-truth verification between each (per
 `no_regression_discipline` feedback memory).
 
+### 4a. I1 + I2 + I3 — Extraction prompts adapt to doc contract + protocol (shipped)
+
+- **I1** (task #60): generic `gov_id` output key, contract-aware descriptions (MRN/NI/student_id/etc examples per doc type).
+- **I2** (task #61): PHI/FERPA label normalization — MEDICAL_RECORD → PHI_MRN, STUDENT_ID → FERPA_STUDENT_ID, etc. so protocols trigger correctly.
+- **I3** (task #62): tabular doc types force records_per_page ≥ 10; Last-4 SSN format recognized.
+
+Full design: BIG_FIXES.md Group I.
+
 ### 4a. I1 — Extraction prompts use generic gov_id key (task #60, shipping now)
 Audit after taxonomy sweep found 27 gov IDs in PDFs that extraction
 missed — mostly MRNs on medical docs because prompts asked for "ssn"

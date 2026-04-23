@@ -182,6 +182,40 @@ After each fix, re-run Batch D and independently verify against PDF ground truth
 
 ## Group I — Extraction prompts adapt to doc contract (2026-04-23)
 
+### I3 — Tabular payroll extraction + Last-4 SSN (task #62, shipped)
+
+**Why:** J_crystal_report_payroll.pdf has 30 employees in tabular
+format across 3 pages. Strategy A extracted only 3 records (10%
+recall) with 0 gov_ids. Two issues:
+
+1. **records_per_page=1** from marker detector — Strategy A prompted
+   for "one person per page" instead of "extract all rows". 27
+   employees silently dropped.
+2. **Last-4 SSN format** (e.g. "SSN (Last 4): 3274") wasn't captured —
+   the prompt asked for "123-45-6789" format, so the LLM skipped the
+   4-digit values.
+
+**Fix:**
+
+- two_phase.py deterministic tabular floor: if segregation's
+  `document_type` matches any of `payroll`, `register`, `roster`,
+  `list`, `patient_list`, `employee_list`, `member_list`, `roll`,
+  `ledger`, `enrollment`, `directory`, `access_log`, `log_file` —
+  force `records_per_page ≥ 10`. Strategy A prompt then asks for "~10
+  persons per page, return one object PER PERSON, not per page".
+- text_batch_extractor.py: SSN description now explicitly accepts
+  full / masked / last-4 formats, with example "'3274' in a payroll
+  register". Same generic `gov_id` JSON key.
+
+**Why this generalizes:** no hardcoded doc paths. Any doc type whose
+`document_type` matches a tabular signal gets the multi-row prompt.
+Last-4 support applies universally, since state laws (CA SB 24, NY
+Shield) treat name+last-4-SSN as notifiable.
+
+**Expected impact on next crystal payroll run:** 30 records extracted
+(up from 3), 30 last-4 SSNs captured (up from 0). Under
+state_breach_generic all 30 trigger notification.
+
 ### I2 — PHI/FERPA label normalization for protocol triggering (task #61, shipped)
 
 **Why:** HIPAA protocol triggers on `PHI_MRN` but segregation emits

@@ -2835,6 +2835,29 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                             _record_unit = _markers.get("record_unit", "page")
                             _records_per_page = _markers.get("records_per_page", 1)
 
+                            # I3 (BIG_FIXES): deterministic floor for tabular
+                            # doc types. Segregation + marker detection missed
+                            # J_crystal_report_payroll (30 employees tabular →
+                            # rpp=1 → only 3 extracted). If segregation's
+                            # document_type looks like a register / roster /
+                            # list / report, assume ≥10 persons per page.
+                            # Heuristic — no doc-specific hardcoding.
+                            _doc_type_lower = (_tb_doc_type or "").lower()
+                            _tabular_signal_types = (
+                                "payroll", "register", "roster", "list",
+                                "patient_list", "employee_list", "member_list",
+                                "roll", "ledger", "enrollment", "directory",
+                                "access_log", "log_file",
+                            )
+                            if any(tok in _doc_type_lower for tok in _tabular_signal_types):
+                                if _records_per_page < 10:
+                                    logger.info(
+                                        "[I3] Tabular doc_type=%r — bumping records_per_page %d → 10",
+                                        _tb_doc_type, _records_per_page,
+                                    )
+                                    _records_per_page = 10
+                                    _markers["records_per_page"] = _records_per_page
+
                             # Vision fallback: if text says "page" but page is dense
                             if _record_unit == "page" and _records_per_page <= 1:
                                 # Check if pages are suspiciously dense for 1 record
