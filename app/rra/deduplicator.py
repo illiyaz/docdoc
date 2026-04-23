@@ -446,12 +446,25 @@ class Deduplicator:
         # containing US_SSN, DOB, etc.) propagate all types to the subject.
         # This is critical for protocol triggering — apply_protocol() checks
         # pii_types_found against triggering_entity_types.
+        #
+        # I2 (BIG_FIXES): normalise domain labels (MEDICAL_RECORD,
+        # STUDENT_ID, etc.) to the protocol-match form (PHI_MRN,
+        # FERPA_STUDENT_ID) so HIPAA/HITECH/FERPA actually trigger.
+        # Keeps the original label too for doc-type observability.
+        from app.pii.gov_id_classifier import normalize_protocol_label
         pii_types_set: set[str] = set()
         for r in records:
             if r.entity_types_found:
-                pii_types_set.update(r.entity_types_found)
+                for t in r.entity_types_found:
+                    pii_types_set.add(t)
+                    normalised = normalize_protocol_label(t)
+                    if normalised and normalised != t:
+                        pii_types_set.add(normalised)
             if r.entity_type:
                 pii_types_set.add(r.entity_type)
+                normalised = normalize_protocol_label(r.entity_type)
+                if normalised and normalised != r.entity_type:
+                    pii_types_set.add(normalised)
         pii_types = sorted(pii_types_set)
 
         # --- Source records ---

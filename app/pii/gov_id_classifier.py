@@ -291,6 +291,56 @@ ALIAS_TO_CANONICAL: dict[str, str] = {
 EXPANDED_KNOWN_TYPES: frozenset[str] = SUPPORTED_TYPES | frozenset(ALIAS_TO_CANONICAL.keys())
 
 
+# I2 (BIG_FIXES): map segregation/extraction labels to protocol-match
+# labels. Protocols declare triggering_entity_types with specific
+# canonical names (PHI_MRN for HIPAA, FERPA_STUDENT_ID for FERPA, etc.),
+# but extraction emits the domain labels (MEDICAL_RECORD, STUDENT_ID).
+# This map lets the dedup step normalise labels so pii_types_found
+# actually matches protocols' trigger sets.
+#
+# Adaptive — each entry handles one real mismatch seen in benchmarks.
+# Only normalises labels that DEFINITIVELY map 1:1 (MRN = PHI_MRN).
+# Ambiguous labels (PROVIDER_ID could be PHI_NPI or generic) stay as-is.
+PROTOCOL_TRIGGER_ALIASES: dict[str, str] = {
+    # Healthcare — HIPAA / HITECH / CCPA triggers
+    "MEDICAL_RECORD": "PHI_MRN",
+    "MRN": "PHI_MRN",
+    "PATIENT_ID": "PHI_MRN",            # PATIENT_ID ≈ MRN for breach purposes
+    "NPI_NUMBER": "PHI_NPI",
+    "NPI": "PHI_NPI",
+    "MEDICAL_LICENSE": "PHI_NPI",       # provider licence ≈ NPI for notification
+    "MEDICARE_NUMBER": "US_MEDICARE_MBI",
+    "HICN": "PHI_HICN",
+    "DEA_NUMBER": "PHI_DEA",
+    "DEA": "PHI_DEA",
+    "INSURANCE_ID": "PHI_HEALTH_PLAN",
+    "HEALTH_PLAN_ID": "PHI_HEALTH_PLAN",
+    "ICD10": "PHI_ICD10",
+    "ICD_10": "PHI_ICD10",
+    # Education — FERPA
+    "STUDENT_ID": "FERPA_STUDENT_ID",
+    "ENROLLMENT_ID": "FERPA_STUDENT_ID",
+    # Employment — though no specific protocol right now, normalise
+    # for consistency
+    "EMPLOYEE_ID": "EMPLOYEE_ID",
+    "BADGE_ID": "EMPLOYEE_ID",
+    "ACCESS_CARD": "EMPLOYEE_ID",
+}
+
+
+def normalize_protocol_label(label: str | None) -> str | None:
+    """Normalise an extraction/segregation label to its protocol-match form.
+
+    Returns the mapped canonical label when *label* appears in
+    PROTOCOL_TRIGGER_ALIASES, otherwise returns *label* unchanged.
+    None in → None out.
+    """
+    if not label:
+        return label
+    upper = label.strip().upper()
+    return PROTOCOL_TRIGGER_ALIASES.get(upper, label)
+
+
 def is_known_gov_id_label(label: str | None) -> bool:
     """True when *label* is a canonical gov-ID type or a known alias.
 

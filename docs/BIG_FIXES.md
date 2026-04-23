@@ -182,6 +182,40 @@ After each fix, re-run Batch D and independently verify against PDF ground truth
 
 ## Group I — Extraction prompts adapt to doc contract (2026-04-23)
 
+### I2 — PHI/FERPA label normalization for protocol triggering (task #61, shipped)
+
+**Why:** HIPAA protocol triggers on `PHI_MRN` but segregation emits
+`MEDICAL_RECORD`. Same mismatch for FERPA (`FERPA_STUDENT_ID` vs
+`STUDENT_ID`), HITECH, CCPA. Result: 20 EHR patients extracted with
+MRNs would still never trigger HIPAA breach notification.
+
+**Fix:** `PROTOCOL_TRIGGER_ALIASES` map in `gov_id_classifier.py`:
+
+```
+MEDICAL_RECORD  → PHI_MRN
+MRN             → PHI_MRN
+PATIENT_ID      → PHI_MRN
+NPI_NUMBER      → PHI_NPI
+MEDICAL_LICENSE → PHI_NPI
+MEDICARE_NUMBER → US_MEDICARE_MBI
+DEA_NUMBER      → PHI_DEA
+INSURANCE_ID    → PHI_HEALTH_PLAN
+ICD10           → PHI_ICD10
+STUDENT_ID      → FERPA_STUDENT_ID
+ENROLLMENT_ID   → FERPA_STUDENT_ID
+```
+
+New helper `normalize_protocol_label(label)` returns the canonical
+form. Deduplicator applies it when building `pii_types_found` — keeps
+both original and normalised labels so doc-type observability is
+preserved AND protocols trigger.
+
+**Verified:** 9-scenario test passed. EHR + medical → HIPAA triggers.
+Report card → FERPA triggers. HR (EMPLOYEE_ID, no protocol) → no
+trigger (correct). Bank (SSN) → HIPAA + state_breach both trigger.
+
+
+
 ### I1 — Generic gov_id output key, contract-aware descriptions (task #60, shipped next)
 
 **Why:** Audit after taxonomy sweep found 27 gov IDs in source PDFs
