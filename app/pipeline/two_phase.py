@@ -2835,13 +2835,17 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                             _record_unit = _markers.get("record_unit", "page")
                             _records_per_page = _markers.get("records_per_page", 1)
 
-                            # I3 (BIG_FIXES): deterministic floor for tabular
-                            # doc types. Segregation + marker detection missed
-                            # J_crystal_report_payroll (30 employees tabular →
-                            # rpp=1 → only 3 extracted). If segregation's
-                            # document_type looks like a register / roster /
-                            # list / report, assume ≥10 persons per page.
-                            # Heuristic — no doc-specific hardcoding.
+                            # I3/I4 (BIG_FIXES): last-resort tabular floor.
+                            # The preferred source for records_per_page is
+                            # DocumentSchema.records_per_page_estimate (set
+                            # by the doc-understanding LLM during analysis,
+                            # based on actual inspection of this doc). The
+                            # code below Strategy A consumes that when
+                            # available. This heuristic only applies when
+                            # NEITHER segregation nor doc-understanding gave
+                            # us an rpp — belt and suspenders for docs
+                            # where the marker detector's "1" is clearly
+                            # wrong on a tabular doc_type name.
                             _doc_type_lower = (_tb_doc_type or "").lower()
                             _tabular_signal_types = (
                                 "payroll", "register", "roster", "list",
@@ -2850,12 +2854,13 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                                 "access_log", "log_file",
                             )
                             if any(tok in _doc_type_lower for tok in _tabular_signal_types):
-                                if _records_per_page < 10:
+                                if _records_per_page < 2:
                                     logger.info(
-                                        "[I3] Tabular doc_type=%r — bumping records_per_page %d → 10",
+                                        "[I3-fallback] Tabular doc_type=%r — raising records_per_page %d → 5 "
+                                        "(DocumentSchema will override if available)",
                                         _tb_doc_type, _records_per_page,
                                     )
-                                    _records_per_page = 10
+                                    _records_per_page = 5
                                     _markers["records_per_page"] = _records_per_page
 
                             # Vision fallback: if text says "page" but page is dense
@@ -2896,15 +2901,33 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                                     f.get("name") for f in _seg.get("fields", [])
                                     if isinstance(f, dict) and f.get("name")
                                 ]
+                                # I4: prefer the LLM's per-doc analysis
+                                # over heuristic guesses. DocumentSchema
+                                # contains records_per_page_estimate +
+                                # field_map with actual value_examples.
+                                _rpp_from_schema: int | None = None
+                                _schema_field_map: list | None = None
+                                if schema is not None:
+                                    _schema_rpp = getattr(schema, "records_per_page_estimate", None)
+                                    if isinstance(_schema_rpp, int) and _schema_rpp >= 1:
+                                        _rpp_from_schema = _schema_rpp
+                                    _schema_field_map = getattr(schema, "field_map", None) or None
+                                _effective_rpp = _rpp_from_schema if _rpp_from_schema else _records_per_page
+                                if _rpp_from_schema and _rpp_from_schema != _records_per_page:
+                                    logger.info(
+                                        "[I4] Using schema rpp=%d for %s (marker detector said %d)",
+                                        _rpp_from_schema, doc.file_name, _records_per_page,
+                                    )
                                 records = extract_with_markers(
                                     page_texts=_tb_page_texts,
                                     ollama_client=_tb_client,
                                     doc_id=str(doc.id),
                                     markers=_markers,
-                                    records_per_page=_records_per_page,
+                                    records_per_page=_effective_rpp,
                                     field_inventory=_tb_fields,
                                     country_hint=_country_hint,
                                     field_labels=_field_labels,
+                                    schema_field_map=_schema_field_map,
                                 )
 
                                 if records:
@@ -2923,6 +2946,9 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                                 )
 
                                 _country_hint = (doc.metadata_json or {}).get("segregation", {}).get("country_hint")
+                                _schema_field_map_b: list | None = None
+                                if schema is not None:
+                                    _schema_field_map_b = getattr(schema, "field_map", None) or None
                                 records = extract_text_batch(
                                     page_texts=_tb_page_texts,
                                     ollama_client=_tb_client,
@@ -2932,6 +2958,7 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                                     record_unit=_record_unit,
                                     records_per_page=_records_per_page,
                                     country_hint=_country_hint,
+                                    schema_field_map=_schema_field_map_b,
                                 )
 
                                 if records:

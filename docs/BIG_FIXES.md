@@ -182,6 +182,45 @@ After each fix, re-run Batch D and independently verify against PDF ground truth
 
 ## Group I — Extraction prompts adapt to doc contract (2026-04-23)
 
+### I4 — Schema-driven extraction prompts (task #64, shipped)
+
+**Why:** I3 hardcoded US-centric guesses: "123-45-6789" example, "SSN
+Last 4" mention in the SSN description, `records_per_page ≥ 10` floor
+for tabular docs. Wrong for Indian/UK/German/Australian docs. User
+challenge: "What if you get an Indian payroll receipt or an
+Australian or UK or German?"
+
+**Fix:** the DocumentSchema LLM already analyzes each doc and
+captures `records_per_page_estimate` + `field_map[i].value_example`.
+Both were being ignored by the extractor. Now:
+
+- `extract_with_markers` + `extract_text_batch` accept a
+  `schema_field_map` param.
+- `_build_gov_id_prompt_fragment(field_inventory, schema_field_map)`
+  takes the schema path first: finds the gov-ID FieldContext,
+  uses ITS label + value_example directly as the prompt's description
+  + example. No doc-type branching, no geography assumptions.
+- Caller in two_phase.py passes `schema.records_per_page_estimate`
+  when present — overrides the marker detector's guess.
+- I3's tabular floor demoted to fallback: fires only when rpp=1 AND
+  no DocumentSchema is available AND doc_type name hints at tabular.
+  Lowered the bump to 5 (not 10) — the schema is the real source
+  when it's there.
+
+**Verified across 5 geographies/doc types:**
+
+| Doc | schema example | Prompt says |
+|---|---|---|
+| US payroll last-4 | "3274" | gov_id looks like '3274' |
+| Indian Aadhaar last-4 | "1234" | gov_id looks like '1234' |
+| UK pension full NI | "YB146386C" | gov_id looks like 'YB146386C' |
+| German Steuer-ID | "12345678901" | gov_id looks like '12345678901' |
+| No schema (fallback) | heuristic | MRN/SSN/NI defaults |
+
+Same code path, same pipeline, different example per doc. LLM learned
+the format from the doc during understanding phase; extraction just
+repeats it back.
+
 ### I3 — Tabular payroll extraction + Last-4 SSN (task #62, shipped)
 
 **Why:** J_crystal_report_payroll.pdf has 30 employees in tabular

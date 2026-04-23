@@ -37,6 +37,7 @@ def extract_with_markers(
     field_inventory: list[str] | None = None,
     country_hint: str | None = None,
     field_labels: list[str] | None = None,
+    schema_field_map: list | None = None,
 ) -> list[PIIRecord]:
     """Strategy A: Extract using marker-filtered snippets.
 
@@ -126,7 +127,13 @@ def extract_with_markers(
             # confused the LLM on non-SSN docs (MRNs, UK NI, student
             # IDs) — 24+ MRNs missed on taxonomy sweep.
             _fi = field_inventory or []
-            _extra_fields, _extra_json, _extra_rules = _build_gov_id_prompt_fragment(_fi)
+            # I4: pass schema_field_map so the prompt can use the
+            # LLM's actual per-doc example (e.g. "YB146386C" for a UK
+            # NI number, "3274" for an SSN-last-4 column, whatever
+            # this specific doc uses) instead of a US-centric default.
+            _extra_fields, _extra_json, _extra_rules = _build_gov_id_prompt_fragment(
+                _fi, schema_field_map=schema_field_map,
+            )
             _fi_set = {t.upper() for t in _fi}
             if any(t in _fi_set for t in ("DATE_OF_BIRTH",)):
                 _extra_fields += ", date of birth"
@@ -244,6 +251,7 @@ def extract_text_batch(
     record_unit: str = "page",
     records_per_page: int = 1,
     country_hint: str | None = None,
+    schema_field_map: list | None = None,
 ) -> list[PIIRecord]:
     """Extract PII from text pages using batched LLM calls.
 
@@ -754,19 +762,63 @@ def _is_placeholder_phone(value: str) -> bool:
 
 def _build_gov_id_prompt_fragment(
     field_inventory: list[str] | None,
+    schema_field_map: list | None = None,
 ) -> tuple[str, str, str]:
     """Return (fields_str, json_str, rules_str) tailored to the doc's contract.
 
-    I1 (BIG_FIXES): the output JSON key is ALWAYS ``gov_id`` regardless
-    of doc type. The prompt describes WHAT KIND of gov ID based on
-    segregation's field_inventory — different example values and
-    descriptions for SSN docs vs UK NI docs vs MRN docs. Previously
-    the prompt used ``"ssn"`` as the output key which confused the LLM
-    on non-SSN docs.
+    I1 + I4 (BIG_FIXES): the output JSON key is ALWAYS ``gov_id``
+    regardless of doc type. The description and example adapt to the
+    doc:
+
+    - **If schema_field_map is provided** (FieldContext list from
+      DocumentSchema / LLM doc understanding), use the LLM's own
+      value_example for the gov-ID field. That's the format THIS
+      specific doc uses — no hardcoded defaults. Works across any
+      geography / doc type.
+    - **Otherwise** (no schema available), fall back to
+      field_inventory-based defaults. These are US-centric for SSN,
+      UK-centric for NI, etc. — rough but better than nothing.
 
     Returns empty strings when no gov-ID is expected — caller's prompt
     won't include a gov-ID section at all.
     """
+    # I4: schema-driven path — trust the LLM's per-doc analysis.
+    if schema_field_map:
+        gov_id_field = None
+        for fc in schema_field_map:
+            sem = (getattr(fc, "semantic_type", "") or "").lower()
+            override = (getattr(fc, "presidio_override", "") or "").upper()
+            if any(tok in sem for tok in (
+                "ssn", "social_security", "tax_id", "tax_identif",
+                "national_id", "national_insurance", "passport",
+                "driver_license", "aadhaar", "pan", "medical_record",
+                "mrn", "patient_id", "student_id", "employee_id",
+                "badge", "insurance", "policy", "government",
+            )) or override in (
+                "US_SSN", "UK_NINO", "IN_PAN", "IN_AADHAAR",
+                "US_DRIVER_LICENSE", "US_PASSPORT", "PHI_MRN",
+                "FERPA_STUDENT_ID", "EMPLOYEE_ID",
+            ):
+                if getattr(fc, "is_pii", False):
+                    gov_id_field = fc
+                    break
+        if gov_id_field is not None:
+            label_from_schema = (getattr(gov_id_field, "label", "") or "").strip() or "ID"
+            example_from_schema = (getattr(gov_id_field, "value_example", "") or "").strip() or "ID12345"
+            # Truncate over-long examples
+            example_clean = example_from_schema[:32]
+            fields_str = f", {label_from_schema}"
+            json_str = f', "gov_id": "{example_clean}"'
+            rules_str = (
+                f"- gov_id: the value appearing under the '{label_from_schema}' label.\n"
+                f"  On THIS document it looks like: {example_clean!r}.\n"
+                f"  Extract the EXACT value as it appears — including any masking\n"
+                f"  (e.g. XXX-XX-1234), partial digits (last 4), or country-specific\n"
+                f"  format. Use the \"gov_id\" JSON key.\n"
+            )
+            return fields_str, json_str, rules_str
+
+    # Heuristic fallback path — when no DocumentSchema is available.
     if not field_inventory:
         return "", "", ""
     fi = {t.upper() for t in field_inventory if t}
