@@ -720,6 +720,18 @@ def _is_placeholder_ssn(value: str) -> bool:
     digits_only = re.sub(r"\D", "", stripped)
     if len(digits_only) < 4:
         return True
+    # I7 (BIG_FIXES): reject values with way too many digits for any
+    # common gov ID. A_bank_statement extracted "123-45-678901" (11
+    # digits) — that's SSN + extra, almost certainly two fields
+    # concatenated by the LLM. Legit IDs we know about:
+    #   SSN: 9 digits
+    #   Aadhaar: 12 digits
+    #   CPF: 11 digits
+    #   US Passport: 9
+    #   UK_NINO: 6 digits + 3 letters = 8-10 chars
+    # Anything with >16 digits is not a personal identifier.
+    if len(digits_only) > 16:
+        return True
     return False
 
 

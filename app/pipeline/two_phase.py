@@ -2937,6 +2937,24 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
                                         i, len(approved_docs), doc.file_name, len(records),
                                     )
 
+                            # I5 (BIG_FIXES): undercount fallback. When
+                            # Strategy A's marker is a column header (e.g.
+                            # "Employee ID" repeating once per page with
+                            # 10 rows beneath), the snippet filter captures
+                            # only 1 row per page. Strategy B full-text
+                            # batch succeeds in that case. Trigger: output
+                            # count < 30% of expected (rpp × pages).
+                            if records and _effective_rpp > 1 and _tb_page_texts:
+                                _expected_count = _effective_rpp * len(_tb_page_texts)
+                                if len(records) < _expected_count * 0.3:
+                                    logger.warning(
+                                        "[I5] Strategy A undercount on %s: got %d, expected ~%d "
+                                        "(rpp=%d × %d pages × 0.3 floor). Falling through to Strategy B.",
+                                        doc.file_name, len(records), _expected_count,
+                                        _effective_rpp, len(_tb_page_texts),
+                                    )
+                                    records = []  # force Strategy B to run below
+
                             # --- Strategy B: Full text batch ---
                             if not records:
                                 logger.info(

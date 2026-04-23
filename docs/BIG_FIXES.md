@@ -182,6 +182,57 @@ After each fix, re-run Batch D and independently verify against PDF ground truth
 
 ## Group I — Extraction prompts adapt to doc contract (2026-04-23)
 
+### I5 — Strategy A → B fallback on undercount (task #65, shipped)
+
+**Why:** J_crystal_report_payroll — Strategy A with marker "Employee ID"
+(a column header) extracted only 3 records from 30 employees. The
+snippet filter narrowed around the HEADER, capturing only row 1 per
+page. Strategy A returned "3 records" which counts as success → never
+fell through to Strategy B.
+
+**Fix:** after Strategy A output, compute expected count = rpp × pages.
+If actual < 30% of expected AND rpp > 1 (multi-person doc expected),
+force Strategy B to run by clearing the records list.
+
+**Generalizes to:** any tabular doc whose marker is a column header
+rather than a per-person label (payroll, badge logs, patient lists,
+etc.). No doc-specific code.
+
+### I6 — Gov ID classifier respects doc contract (task #66, shipped)
+
+**Why:** Classifier labeled STU9634863 as US_SSN (9 digits matched
+loose regex), MEM31135606 as US_SSN (same), 992042 as
+US_DRIVER_LICENSE. Contract from segregation said STUDENT_ID /
+INSURANCE_ID / PATIENT_ID — classifier ignored it.
+
+**Fix:** `infer_gov_id_type(raw, country_hint, contract_field_types)`
+now takes the contract list. When the contract includes an
+institutional type (STUDENT_ID, EMPLOYEE_ID, INSURANCE_ID,
+PATIENT_ID, POLICY_NUMBER, etc.), returns the protocol-aliased form
+(STUDENT_ID → FERPA_STUDENT_ID, INSURANCE_ID → PHI_HEALTH_PLAN,
+PATIENT_ID → PHI_MRN) — NOT US_SSN just because digits align.
+
+Deduplicator passes the union of `entity_types_found` across all
+records as the contract.
+
+**Verified 8 scenarios:** STUDENT_ID, INSURANCE_ID, PATIENT_ID,
+EMPLOYEE_ID all correctly classified even when values look SSN-shaped.
+
+### I7 — Strict gov-ID digit-count backstop (task #67, shipped)
+
+**Why:** A_bank_statement extracted "123-45-678901" (11 digits) —
+LLM concatenated two fields. The classifier's anchored regex already
+downgrades this to GOVERNMENT_ID, but as defence-in-depth we reject
+values with absurd digit counts at extraction time.
+
+**Fix:** `_is_placeholder_ssn` rejects values with >16 digits
+(no personal gov ID is that long).
+
+**Not a cure-all:** values with 10-12 digits that aren't real IDs
+still pass through extraction; relies on the classifier's strict
+pattern matching to downgrade them to GOVERNMENT_ID so they don't
+falsely trigger US_SSN protocols.
+
 ### I4 — Schema-driven extraction prompts (task #64, shipped)
 
 **Why:** I3 hardcoded US-centric guesses: "123-45-6789" example, "SSN

@@ -498,9 +498,22 @@ class Deduplicator:
         # every gov ID US_SSN regardless of jurisdiction).
         government_id_type: str | None = None
         from app.pii.gov_id_classifier import GENERIC_TYPE, infer_gov_id_type
+        # I6: collect the union of entity_types_found across records as
+        # the "contract" — tells the classifier whether this doc's
+        # identifier is institutional (STUDENT_ID, INSURANCE_ID, etc.)
+        # or government (US_SSN, UK_NINO). Without this, loose regex
+        # matches mislabel STU9634863 as US_SSN.
+        _contract_types: list[str] = []
+        for r in records:
+            if r.entity_types_found:
+                _contract_types.extend(r.entity_types_found)
         for r in records:
             if r.raw_government_id:
-                inferred = infer_gov_id_type(r.raw_government_id, country_hint=r.country)
+                inferred = infer_gov_id_type(
+                    r.raw_government_id,
+                    country_hint=r.country,
+                    contract_field_types=_contract_types or None,
+                )
                 if inferred != GENERIC_TYPE:
                     government_id_type = inferred
                     break

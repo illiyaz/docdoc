@@ -359,7 +359,28 @@ def _normalize(value: str) -> str:
     return value.strip().upper() if value else ""
 
 
-def infer_gov_id_type(raw: str | None, country_hint: str | None = None) -> str:
+# I6 (BIG_FIXES): fields from segregation's field_inventory that
+# indicate the raw ID is NOT a government-issued identifier but an
+# institutional one. If the doc's contract says STUDENT_ID, even a
+# 9-digit numeric value shouldn't be labeled US_SSN.
+_NON_GOV_CONTRACT_TYPES: frozenset[str] = frozenset({
+    "STUDENT_ID", "ENROLLMENT_ID",
+    "EMPLOYEE_ID", "BADGE_ID", "ACCESS_CARD", "EMPLOYER_ID",
+    "MEMBER_ID", "POLICY_NUMBER", "POLICYHOLDER_ID",
+    "CLAIM_NUMBER", "SUBSCRIBER_ID",
+    "ACCOUNT_NUMBER", "ACCOUNT_REFERENCE", "LOAN_ID", "MORTGAGE_ID",
+    "CUSTOMER_ID", "SUBSCRIPTION_ID", "USER_ID",
+    "PATIENT_ID", "MEDICAL_RECORD", "MRN",
+    "INSURANCE_ID", "HEALTH_PLAN_ID", "MEMBER_NUMBER",
+    "CASE_NUMBER", "DOCKET_NUMBER",
+})
+
+
+def infer_gov_id_type(
+    raw: str | None,
+    country_hint: str | None = None,
+    contract_field_types: list[str] | None = None,
+) -> str:
     """Infer the canonical government-ID type for ``raw``.
 
     Parameters
@@ -370,13 +391,21 @@ def infer_gov_id_type(raw: str | None, country_hint: str | None = None) -> str:
         Optional ISO 3166-1 alpha-2 country code (e.g. "GB", "US", "IN").
         Used to disambiguate digit-only formats that match multiple
         countries (9-digit → US_SSN vs IL_ID vs NL_BSN, etc.).
+    contract_field_types:
+        Optional list of field types declared by segregation for this
+        document. I6 (BIG_FIXES): when the contract says the identifier
+        is institutional (STUDENT_ID, INSURANCE_ID, EMPLOYEE_ID, etc.)
+        rather than government, return the mapped canonical (via
+        PROTOCOL_TRIGGER_ALIASES) or GOVERNMENT_ID — NOT US_SSN just
+        because the value happens to be 9 digits.
 
     Returns
     -------
     str
-        A canonical type label (e.g. "UK_NINO", "US_SSN") or
-        ``"GOVERNMENT_ID"`` if the format doesn't match any known
-        country pattern or matches multiple with no way to disambiguate.
+        A canonical type label (e.g. "UK_NINO", "US_SSN",
+        "FERPA_STUDENT_ID") or ``"GOVERNMENT_ID"`` if the format
+        doesn't match any known country pattern or matches multiple
+        with no way to disambiguate.
     """
     if not raw:
         return GENERIC_TYPE
@@ -384,6 +413,32 @@ def infer_gov_id_type(raw: str | None, country_hint: str | None = None) -> str:
     value = _normalize(raw)
     if not value:
         return GENERIC_TYPE
+
+    # I6: if contract says this is an institutional identifier, honor
+    # that over loose regex matches. STUDENT_ID beats "looks like 9
+    # digits → US_SSN". Returns the protocol-aliased label so protocols
+    # can trigger on it too (STUDENT_ID → FERPA_STUDENT_ID).
+    if contract_field_types:
+        contract_upper = {t.strip().upper() for t in contract_field_types if t}
+        institutional = contract_upper & _NON_GOV_CONTRACT_TYPES
+        if institutional:
+            # Prefer the most specific institutional match
+            for inst_type in (
+                "STUDENT_ID", "ENROLLMENT_ID",
+                "PATIENT_ID", "MEDICAL_RECORD", "MRN",
+                "INSURANCE_ID", "HEALTH_PLAN_ID",
+                "EMPLOYEE_ID", "BADGE_ID",
+                "POLICY_NUMBER", "POLICYHOLDER_ID",
+                "MEMBER_ID",
+                "ACCOUNT_NUMBER", "CUSTOMER_ID",
+                "CASE_NUMBER",
+            ):
+                if inst_type in institutional:
+                    # Return protocol-aliased form (STUDENT_ID → FERPA_STUDENT_ID)
+                    aliased = PROTOCOL_TRIGGER_ALIASES.get(inst_type, inst_type)
+                    return aliased
+            # Fallback — institutional but no specific type we know
+            return "GOVERNMENT_ID"
 
     hint = country_hint.strip().upper() if country_hint else None
 
