@@ -248,7 +248,13 @@ def _best_address(addresses: list[dict | None]) -> dict | None:
 class Deduplicator:
     """Build ``NotificationSubject`` rows from resolved groups and persist."""
 
-    def __init__(self, db_session: Session, project_id=None) -> None:
+    def __init__(
+        self,
+        db_session: Session,
+        project_id=None,
+        protocol=None,
+        protocol_config: dict | None = None,
+    ) -> None:
         self.db = db_session
         # project_id is plumbed in so in-memory _find_existing + SQL
         # dedup can actually run — previously the caller set project_id
@@ -256,6 +262,38 @@ class Deduplicator:
         # short-circuited (ns.project_id was None). This caused same-
         # person duplicates like Katelyn Cook × 3 in the verify run.
         self.project_id = project_id
+
+        # J1 (BIG_FIXES): protocol context flows through dedup so
+        # protocol's triggering_entity_types + customer protocol_config's
+        # target_entity_types become corroborating PII types for this
+        # job. Without this, customer-defined fields (e.g. DPDPA
+        # investigation targeting IN_AADHAAR + PRESCRIPTION_ID) wouldn't
+        # pass the min-PII threshold even if extracted. Backward-compat:
+        # None protocol / empty config leaves behaviour unchanged.
+        self.protocol = protocol
+        self.protocol_config = protocol_config or {}
+        self._protocol_corroborating: frozenset[str] = self._derive_protocol_corroborating()
+
+    def _derive_protocol_corroborating(self) -> frozenset[str]:
+        """Compute the protocol-specific corroborating PII types.
+
+        Union of:
+          - protocol.triggering_entity_types (built-in or customer base protocol)
+          - protocol_config.target_entity_types (customer override / extension)
+
+        Returned as a frozenset of upper-case canonical labels. Empty when
+        neither is available.
+        """
+        types: set[str] = set()
+        if self.protocol is not None:
+            for t in getattr(self.protocol, "triggering_entity_types", []) or []:
+                if t:
+                    types.add(t.strip().upper())
+        if isinstance(self.protocol_config, dict):
+            for t in self.protocol_config.get("target_entity_types") or []:
+                if t:
+                    types.add(t.strip().upper())
+        return frozenset(types)
 
     def build_subjects(
         self,
@@ -293,8 +331,17 @@ class Deduplicator:
                 if fc:
                     contract_types.update(t.upper() for t in fc if t)
 
-            # Merge the static allowlist with this group's contract.
-            effective_corroborating = _CORROBORATING_PII_TYPES | contract_types
+            # Merge the static allowlist with this group's contract
+            # + protocol context (J1). Customer-defined target types
+            # (e.g. a DPDPA investigation targeting IN_AADHAAR +
+            # PRESCRIPTION_ID, or a proprietary LOYALTY_CARD_NUMBER)
+            # pass the min-PII threshold as long as the active protocol
+            # or its protocol_config declares them.
+            effective_corroborating = (
+                _CORROBORATING_PII_TYPES
+                | contract_types
+                | self._protocol_corroborating
+            )
 
             for r in group.records:
                 if r.raw_name:

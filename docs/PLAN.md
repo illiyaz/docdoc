@@ -114,6 +114,21 @@ rates, E4 deltas. Optional LLM narrative at the end labeled
 taxonomy run's red flags will be the first real-world test of this
 script.
 
+### 4c. J1 — Protocol-driven pipeline (v1 shipped, v2+ pending)
+Customer protocol_configs now drive dedup's min-PII threshold.
+v1 shipped: Deduplicator takes protocol + protocol_config, unions
+their `triggering_entity_types` + `target_entity_types` into the
+corroborating set. Customer-defined PII types (e.g. LOYALTY_CARD_NUMBER)
+pass without code changes.
+
+v2+ (deferred to separate cycles, same task #63):
+- extraction prompts use protocol targets
+- dedup match keys from protocol_config.dedup_anchors
+- export_schema uses protocol_config.export_fields
+- confidence_threshold honored throughout
+
+Full design in BIG_FIXES.md Group J.
+
 ### 5. Phase 6 — Security + Governance
 Real deployment blocker. Without auth + RBAC + audit log, the tool
 can't be given to anyone else — a breach-notification platform that

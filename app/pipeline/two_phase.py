@@ -4931,7 +4931,15 @@ def run_extraction_background(job_id: str, registry: ProtocolRegistry) -> None:
         # _find_existing and _sql_dedup actually fire (they were
         # short-circuiting because project_id got set AFTER build_subjects
         # returned).
-        dedup = Deduplicator(db, project_id=run.project_id)
+        # J1: plumb the active protocol + protocol_config so
+        # customer-defined target_entity_types pass the min-PII
+        # threshold without code changes per protocol.
+        dedup = Deduplicator(
+            db,
+            project_id=run.project_id,
+            protocol=protocol,
+            protocol_config=protocol_config,
+        )
         subjects = dedup.build_subjects(groups)
 
         for subj in subjects:

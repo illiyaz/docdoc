@@ -481,6 +481,50 @@ prompts.
 
 ---
 
+## Group J — Protocol-driven pipeline (2026-04-24)
+
+### J1 — Dedup min-PII threshold honors active protocol + customer config (task #63 v1, shipped)
+
+**Why:** Customer custom protocols exist (via `protocol_configs` DB
+table — each row has `target_entity_types`, `dedup_anchors`,
+`confidence_threshold`, `export_fields`) but the pipeline ignored
+them almost everywhere. Example: an Indian hospital configures a
+DPDPA investigation targeting `[IN_AADHAAR, PHI_MRN,
+PRESCRIPTION_ID]` — pipeline extracts values, but dedup's min-PII
+threshold has no idea those types count as corroborating PII, so
+subjects get filtered out.
+
+**Fix v1:** `Deduplicator.__init__` accepts `protocol` + `protocol_config`.
+At build time the corroborating set becomes:
+
+```
+effective_corroborating =
+      _CORROBORATING_PII_TYPES      (127 gov + industry, H1+I2)
+    | contract_types                 (per-group segregation contract, I8)
+    | protocol_corroborating         (J1: protocol.triggering +
+                                          protocol_config.target)
+```
+
+So a customer adding a new gov ID type to their protocol config
+immediately flows into the dedup filter — zero code change required
+per protocol.
+
+**Backward compat:** `None` protocol / empty config leaves behaviour
+unchanged. Verified against 3 scenarios: custom protocol (IN_AADHAAR
++ LOYALTY_CARD_NUMBER) adds 5 types, no-protocol adds 0, protocol-
+only adds triggering types.
+
+**What's NOT in J1 v1** (future work on same task):
+- Extraction prompts don't yet use protocol targets (they use
+  segregation contract + schema, which is usually enough)
+- Dedup match keys don't yet use `protocol_config.dedup_anchors`
+- Export schema doesn't yet use `protocol_config.export_fields`
+- `confidence_threshold` from protocol_config not yet honored
+
+These are incremental additions — ship and verify v1 first.
+
+---
+
 ## Group H — Filter alignment across geographies + industries (2026-04-22)
 
 ### H1 — Minimum-PII threshold sync'd with gov_id_classifier (task #59, shipped `8a1830a`)
