@@ -498,15 +498,42 @@ class Deduplicator:
         # every gov ID US_SSN regardless of jurisdiction).
         government_id_type: str | None = None
         from app.pii.gov_id_classifier import GENERIC_TYPE, infer_gov_id_type
-        # I6: collect the union of entity_types_found across records as
-        # the "contract" — tells the classifier whether this doc's
-        # identifier is institutional (STUDENT_ID, INSURANCE_ID, etc.)
-        # or government (US_SSN, UK_NINO). Without this, loose regex
-        # matches mislabel STU9634863 as US_SSN.
+        # I6 + I8: build the "contract" for the classifier.
+        # I6 originally used r.entity_types_found (what the extractor
+        # emitted — narrow, mostly PERSON + US_SSN).
+        # I8 (BIG_FIXES): authoritative source is segregation's
+        # field_inventory on the source document. Badge logs with
+        # EMPLOYEE_ID fields got mislabelled US_SSN because the
+        # extractor never saw EMPLOYEE_ID — only segregation did.
+        # Union the two sources so we get the full picture:
+        #   segregation.field_inventory (doc-level, canonical contract)
+        #   ∪ records' entity_types_found (what ran through extraction)
         _contract_types: list[str] = []
         for r in records:
             if r.entity_types_found:
                 _contract_types.extend(r.entity_types_found)
+        # Pull segregation contract per source_document_id, unique
+        _seen_doc_ids: set[str] = set()
+        for r in records:
+            _sdi = str(r.source_document_id or "")
+            if not _sdi or _sdi in _seen_doc_ids:
+                continue
+            _seen_doc_ids.add(_sdi)
+            try:
+                from app.db.models import Document as _Doc
+                from uuid import UUID as _UUID
+                _doc = None
+                try:
+                    _doc = self.db.get(_Doc, _UUID(_sdi))
+                except (ValueError, TypeError):
+                    _doc = None
+                if _doc is not None and _doc.metadata_json:
+                    _seg = _doc.metadata_json.get("segregation") if isinstance(_doc.metadata_json, dict) else None
+                    if isinstance(_seg, dict):
+                        _fi = _seg.get("field_inventory") or []
+                        _contract_types.extend(str(t) for t in _fi if t)
+            except Exception:
+                pass  # segregation lookup is best-effort
         for r in records:
             if r.raw_government_id:
                 inferred = infer_gov_id_type(

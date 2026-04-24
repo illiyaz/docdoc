@@ -218,6 +218,26 @@ records as the contract.
 **Verified 8 scenarios:** STUDENT_ID, INSURANCE_ID, PATIENT_ID,
 EMPLOYEE_ID all correctly classified even when values look SSN-shaped.
 
+### I8 — Classifier contract from segregation, not just extractor (task #68, shipped)
+
+**Why:** I6 wired the classifier contract to `r.entity_types_found`
+which the extractor sets (narrow — mostly PERSON + US_SSN). When
+segregation correctly identified a doc as EMPLOYEE_ID/BADGE_ID but
+the extractor's output didn't carry that forward, the classifier
+fell back to regex-matching `EMP299803` → labelled US_SSN.
+
+**Fix:** deduplicator now unions two sources into the contract:
+- `records[*].entity_types_found` (as before — extractor's output)
+- `documents.metadata_json.segregation.field_inventory` per source
+  document (authoritative contract from segregation)
+
+Per-doc lookup runs once per unique source_document_id seen in the
+group (no N² work). Best-effort — tolerates missing metadata.
+
+**Expected impact on badge log retest:** EMP299803 now labelled
+EMPLOYEE_ID not US_SSN, because segregation flagged EMPLOYEE_ID in
+field_inventory.
+
 ### I7 — Strict gov-ID digit-count backstop (task #67, shipped)
 
 **Why:** A_bank_statement extracted "123-45-678901" (11 digits) —
