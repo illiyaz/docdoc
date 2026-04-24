@@ -509,6 +509,7 @@ class Deduplicator:
         #   segregation.field_inventory (doc-level, canonical contract)
         #   ∪ records' entity_types_found (what ran through extraction)
         _contract_types: list[str] = []
+        _contract_doc_type: str | None = None   # I10: for classifier tiebreak
         for r in records:
             if r.entity_types_found:
                 _contract_types.extend(r.entity_types_found)
@@ -532,6 +533,11 @@ class Deduplicator:
                     if isinstance(_seg, dict):
                         _fi = _seg.get("field_inventory") or []
                         _contract_types.extend(str(t) for t in _fi if t)
+                        # I10: capture doc_type for classifier tiebreak
+                        if _contract_doc_type is None:
+                            _dtype = _seg.get("document_type")
+                            if _dtype:
+                                _contract_doc_type = str(_dtype)
             except Exception:
                 pass  # segregation lookup is best-effort
         for r in records:
@@ -540,6 +546,7 @@ class Deduplicator:
                     r.raw_government_id,
                     country_hint=r.country,
                     contract_field_types=_contract_types or None,
+                    document_type=_contract_doc_type,
                 )
                 if inferred != GENERIC_TYPE:
                     government_id_type = inferred

@@ -376,10 +376,56 @@ _NON_GOV_CONTRACT_TYPES: frozenset[str] = frozenset({
 })
 
 
+# I10 (BIG_FIXES): when segregation emits generic OTHER_ID, use doc_type
+# as a tiebreaker. Maps keywords in doc_type to the most specific
+# institutional classification. Generalisable across geographies —
+# "employee", "staff", "payroll" all point to EMPLOYEE_ID regardless
+# of country. Keywords matched case-insensitively as substrings.
+_DOC_TYPE_TO_INSTITUTIONAL: tuple[tuple[frozenset[str], str], ...] = (
+    # Education — FERPA
+    (frozenset({"student", "transcript", "school", "academic",
+                "enrollment", "university", "college", "report_card",
+                "grade"}), "FERPA_STUDENT_ID"),
+    # Medical — HIPAA
+    (frozenset({"patient", "medical", "ehr", "health_record",
+                "discharge", "clinical", "lab_result", "diagnosis",
+                "prescription"}), "PHI_MRN"),
+    # Insurance — HIPAA + plan
+    (frozenset({"insurance", "policy", "coverage", "benefit",
+                "claim", "policyholder"}), "PHI_HEALTH_PLAN"),
+    # HR / workforce — no specific protocol but correct label
+    (frozenset({"employee", "staff", "payroll", "badge", "access",
+                "hr_", "workforce", "log_file", "timesheet"}),
+     "EMPLOYEE_ID"),
+    # Legal
+    (frozenset({"court", "case", "docket", "legal", "litigation"}),
+     "CASE_NUMBER"),
+)
+
+
+def _infer_from_doc_type(doc_type: str | None) -> str | None:
+    """Return the institutional label keyed by doc_type, or None.
+
+    I10: when segregation's field_inventory is ambiguous (OTHER_ID),
+    the doc_type often carries the real signal ("log_file" → EMPLOYEE_ID,
+    "report_card" → FERPA_STUDENT_ID). Substring match is intentional —
+    handles "payroll_summary_report" / "employee_roster" / "badge_access_log"
+    etc. without per-doc branching.
+    """
+    if not doc_type:
+        return None
+    dt = doc_type.strip().lower()
+    for keywords, label in _DOC_TYPE_TO_INSTITUTIONAL:
+        if any(k in dt for k in keywords):
+            return label
+    return None
+
+
 def infer_gov_id_type(
     raw: str | None,
     country_hint: str | None = None,
     contract_field_types: list[str] | None = None,
+    document_type: str | None = None,
 ) -> str:
     """Infer the canonical government-ID type for ``raw``.
 
@@ -439,6 +485,16 @@ def infer_gov_id_type(
                     return aliased
             # Fallback — institutional but no specific type we know
             return "GOVERNMENT_ID"
+
+        # I10 (BIG_FIXES): contract has generic OTHER_ID / GOV_ID etc.
+        # — segregation's escape hatch. Use doc_type to infer the
+        # specific institutional label. "log_file" → EMPLOYEE_ID,
+        # "report_card" → FERPA_STUDENT_ID, "ehr_patient_list" → PHI_MRN.
+        if contract_upper & {"OTHER_ID", "GOV_ID", "IDENTIFICATION",
+                              "NATIONAL_ID", "TAX_ID", "GOVERNMENT_ID"}:
+            doc_inferred = _infer_from_doc_type(document_type)
+            if doc_inferred:
+                return doc_inferred
 
     hint = country_hint.strip().upper() if country_hint else None
 

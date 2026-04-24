@@ -218,6 +218,48 @@ records as the contract.
 **Verified 8 scenarios:** STUDENT_ID, INSURANCE_ID, PATIENT_ID,
 EMPLOYEE_ID all correctly classified even when values look SSN-shaped.
 
+### I10 — Classifier infers from doc_type when contract is generic OTHER_ID (task #70, shipped)
+
+**Why:** I8 retest showed L_badge_access_log.csv still labelled
+US_SSN because segregation's field_inventory was `["OTHER_ID",
+"PERSON"]` — the generic escape hatch — not `["EMPLOYEE_ID"]`. I8's
+contract check fell through, classifier hit regex, EMP299803 matched
+nothing specific → extractor's US_SSN default survived.
+
+**Fix:** when contract_field_types contains generic tokens
+(`OTHER_ID`, `GOV_ID`, `IDENTIFICATION`, `NATIONAL_ID`, `TAX_ID`,
+`GOVERNMENT_ID`), use segregation's `document_type` as a tiebreaker:
+
+```
+doc_type contains …      → inferred label
+──────────────────────── ───────────────────
+student / transcript /   → FERPA_STUDENT_ID
+  school / academic /
+  report_card / grade
+
+patient / medical /      → PHI_MRN
+  ehr / clinical /
+  discharge / lab_result
+
+insurance / policy /     → PHI_HEALTH_PLAN
+  coverage / benefit /
+  claim / policyholder
+
+employee / staff /       → EMPLOYEE_ID
+  payroll / badge /
+  access / hr_ /
+  log_file / timesheet
+
+court / case / docket /  → CASE_NUMBER
+  legal / litigation
+```
+
+Substring match — handles "payroll_summary_report",
+"ehr_patient_list", "badge_access_log" without per-doc branching.
+
+**Verified 8 scenarios.** Specific contracts (STUDENT_ID,
+EMPLOYEE_ID) still win — I10 only fires on generic OTHER_ID cases.
+
 ### I9 — _merge_into upgrades government_id_type to more-specific label (task #69, shipped)
 
 **Why:** I8 fix was invisible on retest because `_find_existing`
