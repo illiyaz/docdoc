@@ -784,8 +784,43 @@ class Deduplicator:
             existing.canonical_phone = incoming.canonical_phone
         if not existing.canonical_address and incoming.canonical_address:
             existing.canonical_address = incoming.canonical_address
-        if not existing.government_id_type and incoming.government_id_type:
-            existing.government_id_type = incoming.government_id_type
+        # I9 (BIG_FIXES): upgrade government_id_type when incoming is
+        # more specific. Without this, once a subject gets created with
+        # the wrong label (e.g. pre-I8 pipeline tagged an EMPLOYEE_ID
+        # value as US_SSN), no amount of re-extraction can fix it.
+        # Precedence: specific institutional / protocol-aligned >
+        # canonical gov ID > generic.
+        def _type_rank(t: str | None) -> int:
+            if not t:
+                return 0
+            u = t.strip().upper()
+            # Tier 3 — institutional / protocol-aligned (FERPA_STUDENT_ID,
+            # PHI_MRN, PHI_NPI, EMPLOYEE_ID, etc.) — highest confidence
+            # that the doc's context maps the value correctly
+            tier3 = {
+                "FERPA_STUDENT_ID", "PHI_MRN", "PHI_NPI", "PHI_HEALTH_PLAN",
+                "PHI_DEA", "PHI_HICN", "PHI_ICD10", "US_MEDICARE_MBI",
+                "EMPLOYEE_ID", "BADGE_ID", "STUDENT_ID",
+                "POLICY_NUMBER", "CASE_NUMBER",
+            }
+            if u in tier3:
+                return 3
+            # Tier 2 — specific gov ID type (from classifier)
+            tier2 = {"US_SSN", "US_DRIVER_LICENSE", "US_PASSPORT",
+                     "UK_NINO", "IN_AADHAAR", "IN_PAN", "BR_CPF",
+                     "CA_SIN", "DE_IDNR", "FR_NIR"}
+            if u in tier2:
+                return 2
+            # Tier 1 — country-specific but less common, or alias labels
+            if "_" in u and len(u) <= 20:
+                return 2
+            # Tier 0 — generic/unknown fallback
+            return 1
+        if incoming.government_id_type:
+            incoming_rank = _type_rank(incoming.government_id_type)
+            existing_rank = _type_rank(existing.government_id_type)
+            if incoming_rank > existing_rank:
+                existing.government_id_type = incoming.government_id_type
         if incoming.notification_required:
             existing.notification_required = True
 

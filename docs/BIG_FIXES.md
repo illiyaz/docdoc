@@ -218,6 +218,33 @@ records as the contract.
 **Verified 8 scenarios:** STUDENT_ID, INSURANCE_ID, PATIENT_ID,
 EMPLOYEE_ID all correctly classified even when values look SSN-shaped.
 
+### I9 — _merge_into upgrades government_id_type to more-specific label (task #69, shipped)
+
+**Why:** I8 fix was invisible on retest because `_find_existing`
+matched old pre-I8 subjects (labelled US_SSN) and `_merge_into`
+preserved the old label. Re-running the pipeline could never fix
+a mislabeled subject.
+
+**Fix:** `_merge_into` now ranks the incoming `government_id_type`
+against the existing one and takes the more-specific label:
+
+```
+Tier 3 (take): FERPA_STUDENT_ID, PHI_MRN, PHI_NPI, PHI_HEALTH_PLAN,
+               EMPLOYEE_ID, POLICY_NUMBER, etc.
+               (institutional / protocol-aligned — best evidence of
+               doc-context understanding)
+Tier 2 (take if new is T3): US_SSN, UK_NINO, IN_AADHAAR, BR_CPF,
+               any country-prefixed label
+Tier 1 (take if new is T2+): GOVERNMENT_ID / unknown fallback
+Tier 0: null / empty — overwritten by anything
+```
+
+**Implications:**
+- Re-extraction of a doc can now FIX bad historical labels
+- Doesn't downgrade: if existing is PHI_MRN and incoming says US_SSN
+  (weaker), existing wins
+- Decouples extraction quality from first-seen bias
+
 ### I8 — Classifier contract from segregation, not just extractor (task #68, shipped)
 
 **Why:** I6 wired the classifier contract to `r.entity_types_found`
